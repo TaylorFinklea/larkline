@@ -30,6 +30,8 @@ pub struct Config {
 pub struct GeneralConfig {
     /// Directories to scan for plugins.
     pub plugin_dirs: Vec<PathBuf>,
+    /// Name of the plugin to pre-select when the app launches.
+    pub default_plugin: Option<String>,
 }
 
 /// UI appearance settings.
@@ -96,6 +98,7 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             plugin_dirs: vec![default_plugin_dir()],
+            default_plugin: None,
         }
     }
 }

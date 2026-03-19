@@ -108,6 +108,24 @@ impl App {
         };
         // Apply favorites ordering and alphabetical sort at startup.
         app.update_filter();
+
+        // Apply default_plugin pre-selection.
+        if let Some(ref name) = config.general.default_plugin {
+            if let Some(pos) = app
+                .state
+                .filtered
+                .iter()
+                .position(|&i| &app.state.plugins[i].name == name)
+            {
+                app.state.selected = pos;
+            } else {
+                tracing::warn!(
+                    plugin_name = %name,
+                    "default_plugin not found in loaded plugins"
+                );
+            }
+        }
+
         app
     }
 
@@ -123,9 +141,15 @@ impl App {
         use crate::config::FavoritesConfig;
         let mut config = Config::default();
         config.favorites = FavoritesConfig { pinned };
-        let mut app = Self::new(stub_plugins(), &config);
-        app.update_filter();
-        app
+        Self::new(stub_plugins(), &config)
+    }
+
+    /// Create an `App` with stub plugins and a default_plugin setting for testing.
+    #[cfg(test)]
+    pub fn with_stubs_and_default(default_plugin: &str) -> Self {
+        let mut config = Config::default();
+        config.general.default_plugin = Some(default_plugin.to_string());
+        Self::new(stub_plugins(), &config)
     }
 
     /// Run the main event loop until the user quits.
@@ -522,6 +546,21 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn default_plugin_sets_selected_index() {
+        // "Weather" is last alphabetically; default_plugin should pre-select it.
+        let app = App::with_stubs_and_default("Weather");
+        let selected_name = &app.state.plugins[app.state.filtered[app.state.selected]].name;
+        assert_eq!(selected_name, "Weather");
+    }
+
+    #[test]
+    fn missing_default_plugin_falls_back_to_zero() {
+        // A plugin name that doesn't exist → selected stays at 0.
+        let app = App::with_stubs_and_default("DoesNotExist");
+        assert_eq!(app.state.selected, 0);
     }
 
     #[test]
