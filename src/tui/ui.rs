@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{AppState, Mode};
+use crate::app::{AppState, Mode, OutputMode};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -197,7 +197,10 @@ fn render_output_pane(
     // Loading state
     if state.is_loading {
         let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
-        let loading_text = format!("{spinner} Running {title_text}…");
+        let elapsed = state
+            .loading_started
+            .map_or(0.0, |t| t.elapsed().as_secs_f32());
+        let loading_text = format!("{spinner} Running {title_text}… ({elapsed:.1}s)");
         let paragraph = Paragraph::new(Line::from(Span::styled(
             loading_text,
             Style::default().fg(theme.accent),
@@ -227,15 +230,35 @@ fn render_output_pane(
 
     // Output state
     if let Some(ref output) = state.plugin_output {
-        if !output.items.is_empty() {
-            render_output_items(frame, state, theme, output, block, area);
-            return;
-        }
-        if let Some(ref raw) = output.raw_text {
-            // Phase 4: ANSI rendering. For now, plain text.
-            let paragraph = Paragraph::new(raw.as_str()).block(block);
-            frame.render_widget(paragraph, area);
-            return;
+        match state.output_mode {
+            OutputMode::List => {
+                if !output.items.is_empty() {
+                    render_output_items(frame, state, theme, output, block, area);
+                    return;
+                }
+                if let Some(ref raw) = output.raw_text {
+                    let paragraph = Paragraph::new(raw.as_str()).block(block);
+                    frame.render_widget(paragraph, area);
+                    return;
+                }
+            }
+            OutputMode::RawText => {
+                if let Some(ref raw) = output.raw_text {
+                    let paragraph = Paragraph::new(raw.as_str()).block(block);
+                    frame.render_widget(paragraph, area);
+                } else {
+                    // Format items as plain text lines.
+                    let text = output
+                        .items
+                        .iter()
+                        .map(|i| i.label.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let paragraph = Paragraph::new(text).block(block);
+                    frame.render_widget(paragraph, area);
+                }
+                return;
+            }
         }
     }
 
@@ -319,20 +342,40 @@ fn render_status_bar(
         return;
     }
 
-    let hint = match state.mode {
-        Mode::Browse => " j/k: navigate  Enter: select  /: search  q: quit ",
-        Mode::Search => " Type to filter  Esc: clear  Enter: select  ↑↓: navigate ",
+    let plugin_name_for_status = || -> String {
+        if let Some(ref output) = state.plugin_output {
+            output.title.clone()
+        } else if let Some(&idx) = state.filtered.get(state.selected) {
+            state.plugins[idx].name.clone()
+        } else {
+            "output".to_string()
+        }
+    };
+
+    let hint: String = match state.mode {
+        Mode::Browse => {
+            " j/k: navigate  Enter: select  /: search  R: refresh  q: quit ".to_string()
+        }
+        Mode::Search => " Type to filter  Esc: clear  Enter: select  ↑↓: navigate ".to_string(),
         Mode::ViewOutput => {
             if state.is_loading {
-                " Loading… "
+                let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
+                let elapsed = state
+                    .loading_started
+                    .map_or(0.0, |t| t.elapsed().as_secs_f32());
+                let name = plugin_name_for_status();
+                format!(" {spinner} Loading {name}… ({elapsed:.1}s) ")
             } else if state
                 .plugin_output
                 .as_ref()
                 .is_some_and(|o| !o.items.is_empty())
             {
-                " j/k: navigate  Enter: run action  Esc: back "
+                let name = plugin_name_for_status();
+                let n = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
+                format!(" {name} — {n} items  j/k: navigate  Enter: run action  Esc: back ")
             } else {
-                " Esc: back "
+                let name = plugin_name_for_status();
+                format!(" {name}  Esc: back ")
             }
         }
     };

@@ -27,6 +27,10 @@ cargo fmt -- --check   # CI check mode
 
 # Run
 cargo run
+
+# CLI flags (no TUI launched)
+cargo run -- --version
+cargo run -- --print-alias zsh   # also: bash, fish
 ```
 
 **Rust edition:** 2024
@@ -64,10 +68,45 @@ Core dependencies are locked in `docs/ARCHITECTURE.md` under Technology Stack. D
 - **Test files live in:** `tests/` (integration) or inline `#[cfg(test)]` modules (unit)
 - Integration tests should use example plugins from `examples/plugins/`
 
+## Completed Phases
+
+- **Phase 0:** Project scaffold, Plugin trait, ScriptPlugin, PluginEngine
+- **Phase 1:** TUI shell (ratatui), browse list, fuzzy search
+- **Phase 2:** Favorites, configurable keybindings, direct-launch
+- **Phase 3:** Default plugin pre-selection, default config generation, graceful config error handling
+- **Phase 4 (Polish & UX):** Loading elapsed time, panic recovery in engine, Ctrl+D/U scroll, `t` output mode toggle, `R` plugin refresh, lazy entry validation, `--print-alias` shell integration
+
+## Keybindings (defaults)
+
+| Key | Mode | Action |
+|---|---|---|
+| `j`/`k`, `↑`/`↓` | Browse / ViewOutput | Navigate |
+| `Enter` | Browse | Execute plugin |
+| `/` or printable char | Browse | Enter search |
+| `Esc` | Search | Clear search |
+| `q`, `Ctrl+C` | Any | Quit |
+| `R` (shift+r) | Browse | Refresh plugin list |
+| `Ctrl+D` / `Ctrl+U` | ViewOutput | Scroll half-page |
+| `t` | ViewOutput | Toggle list / raw text |
+| `Enter` | ViewOutput | Run item action |
+| `Esc` / `Backspace` | ViewOutput | Back |
+
+All keys except search mode and `Ctrl+C` are configurable in `config.toml`.
+
+## Release Process
+
+1. Ensure `cargo test && cargo clippy -- -D warnings` pass
+2. Bump `version` in `Cargo.toml`
+3. `git tag v<VERSION> && git push origin v<VERSION>`
+4. Release workflow (`.github/workflows/release.yml`) builds 3 tarballs and creates a GitHub Release
+5. Download each tarball, run `shasum -a 256`, update SHA256 values in `Formula/lark.rb`
+6. Copy updated `Formula/lark.rb` to `github.com/tfinklea/homebrew-tap`
+
 ## Plugin Development
 
 Plugin directory: `~/.config/larkline/plugins/`
 Each plugin is a directory with `manifest.toml` + an executable entry point.
+Entry script existence is checked at **execution time**, not at scan time — missing entries show in the list but fail gracefully when run.
 JSON output schema is defined in `docs/ARCHITECTURE.md` under JSON Schema Specification.
 
 ## OPENAI_API_KEY

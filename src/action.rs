@@ -26,4 +26,12 @@ pub enum Action {
     Execute,
     /// Directly launch a plugin by name.
     LaunchPlugin(String),
+    /// Scroll the output pane down by half a page.
+    ScrollHalfPageDown,
+    /// Scroll the output pane up by half a page.
+    ScrollHalfPageUp,
+    /// Toggle between list and raw-text output view.
+    ToggleOutputMode,
+    /// Re-scan plugin directories and reload the plugin list.
+    RefreshPlugins,
 }

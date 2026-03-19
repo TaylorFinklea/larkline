@@ -1,5 +1,6 @@
 //! Core application state and event loop.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -10,12 +11,28 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::action::Action;
-use crate::config::{Config, ResolvedKeybindings, Theme};
+use crate::config::{Config, KeybindingsConfig, ResolvedKeybindings, Theme};
 use crate::input;
 use crate::plugin::engine::{EngineEvent, PluginEngine};
+use crate::plugin::registry;
+use crate::plugin::script::ScriptPlugin;
 use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
 use crate::plugin::{Plugin, PluginMetadata};
 use crate::tui::ui;
+
+// ---------------------------------------------------------------------------
+// Output mode
+// ---------------------------------------------------------------------------
+
+/// How plugin output is displayed in the output pane.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum OutputMode {
+    /// Render structured items as a selectable list.
+    #[default]
+    List,
+    /// Render raw text (or items formatted as plain lines).
+    RawText,
+}
 
 // ---------------------------------------------------------------------------
 // State types
@@ -70,6 +87,10 @@ pub struct AppState {
     pub favorites: Vec<String>,
     /// Warnings to show in the status bar (cleared on first keypress).
     pub warnings: Vec<String>,
+    /// When plugin execution started (for elapsed-time display).
+    pub loading_started: Option<std::time::Instant>,
+    /// How plugin output is displayed in the output pane.
+    pub output_mode: OutputMode,
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +104,10 @@ pub struct App {
     keybindings: ResolvedKeybindings,
     engine: PluginEngine,
     rx: mpsc::Receiver<EngineEvent>,
+    /// Plugin directories for re-scanning on refresh.
+    plugin_dirs: Vec<PathBuf>,
+    /// Raw keybindings config for re-resolving after refresh.
+    keybindings_config: KeybindingsConfig,
 }
 
 impl App {
@@ -113,6 +138,8 @@ impl App {
             keybindings,
             engine,
             rx,
+            plugin_dirs: config.general.plugin_dirs.clone(),
+            keybindings_config: config.keybindings.clone(),
         };
         // Apply favorites ordering and alphabetical sort at startup.
         app.update_filter();
@@ -183,26 +210,7 @@ impl App {
 
             // Drain engine events (non-blocking).
             while let Ok(event) = self.rx.try_recv() {
-                match event {
-                    EngineEvent::PluginStarted { .. } => {
-                        self.state.is_loading = true;
-                        self.state.plugin_output = None;
-                        self.state.plugin_error = None;
-                    }
-                    EngineEvent::PluginFinished { result, .. } => {
-                        self.state.is_loading = false;
-                        match result {
-                            Ok(output) => {
-                                self.state.plugin_output = Some(output);
-                            }
-                            Err(e) => {
-                                self.state.plugin_error = Some(e.to_string());
-                            }
-                        }
-                        self.state.mode = Mode::ViewOutput;
-                        self.state.output_selected = 0;
-                    }
-                }
+                self.handle_engine_event(event);
             }
 
             // Advance spinner.
@@ -214,7 +222,37 @@ impl App {
         Ok(())
     }
 
+    /// Process a single engine event, updating app state.
+    ///
+    /// Extracted from the run loop so it can be called from tests.
+    pub(crate) fn handle_engine_event(&mut self, event: EngineEvent) {
+        match event {
+            EngineEvent::PluginStarted { .. } => {
+                self.state.is_loading = true;
+                self.state.loading_started = Some(std::time::Instant::now());
+                self.state.plugin_output = None;
+                self.state.plugin_error = None;
+            }
+            EngineEvent::PluginFinished { result, .. } => {
+                self.state.is_loading = false;
+                self.state.loading_started = None;
+                match result {
+                    Ok(output) => {
+                        self.state.plugin_output = Some(output);
+                    }
+                    Err(e) => {
+                        self.state.plugin_error = Some(e.to_string());
+                    }
+                }
+                self.state.mode = Mode::ViewOutput;
+                self.state.output_selected = 0;
+                self.state.output_mode = OutputMode::List;
+            }
+        }
+    }
+
     /// Apply an [`Action`] to the application state.
+    #[allow(clippy::too_many_lines)]
     pub fn handle_action(&mut self, action: Action) {
         // Dismiss any config warnings on the first keypress.
         self.state.warnings.clear();
@@ -284,6 +322,7 @@ impl App {
                     self.state.is_loading = true;
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
+                    self.state.output_mode = OutputMode::List;
                     self.state.mode = Mode::ViewOutput;
                     self.engine.execute(plugin_index);
                 }
@@ -294,6 +333,7 @@ impl App {
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
                 self.state.output_selected = 0;
+                self.state.output_mode = OutputMode::List;
             }
 
             Action::Execute => {
@@ -314,12 +354,64 @@ impl App {
                     self.state.is_loading = true;
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
+                    self.state.output_mode = OutputMode::List;
                     self.state.mode = Mode::ViewOutput;
                     self.engine.execute(plugin_index);
                 } else {
                     tracing::warn!(plugin_name = %name, "LaunchPlugin: plugin not found");
                 }
             }
+
+            Action::ScrollHalfPageDown => {
+                if self.state.mode == Mode::ViewOutput {
+                    let max = self
+                        .state
+                        .plugin_output
+                        .as_ref()
+                        .map_or(0, |o| o.items.len().saturating_sub(1));
+                    self.state.output_selected = (self.state.output_selected + 10).min(max);
+                }
+            }
+
+            Action::ScrollHalfPageUp => {
+                if self.state.mode == Mode::ViewOutput {
+                    self.state.output_selected = self.state.output_selected.saturating_sub(10);
+                }
+            }
+
+            Action::ToggleOutputMode => {
+                self.state.output_mode = match self.state.output_mode {
+                    OutputMode::List => OutputMode::RawText,
+                    OutputMode::RawText => OutputMode::List,
+                };
+            }
+
+            Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
+                Ok(discovered) => {
+                    let plugins: Vec<Arc<dyn Plugin>> = discovered
+                        .into_iter()
+                        .map(|d| Arc::new(ScriptPlugin::from_discovered(d)) as Arc<dyn Plugin>)
+                        .collect();
+                    let metadata: Vec<PluginMetadata> =
+                        plugins.iter().map(|p| p.metadata().clone()).collect();
+                    let (tx, rx) = mpsc::channel(4);
+                    self.engine = PluginEngine::new(plugins, tx);
+                    self.rx = rx;
+                    self.keybindings = self.keybindings_config.resolve(&metadata);
+                    self.state.plugins = metadata;
+                    self.state.filtered = (0..self.state.plugins.len()).collect();
+                    self.state.mode = Mode::Browse;
+                    self.state.output_mode = OutputMode::List;
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
+                    self.state.is_loading = false;
+                    self.state.loading_started = None;
+                    self.update_filter();
+                }
+                Err(e) => {
+                    self.state.warnings = vec![format!("Refresh failed: {e}")];
+                }
+            },
         }
     }
 
@@ -688,5 +780,109 @@ mod tests {
         assert_eq!(app.state.mode, Mode::Browse);
         assert!(app.state.plugin_output.is_none());
         assert_eq!(app.state.output_selected, 0);
+    }
+
+    #[test]
+    fn loading_started_set_on_plugin_started_cleared_on_finished() {
+        use crate::plugin::engine::EngineEvent;
+        let mut app = App::with_stubs();
+        assert!(app.state.loading_started.is_none());
+
+        app.handle_engine_event(EngineEvent::PluginStarted { plugin_index: 0 });
+        assert!(app.state.loading_started.is_some());
+        assert!(app.state.is_loading);
+
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            result: Ok(PluginOutput::default()),
+        });
+        assert!(app.state.loading_started.is_none());
+        assert!(!app.state.is_loading);
+    }
+
+    #[test]
+    fn scroll_half_page_down_and_up_in_view_output() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        let items = (0..25)
+            .map(|i| crate::plugin::traits::OutputItem {
+                label: format!("item {i}"),
+                detail: None,
+                icon: None,
+                url: None,
+                actions: Vec::new(),
+            })
+            .collect();
+        app.state.plugin_output = Some(PluginOutput {
+            title: "test".into(),
+            items,
+            raw_text: None,
+        });
+
+        assert_eq!(app.state.output_selected, 0);
+        app.handle_action(Action::ScrollHalfPageDown);
+        assert_eq!(app.state.output_selected, 10);
+        app.handle_action(Action::ScrollHalfPageDown);
+        assert_eq!(app.state.output_selected, 20);
+        app.handle_action(Action::ScrollHalfPageDown);
+        assert_eq!(app.state.output_selected, 24); // clamped at max (25-1)
+        app.handle_action(Action::ScrollHalfPageUp);
+        assert_eq!(app.state.output_selected, 14);
+        app.handle_action(Action::ScrollHalfPageUp);
+        assert_eq!(app.state.output_selected, 4);
+        app.handle_action(Action::ScrollHalfPageUp);
+        assert_eq!(app.state.output_selected, 0); // clamped at 0
+    }
+
+    #[test]
+    fn toggle_output_mode_flips_between_list_and_raw_text() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        assert_eq!(app.state.output_mode, OutputMode::List);
+        app.handle_action(Action::ToggleOutputMode);
+        assert_eq!(app.state.output_mode, OutputMode::RawText);
+        app.handle_action(Action::ToggleOutputMode);
+        assert_eq!(app.state.output_mode, OutputMode::List);
+    }
+
+    #[test]
+    fn back_resets_output_mode_to_list() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.output_mode = OutputMode::RawText;
+        app.handle_action(Action::Back);
+        assert_eq!(app.state.output_mode, OutputMode::List);
+    }
+
+    #[test]
+    fn refresh_picks_up_newly_added_plugin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = Config::default();
+        config.general.plugin_dirs = vec![dir.path().to_path_buf()];
+        let mut app = App::new(vec![], &config, vec![]);
+        assert_eq!(app.state.plugins.len(), 0);
+
+        // Add a plugin manifest (entry existence not checked at scan time after Task 7).
+        let plugin_dir = dir.path().join("new-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            r#"
+[plugin]
+name = "New Plugin"
+description = "Added after init"
+version = "0.1.0"
+author = "test"
+icon = "N"
+entry = "run.sh"
+"#,
+        )
+        .unwrap();
+
+        app.handle_action(Action::RefreshPlugins);
+
+        assert_eq!(app.state.plugins.len(), 1);
+        assert_eq!(app.state.plugins[0].name, "New Plugin");
+        assert_eq!(app.state.mode, Mode::Browse);
     }
 }

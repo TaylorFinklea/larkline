@@ -34,6 +34,31 @@ When modifying any contract, verify all producers and consumers still work. Run 
 - Run `cargo clippy -- -D warnings` and `cargo fmt -- --check` before committing
 - All tests must pass before committing
 
+## Current Status
+
+Phases 0–4 complete. The app is feature-complete and ready for distribution.
+
+Next steps per `docs/ARCHITECTURE.md`:
+- Phase 5: Advanced features (ANSI output rendering, shell action execution with confirmation, Lua plugin support)
+- Phase 6: Distribution (crates.io publish, Homebrew tap live — `Formula/lark.rb` is ready pending SHA256 values after first release)
+
+## Release Artifacts
+
+- **`.github/workflows/release.yml`** — triggered by `v*` tags; builds `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` tarballs
+- **`Formula/lark.rb`** — Homebrew formula (copy to `github.com/tfinklea/homebrew-tap` after filling in SHA256 values)
+- Do not modify `Formula/lark.rb` SHA256 placeholders manually during development — they are filled in post-release
+
+## Key AppState Fields
+
+| Field | Type | Purpose |
+|---|---|---|
+| `mode` | `Mode` | Browse / Search / ViewOutput |
+| `output_mode` | `OutputMode` | List / RawText (toggled with `t`) |
+| `is_loading` | `bool` | Plugin executing |
+| `loading_started` | `Option<Instant>` | For elapsed time display |
+| `plugin_output` | `Option<PluginOutput>` | Last execution result |
+| `warnings` | `Vec<String>` | Status bar warnings (cleared on keypress) |
+
 ## Subagent Guidance
 
 When spawning subagents for this project:

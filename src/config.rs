@@ -75,6 +75,10 @@ pub struct KeybindingsConfig {
     pub quit: Option<String>,
     /// Run the focused action in `ViewOutput`. Default: `"Enter"`.
     pub execute: Option<String>,
+    /// Scroll the output pane down by half a page. Default: `"Ctrl+d"`.
+    pub scroll_half_page_down: Option<String>,
+    /// Scroll the output pane up by half a page. Default: `"Ctrl+u"`.
+    pub scroll_half_page_up: Option<String>,
     /// Direct-launch map: key string → plugin name.
     #[serde(default)]
     pub launch: HashMap<String, String>,
@@ -98,6 +102,8 @@ pub enum BrowseAction {
     MoveDown,
     Select,
     Quit,
+    /// Re-scan plugin directories.
+    Refresh,
 }
 
 /// Actions available in `ViewOutput` mode (subset of all actions).
@@ -108,6 +114,12 @@ pub enum ViewOutputAction {
     Back,
     Execute,
     Quit,
+    /// Scroll down by half a page.
+    ScrollHalfPageDown,
+    /// Scroll up by half a page.
+    ScrollHalfPageUp,
+    /// Toggle between list and raw-text view.
+    ToggleOutputMode,
 }
 
 impl KeybindingsConfig {
@@ -183,6 +195,15 @@ impl KeybindingsConfig {
         if let Some(ev) = parse_key_opt(self.quit.as_deref()) {
             m.insert(ev, BrowseAction::Quit);
         }
+        // R (uppercase) to refresh plugin list.
+        m.insert(
+            key(KeyCode::Char('R'), KeyModifiers::NONE),
+            BrowseAction::Refresh,
+        );
+        m.insert(
+            key(KeyCode::Char('R'), KeyModifiers::SHIFT),
+            BrowseAction::Refresh,
+        );
         m
     }
 
@@ -234,6 +255,27 @@ impl KeybindingsConfig {
         }
         if let Some(ev) = parse_key_opt(self.quit.as_deref()) {
             m.insert(ev, ViewOutputAction::Quit);
+        }
+        // Default half-page scroll bindings.
+        m.insert(
+            key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            ViewOutputAction::ScrollHalfPageDown,
+        );
+        m.insert(
+            key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            ViewOutputAction::ScrollHalfPageUp,
+        );
+        // Default toggle output mode binding.
+        m.insert(
+            key(KeyCode::Char('t'), KeyModifiers::NONE),
+            ViewOutputAction::ToggleOutputMode,
+        );
+        // Config overrides for scroll bindings.
+        if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {
+            m.insert(ev, ViewOutputAction::ScrollHalfPageDown);
+        }
+        if let Some(ev) = parse_key_opt(self.scroll_half_page_up.as_deref()) {
+            m.insert(ev, ViewOutputAction::ScrollHalfPageUp);
         }
         m
     }

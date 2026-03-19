@@ -35,6 +35,13 @@ impl Plugin for ScriptPlugin {
     }
 
     async fn execute(&self) -> Result<PluginOutput, PluginError> {
+        if !self.entry_path.exists() {
+            return Err(PluginError::ExecutionFailed(format!(
+                "entry script not found: {}",
+                self.entry_path.display()
+            )));
+        }
+
         let result = tokio::time::timeout(
             self.metadata.timeout,
             tokio::process::Command::new(&self.entry_path)
@@ -117,6 +124,37 @@ mod tests {
         assert!(
             matches!(result, Err(PluginError::Timeout(_))),
             "expected Timeout error, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_error_for_missing_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = dir.path().join("no-entry");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            r#"
+[plugin]
+name = "No Entry"
+description = "test"
+version = "0.1.0"
+author = "test"
+icon = "T"
+entry = "nonexistent.sh"
+"#,
+        )
+        .unwrap();
+
+        // parse_manifest no longer checks entry existence — succeeds here.
+        let discovered = parse_manifest(&plugin_dir).unwrap();
+        let plugin = ScriptPlugin::from_discovered(discovered);
+
+        // But execute() should catch the missing entry and return an error.
+        let result = plugin.execute().await;
+        assert!(
+            matches!(result, Err(PluginError::ExecutionFailed(_))),
+            "expected ExecutionFailed error, got: {result:?}"
         );
     }
 }

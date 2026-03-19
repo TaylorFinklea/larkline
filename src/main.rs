@@ -14,8 +14,50 @@ mod input;
 mod plugin;
 mod tui;
 
+/// Returns shell alias/function text that binds Ctrl+L to launch `lark`.
+fn alias_for_shell(shell: &str) -> String {
+    match shell {
+        "bash" => [
+            "lark-widget() { lark; }",
+            r#"bind -x '"\C-l": lark-widget'"#,
+        ]
+        .join("\n"),
+        "fish" => [
+            "function lark-widget",
+            "    lark",
+            "    commandline -f repaint",
+            "end",
+            r"bind \cl lark-widget",
+        ]
+        .join("\n"),
+        // Default: zsh
+        _ => [
+            "lark-widget() { lark; zle reset-prompt; }",
+            "zle -N lark-widget",
+            "bindkey '^L' lark-widget",
+        ]
+        .join("\n"),
+    }
+}
+
+fn print_alias(shell: &str) {
+    println!("{}", alias_for_shell(shell));
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle CLI flags before TUI init.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a == "--version") {
+        println!("lark {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|a| a == "--print-alias") {
+        let shell = args.get(2).map_or("zsh", String::as_str);
+        print_alias(shell);
+        return Ok(());
+    }
+
     // Generate a commented default config on first run.
     // Errors here are non-fatal — silently fall through.
     if let Err(e) = config::generate_default_if_missing() {
@@ -57,4 +99,45 @@ async fn main() -> Result<()> {
     tui::restore()?;
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alias_zsh_contains_key_components() {
+        let output = alias_for_shell("zsh");
+        assert!(output.contains("bindkey"), "zsh alias should use bindkey");
+        assert!(output.contains("^L"), "zsh alias should bind Ctrl+L");
+        assert!(
+            output.contains("lark-widget"),
+            "zsh alias should define widget"
+        );
+    }
+
+    #[test]
+    fn alias_unknown_shell_defaults_to_zsh() {
+        let zsh = alias_for_shell("zsh");
+        let unknown = alias_for_shell("unknown-shell");
+        assert_eq!(zsh, unknown, "unknown shell should default to zsh output");
+    }
+
+    #[test]
+    fn alias_bash_contains_bind() {
+        let output = alias_for_shell("bash");
+        assert!(output.contains("bind"), "bash alias should use bind");
+        assert!(output.contains(r"\C-l"), "bash alias should bind Ctrl+L");
+    }
+
+    #[test]
+    fn alias_fish_contains_bind() {
+        let output = alias_for_shell("fish");
+        assert!(output.contains("bind"), "fish alias should use bind");
+        assert!(output.contains(r"\cl"), "fish alias should bind Ctrl+L");
+        assert!(
+            output.contains("commandline -f repaint"),
+            "fish alias should repaint"
+        );
+    }
 }

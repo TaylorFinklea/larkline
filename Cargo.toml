@@ -6,6 +6,10 @@ description = "The line to all your tools — a keyboard-driven terminal command
 repository = "https://github.com/tfinklea/larkline"
 license = "MIT"
 rust-version = "1.85"
+homepage = "https://github.com/tfinklea/larkline"
+authors = ["Taylor Finklea"]
+keywords = ["cli", "tui", "command-palette", "terminal", "productivity"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "lark"

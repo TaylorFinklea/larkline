@@ -28,6 +28,8 @@ pub enum RegistryError {
         source: toml::de::Error,
     },
     /// The entry script declared in the manifest does not exist.
+    /// Kept for documentation; returned at execution time by [`crate::plugin::script::ScriptPlugin`].
+    #[allow(dead_code)]
     #[error("entry script not found: {path}")]
     EntryNotFound {
         /// Path to the missing entry script.
@@ -77,11 +79,6 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<DiscoveredPlugin, RegistryErr
             path: manifest_path,
             source,
         })?;
-
-    let entry_path = plugin_dir.join(&manifest.plugin.entry);
-    if !entry_path.exists() {
-        return Err(RegistryError::EntryNotFound { path: entry_path });
-    }
 
     let p = manifest.plugin;
     Ok(DiscoveredPlugin {
@@ -169,5 +166,30 @@ mod tests {
         let nonexistent = PathBuf::from("/tmp/larkline-nonexistent-test-dir");
         let plugins = scan(&[nonexistent]).expect("scan should not fail on missing dir");
         assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn scan_includes_plugin_with_missing_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = dir.path().join("missing-entry-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            r#"
+[plugin]
+name = "Missing Entry"
+description = "test"
+version = "0.1.0"
+author = "test"
+icon = "T"
+entry = "nonexistent.sh"
+"#,
+        )
+        .unwrap();
+
+        // After Task 7, missing entry is not checked at scan time.
+        let plugins = scan(&[dir.path().to_path_buf()]).expect("scan failed");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].metadata.name, "Missing Entry");
     }
 }

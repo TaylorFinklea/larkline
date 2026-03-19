@@ -37,6 +37,7 @@ fn handle_browse(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<A
             BrowseAction::MoveDown => Action::MoveDown,
             BrowseAction::Select => Action::Select,
             BrowseAction::Quit => Action::Quit,
+            BrowseAction::Refresh => Action::RefreshPlugins,
         });
     }
 
@@ -74,6 +75,9 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
             ViewOutputAction::Back => Action::Back,
             ViewOutputAction::Execute => Action::Execute,
             ViewOutputAction::Quit => Action::Quit,
+            ViewOutputAction::ScrollHalfPageDown => Action::ScrollHalfPageDown,
+            ViewOutputAction::ScrollHalfPageUp => Action::ScrollHalfPageUp,
+            ViewOutputAction::ToggleOutputMode => Action::ToggleOutputMode,
         });
     }
 

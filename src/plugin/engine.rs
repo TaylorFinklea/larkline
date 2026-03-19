@@ -43,12 +43,22 @@ impl PluginEngine {
     /// Spawn plugin execution on a Tokio task. Returns immediately.
     ///
     /// Events are sent to the channel: `PluginStarted`, then `PluginFinished`.
+    ///
+    /// Uses an outer/inner task pattern so panics in the plugin are caught by the
+    /// `JoinHandle` and converted to a `PluginError`, ensuring `PluginFinished` is
+    /// always sent even when the plugin task panics.
     pub fn execute(&self, plugin_index: usize) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx.send(EngineEvent::PluginStarted { plugin_index }).await;
-            let result = plugin.execute().await;
+            let handle = tokio::spawn(async move { plugin.execute().await });
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(join_err) => Err(PluginError::ExecutionFailed(format!(
+                    "plugin task failed: {join_err}"
+                ))),
+            };
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
@@ -141,6 +151,40 @@ mod tests {
         assert!(matches!(
             event,
             EngineEvent::PluginFinished { result: Err(_), .. }
+        ));
+    }
+
+    struct PanicPlugin(PluginMetadata);
+
+    #[async_trait::async_trait]
+    impl Plugin for PanicPlugin {
+        fn metadata(&self) -> &PluginMetadata {
+            &self.0
+        }
+        async fn execute(&self) -> Result<PluginOutput, PluginError> {
+            panic!("plugin panicked!")
+        }
+    }
+
+    #[tokio::test]
+    async fn panic_in_plugin_sends_finished_with_error() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let engine = PluginEngine::new(vec![Arc::new(PanicPlugin(test_metadata()))], tx);
+        engine.execute(0);
+
+        let event1 = rx.recv().await.unwrap();
+        assert!(matches!(
+            event1,
+            EngineEvent::PluginStarted { plugin_index: 0 }
+        ));
+
+        let event2 = rx.recv().await.unwrap();
+        assert!(matches!(
+            event2,
+            EngineEvent::PluginFinished {
+                plugin_index: 0,
+                result: Err(_)
+            }
         ));
     }
 }
