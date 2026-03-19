@@ -433,6 +433,81 @@ fn parse_color(s: &str) -> anyhow::Result<Color> {
     }
 }
 
+/// The commented default config template written on first run.
+const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
+#
+# All fields are optional — defaults are shown below.
+# Remove the leading '#' from any line to activate that setting.
+
+[general]
+# Directories to scan for plugins (tilde expansion not yet supported — use full paths).
+# plugin_dirs = ["~/.config/larkline/plugins"]
+
+# Pre-select a plugin by name when the app launches.
+# default_plugin = "GitHub PRs"
+
+[ui]
+# Show emoji icons next to plugin names.
+# show_icons = true
+
+# Maximum items visible before scrolling.
+# visible_items = 15
+
+[logging]
+# Log level written to stderr. Options: error, warn, info, debug, trace.
+# level = "warn"
+
+[theme]
+# Colors accept named values (black, red, green, yellow, blue, magenta, cyan,
+# gray, darkgray, white) or hex strings (#rrggbb).
+# accent        = "cyan"
+# text          = "white"
+# text_dimmed   = "darkgray"
+# highlight_bg  = "darkgray"
+# highlight_fg  = "white"
+# error         = "red"
+# status_bar_bg = "black"
+
+[favorites]
+# Plugin names to pin to the top of the list (shown in this order, then rest alphabetically).
+# pinned = ["GitHub PRs", "System Info"]
+
+[keybindings]
+# Override navigation keys. Formats: single char ("k"), named key ("Enter"),
+# or Ctrl modifier ("Ctrl+d"). Search mode and Ctrl+C are not configurable.
+# move_up   = "k"
+# move_down = "j"
+# select    = "Enter"
+# back      = "Escape"
+# quit      = "q"
+# execute   = "Enter"
+
+# Direct-launch: press a key from Browse mode to immediately execute a plugin.
+# [keybindings.launch]
+# "Ctrl+g" = "GitHub PRs"
+# "Ctrl+s" = "System Info"
+"#;
+
+/// Write the default commented config file if none exists.
+///
+/// Creates parent directories as needed. No-ops if the file already exists.
+pub fn generate_default_if_missing() -> anyhow::Result<()> {
+    write_default_if_missing(&config_path())
+}
+
+/// Inner implementation — testable with an arbitrary path.
+fn write_default_if_missing(path: &std::path::Path) -> anyhow::Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, DEFAULT_CONFIG_TEMPLATE)?;
+    tracing::info!(path = %path.display(), "generated default config");
+    Ok(())
+}
+
 /// Loads configuration from `~/.config/larkline/config.toml`.
 ///
 /// Returns the default config if the file doesn't exist.
@@ -559,6 +634,36 @@ mod tests {
         assert_eq!(theme.text_dimmed, Color::Gray);
         // Unset fields use defaults
         assert_eq!(theme.error, Color::Red);
+    }
+
+    // ── Default config generation tests ─────────────────────────────────────
+
+    #[test]
+    fn generate_creates_file_when_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("larkline").join("config.toml");
+        assert!(!path.exists());
+
+        write_default_if_missing(&path).expect("should create file");
+
+        assert!(path.exists(), "config file should have been created");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("[general]"));
+    }
+
+    #[test]
+    fn generate_does_not_overwrite_existing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# custom").unwrap();
+
+        write_default_if_missing(&path).expect("should succeed");
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            contents, "# custom",
+            "existing file must not be overwritten"
+        );
     }
 
     // ── Key parsing tests ────────────────────────────────────────────────────

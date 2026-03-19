@@ -16,6 +16,12 @@ mod tui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Generate a commented default config on first run.
+    // Errors here are non-fatal — silently fall through.
+    if let Err(e) = config::generate_default_if_missing() {
+        eprintln!("larkline: could not generate default config ({e})");
+    }
+
     // Load config first so we can use the configured log level.
     let config = config::load().unwrap_or_else(|e| {
         // Can't log yet — write to stderr directly since TUI isn't up.
