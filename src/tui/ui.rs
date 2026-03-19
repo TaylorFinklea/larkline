@@ -6,17 +6,18 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use crate::app::{AppState, Mode};
+use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
 /// Top-level render function. Draws the full UI for the current `AppState`.
-pub fn render(frame: &mut Frame, state: &AppState) {
+pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     let area = frame.area();
 
     // Vertical split: search bar | content area | status bar
@@ -29,8 +30,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         ])
         .split(area);
 
-    render_search_bar(frame, state, chunks[0]);
-    render_status_bar(frame, state, chunks[2]);
+    render_search_bar(frame, state, theme, chunks[0]);
+    render_status_bar(frame, state, theme, chunks[2]);
 
     if state.mode == Mode::ViewOutput {
         // Horizontal split: plugin list (left) | output pane (right)
@@ -39,31 +40,36 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[1]);
 
-        render_plugin_list(frame, state, content_chunks[0]);
-        render_output_pane(frame, state, content_chunks[1]);
+        render_plugin_list(frame, state, theme, content_chunks[0]);
+        render_output_pane(frame, state, theme, content_chunks[1]);
     } else {
-        render_plugin_list(frame, state, chunks[1]);
+        render_plugin_list(frame, state, theme, chunks[1]);
     }
 }
 
-fn render_search_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+fn render_search_bar(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
     let is_searching = state.mode == Mode::Search;
 
     let border_style = if is_searching {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme.accent)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme.text_dimmed)
     };
 
     let prompt = if is_searching {
-        Span::styled("/ ", Style::default().fg(Color::Cyan).bold())
+        Span::styled("/ ", Style::default().fg(theme.accent).bold())
     } else {
         Span::styled("  ", Style::default())
     };
 
     let query = Span::raw(&state.query);
     let cursor = if is_searching {
-        Span::styled("█", Style::default().fg(Color::Cyan))
+        Span::styled("█", Style::default().fg(theme.accent))
     } else {
         Span::raw("")
     };
@@ -72,7 +78,7 @@ fn render_search_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout:
     let block = Block::default()
         .title(Span::styled(
             " lark ",
-            Style::default().fg(Color::Cyan).bold(),
+            Style::default().fg(theme.accent).bold(),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -82,14 +88,18 @@ fn render_search_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout:
     frame.render_widget(paragraph, area);
 }
 
-fn render_plugin_list(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+fn render_plugin_list(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
     let items: Vec<ListItem> = state
         .filtered
         .iter()
         .enumerate()
         .map(|(list_pos, &idx)| {
             let plugin = &state.plugins[idx];
-            let icon = format!("{} ", plugin.icon);
 
             // Match indices from nucleo point into plugin.name characters.
             let matched: std::collections::HashSet<usize> = state
@@ -98,18 +108,22 @@ fn render_plugin_list(frame: &mut Frame, state: &AppState, area: ratatui::layout
                 .map(|v| v.iter().copied().collect())
                 .unwrap_or_default();
 
-            // Build icon spans (never highlighted).
-            let mut spans: Vec<Span> = icon
-                .chars()
-                .map(|c| Span::styled(c.to_string(), Style::default().bold()))
-                .collect();
+            let mut spans: Vec<Span> = Vec::new();
+
+            // Icon (conditionally shown).
+            if state.show_icons {
+                let icon = format!("{} ", plugin.icon);
+                for c in icon.chars() {
+                    spans.push(Span::styled(c.to_string(), Style::default().bold()));
+                }
+            }
 
             // Build name spans with per-character highlighting.
             for (char_idx, c) in plugin.name.chars().enumerate() {
                 let style = if matched.contains(&char_idx) {
-                    Style::default().fg(Color::Cyan).bold()
+                    Style::default().fg(theme.accent).bold()
                 } else {
-                    Style::default().bold()
+                    Style::default().fg(theme.text).bold()
                 };
                 spans.push(Span::styled(c.to_string(), style));
             }
@@ -117,7 +131,7 @@ fn render_plugin_list(frame: &mut Frame, state: &AppState, area: ratatui::layout
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
                 plugin.description.as_str(),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.text_dimmed),
             ));
 
             ListItem::new(Line::from(spans))
@@ -127,15 +141,15 @@ fn render_plugin_list(frame: &mut Frame, state: &AppState, area: ratatui::layout
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(Style::default().fg(theme.text_dimmed))
         .title(Span::styled(
             format!(" {} plugins ", state.filtered.len()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.text_dimmed),
         ));
 
     let highlight_style = Style::default()
-        .bg(Color::DarkGray)
-        .fg(Color::White)
+        .bg(theme.highlight_bg)
+        .fg(theme.highlight_fg)
         .add_modifier(Modifier::BOLD);
 
     let list = List::new(items)
@@ -151,7 +165,12 @@ fn render_plugin_list(frame: &mut Frame, state: &AppState, area: ratatui::layout
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+fn render_output_pane(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
     // Determine output title from the selected plugin.
     let title_text = if let Some(ref output) = state.plugin_output {
         output.title.clone()
@@ -164,10 +183,10 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
             format!(" {title_text} "),
-            Style::default().fg(Color::Cyan).bold(),
+            Style::default().fg(theme.accent).bold(),
         ));
 
     // Loading state
@@ -176,7 +195,7 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
         let loading_text = format!("{spinner} Running {title_text}…");
         let paragraph = Paragraph::new(Line::from(Span::styled(
             loading_text,
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme.accent),
         )))
         .block(block);
         frame.render_widget(paragraph, area);
@@ -188,12 +207,12 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
         let lines = vec![
             Line::from(Span::styled(
                 "✖ Plugin failed",
-                Style::default().fg(Color::Red).bold(),
+                Style::default().fg(theme.error).bold(),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 error.as_str(),
-                Style::default().fg(Color::Red),
+                Style::default().fg(theme.error),
             )),
         ];
         let paragraph = Paragraph::new(lines).block(block);
@@ -204,7 +223,7 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
     // Output state
     if let Some(ref output) = state.plugin_output {
         if !output.items.is_empty() {
-            render_output_items(frame, state, output, block, area);
+            render_output_items(frame, state, theme, output, block, area);
             return;
         }
         if let Some(ref raw) = output.raw_text {
@@ -218,7 +237,7 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
     // No output yet (ViewOutput entered but waiting or no items)
     let paragraph = Paragraph::new(Span::styled(
         "No output",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme.text_dimmed),
     ))
     .block(block);
     frame.render_widget(paragraph, area);
@@ -227,6 +246,7 @@ fn render_output_pane(frame: &mut Frame, state: &AppState, area: ratatui::layout
 fn render_output_items(
     frame: &mut Frame,
     state: &AppState,
+    theme: &Theme,
     output: &crate::plugin::PluginOutput,
     block: Block,
     area: ratatui::layout::Rect,
@@ -237,17 +257,22 @@ fn render_output_items(
         .map(|item| {
             let mut spans = Vec::new();
 
-            if let Some(ref icon) = item.icon {
-                spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
+            if state.show_icons {
+                if let Some(ref icon) = item.icon {
+                    spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
+                }
             }
 
-            spans.push(Span::styled(item.label.as_str(), Style::default().bold()));
+            spans.push(Span::styled(
+                item.label.as_str(),
+                Style::default().fg(theme.text).bold(),
+            ));
 
             if let Some(ref detail) = item.detail {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
                     detail.as_str(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.text_dimmed),
                 ));
             }
 
@@ -256,8 +281,8 @@ fn render_output_items(
         .collect();
 
     let highlight_style = Style::default()
-        .bg(Color::DarkGray)
-        .fg(Color::White)
+        .bg(theme.highlight_bg)
+        .fg(theme.highlight_fg)
         .add_modifier(Modifier::BOLD);
 
     let list = List::new(items)
@@ -271,7 +296,12 @@ fn render_output_items(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+fn render_status_bar(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
     let hint = match state.mode {
         Mode::Browse => " j/k: navigate  Enter: select  /: search  q: quit ",
         Mode::Search => " Type to filter  Esc: clear  Enter: select  ↑↓: navigate ",
@@ -290,6 +320,10 @@ fn render_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout:
         }
     };
 
-    let bar = Paragraph::new(hint).style(Style::default().fg(Color::DarkGray).bg(Color::Black));
+    let bar = Paragraph::new(hint).style(
+        Style::default()
+            .fg(theme.text_dimmed)
+            .bg(theme.status_bar_bg),
+    );
     frame.render_widget(bar, area);
 }

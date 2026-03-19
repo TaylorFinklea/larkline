@@ -16,19 +16,26 @@ mod tui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load config first so we can use the configured log level.
+    let config = config::load().unwrap_or_else(|e| {
+        // Can't log yet — write to stderr directly since TUI isn't up.
+        eprintln!("larkline: config error ({e}), using defaults");
+        config::Config::default()
+    });
+
+    // Parse log level from config; fall back to WARN on invalid values.
+    let log_level: tracing::Level = config.logging.level.parse().unwrap_or(tracing::Level::WARN);
+
     // Initialize logging to stderr (hidden when TUI is active).
-    // Set RUST_LOG=debug to see output in a log file.
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()),
         )
         .with_writer(std::io::stderr)
         .init();
 
     info!("larkline starting");
 
-    let config = config::load()?;
     let discovered = plugin::registry::scan(&config.general.plugin_dirs)?;
     let plugins: Vec<Arc<dyn plugin::Plugin>> = discovered
         .into_iter()
@@ -38,7 +45,7 @@ async fn main() -> Result<()> {
         .collect();
 
     let mut terminal = tui::init()?;
-    let result = app::App::new(plugins).run(&mut terminal).await;
+    let result = app::App::new(plugins, &config).run(&mut terminal).await;
     tui::restore()?;
 
     result

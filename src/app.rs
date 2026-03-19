@@ -5,11 +5,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
+use nucleo_matcher::{Config as NucleoConfig, Matcher, Utf32Str};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::action::Action;
+use crate::config::{Config, Theme};
 use crate::input;
 use crate::plugin::engine::{EngineEvent, PluginEngine};
 use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
@@ -63,6 +64,8 @@ pub struct AppState {
     pub spinner_tick: u8,
     /// Index of the selected item within plugin output (for item navigation).
     pub output_selected: usize,
+    /// Whether to show emoji icons next to plugin names.
+    pub show_icons: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -72,24 +75,31 @@ pub struct AppState {
 /// The main application runner.
 pub struct App {
     state: AppState,
+    theme: Theme,
     engine: PluginEngine,
     rx: mpsc::Receiver<EngineEvent>,
 }
 
 impl App {
-    /// Create a new `App` with the given set of plugins.
-    pub fn new(plugins: Vec<Arc<dyn Plugin>>) -> Self {
+    /// Create a new `App` with the given set of plugins and config.
+    pub fn new(plugins: Vec<Arc<dyn Plugin>>, config: &Config) -> Self {
         let (tx, rx) = mpsc::channel(4);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
-        // Clone needed because PluginMetadata doesn't implement Copy.
         let filtered: Vec<usize> = (0..metadata.len()).collect();
         let engine = PluginEngine::new(plugins, tx);
+        // Resolve theme; fall back to defaults on invalid colors.
+        let theme = config.theme.resolve().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid theme color, falling back to defaults");
+            Theme::default_theme()
+        });
         Self {
             state: AppState {
                 plugins: metadata,
                 filtered,
+                show_icons: config.ui.show_icons,
                 ..Default::default()
             },
+            theme,
             engine,
             rx,
         }
@@ -98,7 +108,7 @@ impl App {
     /// Create an `App` with stub plugins for testing.
     #[cfg(test)]
     pub fn with_stubs() -> Self {
-        Self::new(stub_plugins())
+        Self::new(stub_plugins(), &Config::default())
     }
 
     /// Run the main event loop until the user quits.
@@ -107,7 +117,7 @@ impl App {
     #[allow(clippy::unused_async)]
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         while !self.state.should_quit {
-            terminal.draw(|frame| ui::render(frame, &self.state))?;
+            terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
 
             if event::poll(std::time::Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
@@ -287,7 +297,7 @@ impl App {
             nucleo_matcher::pattern::AtomKind::Fuzzy,
         );
 
-        let mut matcher = Matcher::new(Config::DEFAULT);
+        let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
         let mut indices_buf = Vec::new();
 
         // Score each plugin against the pattern; fall back to description when name misses.
