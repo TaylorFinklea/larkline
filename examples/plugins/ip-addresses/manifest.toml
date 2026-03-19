@@ -1,0 +1,10 @@
+[plugin]
+name = "IP Addresses"
+description = "IPv4 addresses — local interfaces + public via ip.me"
+version = "0.1.0"
+author = "taylor"
+icon = "🌐"
+entry = "run.sh"
+timeout_seconds = 10
+
+category = "system"
