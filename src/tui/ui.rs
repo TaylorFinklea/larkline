@@ -307,6 +307,18 @@ fn render_status_bar(
     theme: &Theme,
     area: ratatui::layout::Rect,
 ) {
+    // Config warnings take priority over the normal hint.
+    if let Some(warning) = state.warnings.first() {
+        let bar = Paragraph::new(format!(" ⚠ {warning} ")).style(
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(bar, area);
+        return;
+    }
+
     let hint = match state.mode {
         Mode::Browse => " j/k: navigate  Enter: select  /: search  q: quit ",
         Mode::Search => " Type to filter  Esc: clear  Enter: select  ↑↓: navigate ",

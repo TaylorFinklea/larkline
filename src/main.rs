@@ -23,10 +23,10 @@ async fn main() -> Result<()> {
     }
 
     // Load config first so we can use the configured log level.
-    let config = config::load().unwrap_or_else(|e| {
+    let (config, config_warnings) = config::load().unwrap_or_else(|e| {
         // Can't log yet — write to stderr directly since TUI isn't up.
-        eprintln!("larkline: config error ({e}), using defaults");
-        config::Config::default()
+        eprintln!("larkline: config I/O error ({e}), using defaults");
+        (config::Config::default(), Vec::new())
     });
 
     // Parse log level from config; fall back to WARN on invalid values.
@@ -51,7 +51,9 @@ async fn main() -> Result<()> {
         .collect();
 
     let mut terminal = tui::init()?;
-    let result = app::App::new(plugins, &config).run(&mut terminal).await;
+    let result = app::App::new(plugins, &config, config_warnings)
+        .run(&mut terminal)
+        .await;
     tui::restore()?;
 
     result

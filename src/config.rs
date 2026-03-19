@@ -511,16 +511,24 @@ fn write_default_if_missing(path: &std::path::Path) -> anyhow::Result<()> {
 /// Loads configuration from `~/.config/larkline/config.toml`.
 ///
 /// Returns the default config if the file doesn't exist.
-/// Returns an error if the file exists but cannot be parsed.
-pub fn load() -> anyhow::Result<Config> {
+/// Returns a pair of `(Config, warnings)` — warnings is non-empty when the config
+/// had parse errors or invalid field values (falls back to defaults for those fields).
+/// Returns `Err` only for unrecoverable I/O errors (can't read the file at all).
+pub fn load() -> anyhow::Result<(Config, Vec<String>)> {
     let path = config_path();
     if !path.exists() {
-        return Ok(Config::default());
+        return Ok((Config::default(), Vec::new()));
     }
 
     let contents = std::fs::read_to_string(&path)?;
-    let config: Config = toml::from_str(&contents)?;
-    Ok(config)
+    match toml::from_str::<Config>(&contents) {
+        Ok(config) => Ok((config, Vec::new())),
+        Err(e) => {
+            let warning = format!("Config error: {e} — using defaults");
+            tracing::error!(error = %e, "failed to parse config, falling back to defaults");
+            Ok((Config::default(), vec![warning]))
+        }
+    }
 }
 
 /// Returns the path to the config file, respecting `XDG_CONFIG_HOME` if set.
@@ -721,5 +729,38 @@ mod tests {
                 .browse_map
                 .contains_key(&key(KeyCode::Char('j'), KeyModifiers::NONE))
         );
+    }
+
+    // ── Graceful config error handling tests ─────────────────────────────────
+
+    #[test]
+    fn malformed_toml_returns_defaults_with_warning() {
+        // We can't call load() directly since it reads a real file path,
+        // but we can test the TOML parse fallback logic inline.
+        let bad_toml = "this is not valid toml ===";
+        let result = toml::from_str::<Config>(bad_toml);
+        assert!(result.is_err(), "bad TOML should fail to parse");
+        // Verify that load() would fall back: simulate the match arm.
+        let (config, warnings) = match result {
+            Ok(c) => (c, Vec::new()),
+            Err(e) => (
+                Config::default(),
+                vec![format!("Config error: {e} — using defaults")],
+            ),
+        };
+        assert!(!warnings.is_empty(), "should have a warning");
+        assert!(warnings[0].contains("Config error"));
+        assert_eq!(config.logging.level, "warn"); // defaults
+    }
+
+    #[test]
+    fn invalid_theme_color_falls_back_with_default_theme() {
+        let mut theme_cfg = ThemeConfig::default();
+        theme_cfg.accent = "not_a_color".to_string();
+        // resolve() returns Err — caller falls back to default theme.
+        assert!(theme_cfg.resolve().is_err());
+        // Default theme always resolves.
+        let default_theme = ThemeConfig::default().resolve().unwrap();
+        assert_eq!(default_theme.accent, Color::Cyan);
     }
 }

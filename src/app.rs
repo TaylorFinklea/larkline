@@ -68,6 +68,8 @@ pub struct AppState {
     pub show_icons: bool,
     /// Plugin names pinned to the top (from config), in config order.
     pub favorites: Vec<String>,
+    /// Warnings to show in the status bar (cleared on first keypress).
+    pub warnings: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ pub struct App {
 
 impl App {
     /// Create a new `App` with the given set of plugins and config.
-    pub fn new(plugins: Vec<Arc<dyn Plugin>>, config: &Config) -> Self {
+    pub fn new(plugins: Vec<Arc<dyn Plugin>>, config: &Config, warnings: Vec<String>) -> Self {
         let (tx, rx) = mpsc::channel(4);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
         let filtered: Vec<usize> = (0..metadata.len()).collect();
@@ -104,6 +106,7 @@ impl App {
                 filtered,
                 show_icons: config.ui.show_icons,
                 favorites: config.favorites.pinned.clone(),
+                warnings,
                 ..Default::default()
             },
             theme,
@@ -137,7 +140,7 @@ impl App {
     /// Create an `App` with stub plugins for testing.
     #[cfg(test)]
     pub fn with_stubs() -> Self {
-        Self::new(stub_plugins(), &Config::default())
+        Self::new(stub_plugins(), &Config::default(), Vec::new())
     }
 
     /// Create an `App` with stub plugins and a favorites list for testing.
@@ -146,7 +149,7 @@ impl App {
         use crate::config::FavoritesConfig;
         let mut config = Config::default();
         config.favorites = FavoritesConfig { pinned };
-        Self::new(stub_plugins(), &config)
+        Self::new(stub_plugins(), &config, Vec::new())
     }
 
     /// Create an `App` with stub plugins and a default_plugin setting for testing.
@@ -154,7 +157,7 @@ impl App {
     pub fn with_stubs_and_default(default_plugin: &str) -> Self {
         let mut config = Config::default();
         config.general.default_plugin = Some(default_plugin.to_string());
-        Self::new(stub_plugins(), &config)
+        Self::new(stub_plugins(), &config, Vec::new())
     }
 
     /// Run the main event loop until the user quits.
@@ -213,6 +216,9 @@ impl App {
 
     /// Apply an [`Action`] to the application state.
     pub fn handle_action(&mut self, action: Action) {
+        // Dismiss any config warnings on the first keypress.
+        self.state.warnings.clear();
+
         match action {
             Action::Quit => self.state.should_quit = true,
 
