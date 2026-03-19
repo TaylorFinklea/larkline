@@ -1,7 +1,9 @@
 //! Configuration loading and defaults.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +24,8 @@ pub struct Config {
     pub theme: ThemeConfig,
     /// Pinned/favorite plugins.
     pub favorites: FavoritesConfig,
+    /// Keybinding overrides.
+    pub keybindings: KeybindingsConfig,
 }
 
 /// General application settings.
@@ -50,6 +54,247 @@ pub struct UiConfig {
 pub struct LoggingConfig {
     /// Log level: error, warn, info, debug, trace.
     pub level: String,
+}
+
+/// Keybinding overrides for navigation actions.
+///
+/// Each field is an optional key string. If unset, the default hardcoded key is used.
+/// Format: single char (`"k"`), named key (`"Enter"`, `"Escape"`), or modifier (`"Ctrl+d"`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeybindingsConfig {
+    /// Move selection up. Default: `"k"` / Up arrow.
+    pub move_up: Option<String>,
+    /// Move selection down. Default: `"j"` / Down arrow.
+    pub move_down: Option<String>,
+    /// Execute the selected plugin. Default: `"Enter"`.
+    pub select: Option<String>,
+    /// Go back / close output pane. Default: `"Escape"`.
+    pub back: Option<String>,
+    /// Quit the application. Default: `"q"`.
+    pub quit: Option<String>,
+    /// Run the focused action in `ViewOutput`. Default: `"Enter"`.
+    pub execute: Option<String>,
+    /// Direct-launch map: key string → plugin name.
+    #[serde(default)]
+    pub launch: HashMap<String, String>,
+}
+
+/// Resolved keybindings — `KeyEvent` → `Action` maps built from [`KeybindingsConfig`].
+///
+/// Built once at startup; looked up on every keystroke in `Browse` and `ViewOutput` modes.
+#[allow(clippy::struct_field_names)]
+pub struct ResolvedKeybindings {
+    pub browse_map: HashMap<KeyEvent, BrowseAction>,
+    pub view_output_map: HashMap<KeyEvent, ViewOutputAction>,
+    /// Direct-launch: key → plugin name.
+    pub launch_map: HashMap<KeyEvent, String>,
+}
+
+/// Actions available in Browse mode (subset of all actions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowseAction {
+    MoveUp,
+    MoveDown,
+    Select,
+    Quit,
+}
+
+/// Actions available in `ViewOutput` mode (subset of all actions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewOutputAction {
+    MoveUp,
+    MoveDown,
+    Back,
+    Execute,
+    Quit,
+}
+
+impl KeybindingsConfig {
+    /// Build [`ResolvedKeybindings`] from the config.
+    ///
+    /// Uses defaults for any unset field. Logs and skips invalid key strings.
+    pub fn resolve(&self, plugins: &[crate::plugin::PluginMetadata]) -> ResolvedKeybindings {
+        let browse_map = self.build_browse_map();
+        let view_output_map = self.build_view_output_map();
+
+        // ── Launch map ───────────────────────────────────────────────────────
+        let mut launch_map: HashMap<KeyEvent, String> = HashMap::new();
+
+        // Populate from plugin metadata keybindings first (lower priority).
+        for plugin in plugins {
+            if let Some(ref kb) = plugin.keybinding {
+                if let Ok(ev) = parse_key(kb) {
+                    launch_map.entry(ev).or_insert_with(|| plugin.name.clone());
+                }
+            }
+        }
+        // Config overrides plugin metadata.
+        for (key_str, plugin_name) in &self.launch {
+            match parse_key(key_str) {
+                Ok(ev) => {
+                    launch_map.insert(ev, plugin_name.clone());
+                }
+                Err(e) => {
+                    tracing::warn!(key = %key_str, error = %e, "invalid launch keybinding, skipping");
+                }
+            }
+        }
+
+        ResolvedKeybindings {
+            browse_map,
+            view_output_map,
+            launch_map,
+        }
+    }
+
+    fn build_browse_map(&self) -> HashMap<KeyEvent, BrowseAction> {
+        let mut m: HashMap<KeyEvent, BrowseAction> = HashMap::new();
+        m.insert(
+            key(KeyCode::Char('k'), KeyModifiers::NONE),
+            BrowseAction::MoveUp,
+        );
+        m.insert(key(KeyCode::Up, KeyModifiers::NONE), BrowseAction::MoveUp);
+        m.insert(
+            key(KeyCode::Char('j'), KeyModifiers::NONE),
+            BrowseAction::MoveDown,
+        );
+        m.insert(
+            key(KeyCode::Down, KeyModifiers::NONE),
+            BrowseAction::MoveDown,
+        );
+        m.insert(
+            key(KeyCode::Enter, KeyModifiers::NONE),
+            BrowseAction::Select,
+        );
+        m.insert(
+            key(KeyCode::Char('q'), KeyModifiers::NONE),
+            BrowseAction::Quit,
+        );
+        if let Some(ev) = parse_key_opt(self.move_up.as_deref()) {
+            m.insert(ev, BrowseAction::MoveUp);
+        }
+        if let Some(ev) = parse_key_opt(self.move_down.as_deref()) {
+            m.insert(ev, BrowseAction::MoveDown);
+        }
+        if let Some(ev) = parse_key_opt(self.select.as_deref()) {
+            m.insert(ev, BrowseAction::Select);
+        }
+        if let Some(ev) = parse_key_opt(self.quit.as_deref()) {
+            m.insert(ev, BrowseAction::Quit);
+        }
+        m
+    }
+
+    fn build_view_output_map(&self) -> HashMap<KeyEvent, ViewOutputAction> {
+        let mut m: HashMap<KeyEvent, ViewOutputAction> = HashMap::new();
+        m.insert(
+            key(KeyCode::Char('k'), KeyModifiers::NONE),
+            ViewOutputAction::MoveUp,
+        );
+        m.insert(
+            key(KeyCode::Up, KeyModifiers::NONE),
+            ViewOutputAction::MoveUp,
+        );
+        m.insert(
+            key(KeyCode::Char('j'), KeyModifiers::NONE),
+            ViewOutputAction::MoveDown,
+        );
+        m.insert(
+            key(KeyCode::Down, KeyModifiers::NONE),
+            ViewOutputAction::MoveDown,
+        );
+        m.insert(
+            key(KeyCode::Esc, KeyModifiers::NONE),
+            ViewOutputAction::Back,
+        );
+        m.insert(
+            key(KeyCode::Enter, KeyModifiers::NONE),
+            ViewOutputAction::Execute,
+        );
+        m.insert(
+            key(KeyCode::Char('q'), KeyModifiers::NONE),
+            ViewOutputAction::Quit,
+        );
+        m.insert(
+            key(KeyCode::Backspace, KeyModifiers::NONE),
+            ViewOutputAction::Back,
+        );
+        if let Some(ev) = parse_key_opt(self.move_up.as_deref()) {
+            m.insert(ev, ViewOutputAction::MoveUp);
+        }
+        if let Some(ev) = parse_key_opt(self.move_down.as_deref()) {
+            m.insert(ev, ViewOutputAction::MoveDown);
+        }
+        if let Some(ev) = parse_key_opt(self.back.as_deref()) {
+            m.insert(ev, ViewOutputAction::Back);
+        }
+        if let Some(ev) = parse_key_opt(self.execute.as_deref()) {
+            m.insert(ev, ViewOutputAction::Execute);
+        }
+        if let Some(ev) = parse_key_opt(self.quit.as_deref()) {
+            m.insert(ev, ViewOutputAction::Quit);
+        }
+        m
+    }
+}
+
+fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
+}
+
+fn parse_key_opt(s: Option<&str>) -> Option<KeyEvent> {
+    let s = s?;
+    match parse_key(s) {
+        Ok(ev) => Some(ev),
+        Err(e) => {
+            tracing::warn!(key = %s, error = %e, "invalid keybinding, using default");
+            None
+        }
+    }
+}
+
+/// Parse a key string into a [`KeyEvent`].
+///
+/// Supported formats:
+/// - Single printable char: `"k"`, `"j"`, `"q"`, `"/"`
+/// - Named keys: `"Enter"`, `"Escape"`, `"Up"`, `"Down"`, `"Backspace"`, `"Tab"`, `"Delete"`
+/// - Ctrl modifier: `"Ctrl+c"`, `"Ctrl+d"` (case-insensitive prefix)
+pub fn parse_key(s: &str) -> anyhow::Result<KeyEvent> {
+    // Ctrl+x modifier form
+    if let Some(rest) = s.strip_prefix("Ctrl+").or_else(|| s.strip_prefix("ctrl+")) {
+        let chars: Vec<char> = rest.chars().collect();
+        anyhow::ensure!(
+            chars.len() == 1,
+            "Ctrl+ modifier requires a single character, got {rest:?}"
+        );
+        return Ok(KeyEvent::new(
+            KeyCode::Char(chars[0].to_lowercase().next().unwrap()),
+            KeyModifiers::CONTROL,
+        ));
+    }
+
+    // Named keys (case-insensitive)
+    match s.to_lowercase().as_str() {
+        "enter" => return Ok(key(KeyCode::Enter, KeyModifiers::NONE)),
+        "escape" | "esc" => return Ok(key(KeyCode::Esc, KeyModifiers::NONE)),
+        "up" => return Ok(key(KeyCode::Up, KeyModifiers::NONE)),
+        "down" => return Ok(key(KeyCode::Down, KeyModifiers::NONE)),
+        "left" => return Ok(key(KeyCode::Left, KeyModifiers::NONE)),
+        "right" => return Ok(key(KeyCode::Right, KeyModifiers::NONE)),
+        "backspace" => return Ok(key(KeyCode::Backspace, KeyModifiers::NONE)),
+        "delete" | "del" => return Ok(key(KeyCode::Delete, KeyModifiers::NONE)),
+        "tab" => return Ok(key(KeyCode::Tab, KeyModifiers::NONE)),
+        _ => {}
+    }
+
+    // Single printable character
+    let chars: Vec<char> = s.chars().collect();
+    anyhow::ensure!(
+        chars.len() == 1 && !chars[0].is_control(),
+        "key must be a single printable character or a named key, got {s:?}"
+    );
+    Ok(key(KeyCode::Char(chars[0]), KeyModifiers::NONE))
 }
 
 /// Favorites / pinned plugins configuration.
@@ -314,5 +559,62 @@ mod tests {
         assert_eq!(theme.text_dimmed, Color::Gray);
         // Unset fields use defaults
         assert_eq!(theme.error, Color::Red);
+    }
+
+    // ── Key parsing tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_single_char_key() {
+        let ev = parse_key("k").unwrap();
+        assert_eq!(ev.code, KeyCode::Char('k'));
+        assert_eq!(ev.modifiers, KeyModifiers::NONE);
+    }
+
+    #[test]
+    fn parse_named_keys() {
+        assert_eq!(parse_key("Enter").unwrap().code, KeyCode::Enter);
+        assert_eq!(parse_key("enter").unwrap().code, KeyCode::Enter);
+        assert_eq!(parse_key("Escape").unwrap().code, KeyCode::Esc);
+        assert_eq!(parse_key("esc").unwrap().code, KeyCode::Esc);
+        assert_eq!(parse_key("Up").unwrap().code, KeyCode::Up);
+        assert_eq!(parse_key("Down").unwrap().code, KeyCode::Down);
+        assert_eq!(parse_key("Backspace").unwrap().code, KeyCode::Backspace);
+        assert_eq!(parse_key("Delete").unwrap().code, KeyCode::Delete);
+        assert_eq!(parse_key("Tab").unwrap().code, KeyCode::Tab);
+    }
+
+    #[test]
+    fn parse_ctrl_modifier() {
+        let ev = parse_key("Ctrl+c").unwrap();
+        assert_eq!(ev.code, KeyCode::Char('c'));
+        assert_eq!(ev.modifiers, KeyModifiers::CONTROL);
+
+        let ev2 = parse_key("ctrl+d").unwrap();
+        assert_eq!(ev2.code, KeyCode::Char('d'));
+        assert_eq!(ev2.modifiers, KeyModifiers::CONTROL);
+    }
+
+    #[test]
+    fn parse_invalid_key_returns_error() {
+        assert!(parse_key("notakey").is_err());
+        assert!(parse_key("Ctrl+abc").is_err()); // multi-char after Ctrl+
+        assert!(parse_key("").is_err());
+    }
+
+    #[test]
+    fn default_keybindings_resolve() {
+        let kb = KeybindingsConfig::default();
+        let resolved = kb.resolve(&[]);
+        // Default browse map should have j/k mapped
+        assert!(
+            resolved
+                .browse_map
+                .contains_key(&key(KeyCode::Char('k'), KeyModifiers::NONE))
+        );
+        assert!(
+            resolved
+                .browse_map
+                .contains_key(&key(KeyCode::Char('j'), KeyModifiers::NONE))
+        );
     }
 }

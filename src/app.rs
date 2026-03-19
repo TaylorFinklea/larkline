@@ -10,7 +10,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::action::Action;
-use crate::config::{Config, Theme};
+use crate::config::{Config, ResolvedKeybindings, Theme};
 use crate::input;
 use crate::plugin::engine::{EngineEvent, PluginEngine};
 use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
@@ -78,6 +78,7 @@ pub struct AppState {
 pub struct App {
     state: AppState,
     theme: Theme,
+    keybindings: ResolvedKeybindings,
     engine: PluginEngine,
     rx: mpsc::Receiver<EngineEvent>,
 }
@@ -94,6 +95,9 @@ impl App {
             tracing::warn!(error = %e, "invalid theme color, falling back to defaults");
             Theme::default_theme()
         });
+        // Resolve keybindings (uses plugin metadata for launch map).
+        let keybindings = config.keybindings.resolve(&metadata);
+
         let mut app = Self {
             state: AppState {
                 plugins: metadata,
@@ -103,6 +107,7 @@ impl App {
                 ..Default::default()
             },
             theme,
+            keybindings,
             engine,
             rx,
         };
@@ -164,7 +169,9 @@ impl App {
                 if let Event::Key(key) = event::read()? {
                     // Only process key press events, not repeats or releases.
                     if key.kind == KeyEventKind::Press {
-                        if let Some(action) = input::handle_key(key, &self.state.mode) {
+                        if let Some(action) =
+                            input::handle_key(key, &self.state.mode, &self.keybindings)
+                        {
                             self.handle_action(action);
                         }
                     }
@@ -292,6 +299,19 @@ impl App {
                             open_url(url);
                         }
                     }
+                }
+            }
+
+            Action::LaunchPlugin(name) => {
+                // Find the plugin by name and execute it directly.
+                if let Some(plugin_index) = self.state.plugins.iter().position(|p| p.name == name) {
+                    self.state.is_loading = true;
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
+                    self.state.mode = Mode::ViewOutput;
+                    self.engine.execute(plugin_index);
+                } else {
+                    tracing::warn!(plugin_name = %name, "LaunchPlugin: plugin not found");
                 }
             }
         }

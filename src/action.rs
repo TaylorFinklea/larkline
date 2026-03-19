@@ -2,9 +2,9 @@
 
 /// Application-level actions produced by the input handler.
 ///
-/// Raw key events are mapped to `Action` variants by [`crate::input::InputHandler`].
+/// Raw key events are mapped to `Action` variants by [`crate::input`].
 /// The app state machine in [`crate::app::App`] processes actions to drive state transitions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Move selection up one item.
     MoveUp,
@@ -24,4 +24,6 @@ pub enum Action {
     Quit,
     /// Execute the default action on the selected output item.
     Execute,
+    /// Directly launch a plugin by name.
+    LaunchPlugin(String),
 }
