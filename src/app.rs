@@ -66,6 +66,8 @@ pub struct AppState {
     pub output_selected: usize,
     /// Whether to show emoji icons next to plugin names.
     pub show_icons: bool,
+    /// Plugin names pinned to the top (from config), in config order.
+    pub favorites: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,23 +94,38 @@ impl App {
             tracing::warn!(error = %e, "invalid theme color, falling back to defaults");
             Theme::default_theme()
         });
-        Self {
+        let mut app = Self {
             state: AppState {
                 plugins: metadata,
                 filtered,
                 show_icons: config.ui.show_icons,
+                favorites: config.favorites.pinned.clone(),
                 ..Default::default()
             },
             theme,
             engine,
             rx,
-        }
+        };
+        // Apply favorites ordering and alphabetical sort at startup.
+        app.update_filter();
+        app
     }
 
     /// Create an `App` with stub plugins for testing.
     #[cfg(test)]
     pub fn with_stubs() -> Self {
         Self::new(stub_plugins(), &Config::default())
+    }
+
+    /// Create an `App` with stub plugins and a favorites list for testing.
+    #[cfg(test)]
+    pub fn with_stubs_and_favorites(pinned: Vec<String>) -> Self {
+        use crate::config::FavoritesConfig;
+        let mut config = Config::default();
+        config.favorites = FavoritesConfig { pinned };
+        let mut app = Self::new(stub_plugins(), &config);
+        app.update_filter();
+        app
     }
 
     /// Run the main event loop until the user quits.
@@ -285,7 +302,21 @@ impl App {
         self.state.selected = 0;
 
         if self.state.query.is_empty() {
-            self.state.filtered = (0..self.state.plugins.len()).collect();
+            // Partition into favorited (config order) then rest (alphabetical).
+            let favorites = &self.state.favorites;
+            let mut fav_indices: Vec<usize> = favorites
+                .iter()
+                .filter_map(|name| self.state.plugins.iter().position(|p| &p.name == name))
+                .collect();
+            let fav_set: std::collections::HashSet<usize> = fav_indices.iter().copied().collect();
+            let mut rest: Vec<usize> = (0..self.state.plugins.len())
+                .filter(|i| !fav_set.contains(i))
+                .collect();
+            rest.sort_unstable_by(|&a, &b| {
+                self.state.plugins[a].name.cmp(&self.state.plugins[b].name)
+            });
+            fav_indices.append(&mut rest);
+            self.state.filtered = fav_indices;
             self.state.match_indices = self.state.plugins.iter().map(|_| Vec::new()).collect();
             return;
         }
@@ -456,6 +487,41 @@ mod tests {
     fn fuzzy_filter_empty_query_returns_all() {
         let app = App::with_stubs();
         assert_eq!(app.state.filtered.len(), app.state.plugins.len());
+    }
+
+    #[test]
+    fn favorites_sort_to_top_with_empty_query() {
+        // "Weather" is alphabetically last among stubs, but favorited → should be first.
+        let app = App::with_stubs_and_favorites(vec!["Weather".to_string()]);
+        assert!(!app.state.filtered.is_empty());
+        let first_name = &app.state.plugins[app.state.filtered[0]].name;
+        assert_eq!(first_name, "Weather");
+    }
+
+    #[test]
+    fn favorites_config_order_preserved() {
+        // Multiple favorites should appear in the order specified, not alphabetically.
+        let app =
+            App::with_stubs_and_favorites(vec!["Weather".to_string(), "GitHub PRs".to_string()]);
+        let first = &app.state.plugins[app.state.filtered[0]].name;
+        let second = &app.state.plugins[app.state.filtered[1]].name;
+        assert_eq!(first, "Weather");
+        assert_eq!(second, "GitHub PRs");
+    }
+
+    #[test]
+    fn non_favorite_rest_sorted_alphabetically() {
+        // With no favorites, the list should be alphabetical.
+        let app = App::with_stubs();
+        let names: Vec<&str> = app
+            .state
+            .filtered
+            .iter()
+            .map(|&i| app.state.plugins[i].name.as_str())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
     }
 
     #[test]

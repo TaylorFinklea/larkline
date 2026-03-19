@@ -20,6 +20,8 @@ pub struct Config {
     pub logging: LoggingConfig,
     /// Color theme settings.
     pub theme: ThemeConfig,
+    /// Pinned/favorite plugins.
+    pub favorites: FavoritesConfig,
 }
 
 /// General application settings.
@@ -46,6 +48,14 @@ pub struct UiConfig {
 pub struct LoggingConfig {
     /// Log level: error, warn, info, debug, trace.
     pub level: String,
+}
+
+/// Favorites / pinned plugins configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FavoritesConfig {
+    /// Plugin names to pin to the top of the list (in config order).
+    pub pinned: Vec<String>,
 }
 
 /// Color theme configuration.

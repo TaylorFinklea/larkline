@@ -110,6 +110,11 @@ fn render_plugin_list(
 
             let mut spans: Vec<Span> = Vec::new();
 
+            // Favorite star indicator.
+            if state.favorites.contains(&plugin.name) {
+                spans.push(Span::styled("★ ", Style::default().fg(theme.accent).bold()));
+            }
+
             // Icon (conditionally shown).
             if state.show_icons {
                 let icon = format!("{} ", plugin.icon);
