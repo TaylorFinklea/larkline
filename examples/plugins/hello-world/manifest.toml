@@ -1,0 +1,10 @@
+[plugin]
+name = "Hello World"
+description = "A minimal example plugin — returns a greeting"
+version = "0.1.0"
+author = "taylor"
+icon = "👋"
+entry = "run.sh"
+timeout_seconds = 5
+
+category = "examples"

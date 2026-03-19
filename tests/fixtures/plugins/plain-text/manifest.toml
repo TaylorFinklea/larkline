@@ -1,0 +1,8 @@
+[plugin]
+name = "Plain Text"
+description = "Outputs plain text, not JSON"
+version = "0.1.0"
+author = "test"
+icon = "T"
+entry = "run.sh"
+timeout_seconds = 5

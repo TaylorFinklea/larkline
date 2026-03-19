@@ -1,0 +1,8 @@
+[plugin]
+name = "Slow"
+description = "A slow plugin for testing timeout enforcement"
+version = "0.1.0"
+author = "test"
+icon = "⏳"
+entry = "run.sh"
+timeout_seconds = 1

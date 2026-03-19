@@ -1,0 +1,10 @@
+[plugin]
+name = "System Info"
+description = "CPU, memory, and disk usage at a glance"
+version = "0.1.0"
+author = "taylor"
+icon = "💻"
+entry = "run.sh"
+timeout_seconds = 5
+
+category = "system"
