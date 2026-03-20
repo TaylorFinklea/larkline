@@ -404,14 +404,14 @@ lark.register({
     async fn runtime_error_returns_execution_failed() {
         let plugin = lua_plugin_from_source(
             "runtime-err",
-            r#"
+            r"
 lark.register({
     on_run = function()
         local x = nil
         x()
     end
 })
-"#,
+",
         );
         let result = plugin.execute().await;
         assert!(

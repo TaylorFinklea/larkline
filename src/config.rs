@@ -824,8 +824,10 @@ mod tests {
 
     #[test]
     fn invalid_theme_color_falls_back_with_default_theme() {
-        let mut theme_cfg = ThemeConfig::default();
-        theme_cfg.accent = "not_a_color".to_string();
+        let theme_cfg = ThemeConfig {
+            accent: "not_a_color".to_string(),
+            ..ThemeConfig::default()
+        };
         // resolve() returns Err — caller falls back to default theme.
         assert!(theme_cfg.resolve().is_err());
         // Default theme always resolves.

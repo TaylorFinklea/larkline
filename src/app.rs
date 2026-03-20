@@ -209,12 +209,14 @@ impl App {
     #[cfg(test)]
     pub fn with_stubs_and_favorites(pinned: Vec<String>) -> Self {
         use crate::config::FavoritesConfig;
-        let mut config = Config::default();
-        config.favorites = FavoritesConfig { pinned };
+        let config = Config {
+            favorites: FavoritesConfig { pinned },
+            ..Config::default()
+        };
         Self::new(stub_plugins(), &config, Vec::new())
     }
 
-    /// Create an `App` with stub plugins and a default_plugin setting for testing.
+    /// Create an `App` with stub plugins and a `default_plugin` setting for testing.
     #[cfg(test)]
     pub fn with_stubs_and_default(default_plugin: &str) -> Self {
         let mut config = Config::default();
