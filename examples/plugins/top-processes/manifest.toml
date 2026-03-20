@@ -1,0 +1,11 @@
+[plugin]
+name = "Top Processes"
+description = "20 processes by CPU usage — table output with scroll"
+version = "0.1.0"
+author = "taylor"
+icon = "⚡"
+icon_nerd = ""
+entry = "run.sh"
+timeout_seconds = 10
+
+category = "system"

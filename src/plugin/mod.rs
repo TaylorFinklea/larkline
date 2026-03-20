@@ -5,6 +5,7 @@
 //! The rest of the application only talks to the trait, never to backends directly.
 
 pub mod engine;
+pub mod lua;
 pub mod registry;
 pub mod script;
 pub mod traits;
@@ -15,3 +16,16 @@ pub mod traits;
 pub use traits::{
     ActionKind, ItemAction, OutputItem, Plugin, PluginError, PluginMetadata, PluginOutput,
 };
+
+use std::sync::Arc;
+
+use registry::{DiscoveredPlugin, PluginKind};
+
+/// Construct the correct [`Plugin`] backend for a discovered plugin.
+#[must_use]
+pub fn build_plugin(discovered: DiscoveredPlugin) -> Arc<dyn Plugin> {
+    match discovered.kind {
+        PluginKind::Script => Arc::new(script::ScriptPlugin::from_discovered(discovered)),
+        PluginKind::Lua => Arc::new(lua::LuaPlugin::from_discovered(discovered)),
+    }
+}

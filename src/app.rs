@@ -15,7 +15,6 @@ use crate::config::{Config, KeybindingsConfig, ResolvedKeybindings, Theme};
 use crate::input;
 use crate::plugin::engine::{EngineEvent, PluginEngine};
 use crate::plugin::registry;
-use crate::plugin::script::ScriptPlugin;
 use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
 use crate::plugin::{Plugin, PluginMetadata};
 use crate::tui::ui;
@@ -32,13 +31,15 @@ pub enum OutputMode {
     List,
     /// Render raw text (or items formatted as plain lines).
     RawText,
+    /// Render items as a table with column headers (when `columns` is non-empty).
+    Table,
 }
 
 // ---------------------------------------------------------------------------
 // State types
 // ---------------------------------------------------------------------------
 
-/// The current UI mode, which determines how keyboard input is interpreted.
+/// The current UI mode — describes *which pane is active*.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum Mode {
     /// Browsing the plugin list.
@@ -48,6 +49,20 @@ pub enum Mode {
     Search,
     /// Viewing a plugin's output in the detail pane.
     ViewOutput,
+}
+
+/// Vim-style input mode — describes *how keys are interpreted*.
+///
+/// Orthogonal to [`Mode`]: Normal + Browse = navigation; Insert + Browse = quickkeys/search.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum VimMode {
+    /// Navigation keys (j/k/q) are active. Default on startup.
+    #[default]
+    Normal,
+    /// Quickkeys and search input are active; j/k/q are NOT navigation.
+    Insert,
+    /// Command input mode — accumulates a `:command` string.
+    Command,
 }
 
 /// Central application state.
@@ -91,6 +106,23 @@ pub struct AppState {
     pub loading_started: Option<std::time::Instant>,
     /// How plugin output is displayed in the output pane.
     pub output_mode: OutputMode,
+    /// Vim-style input mode (Normal / Insert / Command).
+    pub vim_mode: VimMode,
+    /// Accumulated input buffer for Command mode (the text after `:`).
+    pub command_input: String,
+    /// Pending shell action awaiting user confirmation (Y/N).
+    pub pending_confirmation: Option<PendingConfirmation>,
+}
+
+/// A shell action awaiting user confirmation before execution.
+#[derive(Debug, Clone)]
+pub struct PendingConfirmation {
+    /// Human-readable description of the action.
+    pub description: String,
+    /// Command to run.
+    pub command: String,
+    /// Arguments to pass.
+    pub args: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +140,8 @@ pub struct App {
     plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
     keybindings_config: KeybindingsConfig,
+    /// Icon set preference for resolving Nerd Font vs emoji icons.
+    icon_set: crate::config::IconSet,
 }
 
 impl App {
@@ -140,6 +174,7 @@ impl App {
             rx,
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
+            icon_set: config.ui.icon_set.clone(),
         };
         // Apply favorites ordering and alphabetical sort at startup.
         app.update_filter();
@@ -199,9 +234,13 @@ impl App {
                 if let Event::Key(key) = event::read()? {
                     // Only process key press events, not repeats or releases.
                     if key.kind == KeyEventKind::Press {
-                        if let Some(action) =
-                            input::handle_key(key, &self.state.mode, &self.keybindings)
-                        {
+                        if let Some(action) = input::handle_key(
+                            key,
+                            &self.state.mode,
+                            &self.state.vim_mode,
+                            &self.keybindings,
+                            self.state.pending_confirmation.is_some(),
+                        ) {
                             self.handle_action(action);
                         }
                     }
@@ -233,20 +272,51 @@ impl App {
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
             }
+            EngineEvent::PartialOutput { title, items, .. } => {
+                if let Some(ref t) = title {
+                    // First partial: create output and switch to ViewOutput.
+                    self.state.plugin_output = Some(PluginOutput {
+                        title: t.clone(),
+                        items,
+                        ..Default::default()
+                    });
+                    self.state.mode = Mode::ViewOutput;
+                    self.state.output_selected = 0;
+                    self.state.output_mode = OutputMode::List;
+                } else if let Some(ref mut output) = self.state.plugin_output {
+                    // Subsequent partials: extend items.
+                    output.items.extend(items);
+                }
+            }
             EngineEvent::PluginFinished { result, .. } => {
                 self.state.is_loading = false;
                 self.state.loading_started = None;
                 match result {
                     Ok(output) => {
-                        self.state.plugin_output = Some(output);
+                        // Don't overwrite if streaming already populated output.
+                        if self.state.plugin_output.is_none() {
+                            self.state.plugin_output = Some(output);
+                        }
                     }
                     Err(e) => {
                         self.state.plugin_error = Some(e.to_string());
                     }
                 }
-                self.state.mode = Mode::ViewOutput;
+                if self.state.mode != Mode::ViewOutput {
+                    self.state.mode = Mode::ViewOutput;
+                }
                 self.state.output_selected = 0;
-                self.state.output_mode = OutputMode::List;
+                // Auto-select Table mode when columns are defined.
+                self.state.output_mode = if self
+                    .state
+                    .plugin_output
+                    .as_ref()
+                    .is_some_and(|o| !o.columns.is_empty())
+                {
+                    OutputMode::Table
+                } else {
+                    OutputMode::List
+                };
             }
         }
     }
@@ -310,12 +380,6 @@ impl App {
                 self.update_filter();
             }
 
-            Action::ClearSearch => {
-                self.state.query.clear();
-                self.state.mode = Mode::Browse;
-                self.update_filter();
-            }
-
             Action::Select => {
                 if !self.state.filtered.is_empty() {
                     let plugin_index = self.state.filtered[self.state.selected];
@@ -340,7 +404,7 @@ impl App {
                 if let Some(ref output) = self.state.plugin_output.clone() {
                     if let Some(item) = output.items.get(self.state.output_selected) {
                         if let Some(action) = item.actions.first() {
-                            App::execute_item_action(action);
+                            self.execute_item_action(action);
                         } else if let Some(ref url) = item.url {
                             open_url(url);
                         }
@@ -380,17 +444,82 @@ impl App {
             }
 
             Action::ToggleOutputMode => {
+                let has_columns = self
+                    .state
+                    .plugin_output
+                    .as_ref()
+                    .is_some_and(|o| !o.columns.is_empty());
                 self.state.output_mode = match self.state.output_mode {
                     OutputMode::List => OutputMode::RawText,
-                    OutputMode::RawText => OutputMode::List,
+                    OutputMode::RawText if has_columns => OutputMode::Table,
+                    OutputMode::RawText | OutputMode::Table => OutputMode::List,
                 };
             }
 
+            Action::Confirm => {
+                if let Some(pending) = self.state.pending_confirmation.take() {
+                    run_shell_action(&mut self.state, &pending.command, &pending.args);
+                }
+            }
+
+            Action::Cancel => {
+                self.state.pending_confirmation = None;
+            }
+
+            Action::EnterInsertMode => {
+                self.state.vim_mode = VimMode::Insert;
+            }
+
+            Action::EnterNormalMode => {
+                self.state.vim_mode = VimMode::Normal;
+                self.state.query.clear();
+                self.state.mode = Mode::Browse;
+                self.update_filter();
+                self.state.command_input.clear();
+            }
+
+            Action::EnterCommandMode => {
+                self.state.vim_mode = VimMode::Command;
+                self.state.command_input.clear();
+            }
+
+            Action::CommandChar(c) => {
+                self.state.command_input.push(c);
+            }
+
+            Action::CommandBackspace => {
+                self.state.command_input.pop();
+            }
+
+            Action::CommandSubmit => {
+                let cmd = self.state.command_input.trim().to_string();
+                self.state.vim_mode = VimMode::Normal;
+                self.state.command_input.clear();
+                match cmd.as_str() {
+                    "q" | "quit" => self.state.should_quit = true,
+                    "r" | "refresh" => {
+                        // Re-use the RefreshPlugins logic by recursing.
+                        self.handle_action(Action::RefreshPlugins);
+                    }
+                    _ => {
+                        // Unknown command — ignore silently for now.
+                    }
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
-                Ok(discovered) => {
+                Ok(mut discovered) => {
+                    // Resolve icons based on configured icon set.
+                    if self.icon_set == crate::config::IconSet::Nerd {
+                        for d in &mut discovered {
+                            if let Some(ref nerd) = d.metadata.icon_nerd {
+                                d.metadata.icon = nerd.clone();
+                            }
+                        }
+                    }
                     let plugins: Vec<Arc<dyn Plugin>> = discovered
                         .into_iter()
-                        .map(|d| Arc::new(ScriptPlugin::from_discovered(d)) as Arc<dyn Plugin>)
+                        .map(crate::plugin::build_plugin)
                         .collect();
                     let metadata: Vec<PluginMetadata> =
                         plugins.iter().map(|p| p.metadata().clone()).collect();
@@ -415,7 +544,7 @@ impl App {
         }
     }
 
-    fn execute_item_action(action: &ItemAction) {
+    fn execute_item_action(&mut self, action: &ItemAction) {
         match action.kind {
             ActionKind::Open => {
                 if let Some(url) = action.args.first() {
@@ -430,8 +559,21 @@ impl App {
                 }
             }
             ActionKind::Shell => {
-                // Phase 4: shell execution with confirmation.
-                tracing::info!(args = ?action.args, "shell action not yet implemented");
+                let cmd = action.args.first().cloned().unwrap_or_default();
+                let args: Vec<String> = action.args.iter().skip(1).cloned().collect();
+                let description = action.label.clone();
+
+                if action.confirm {
+                    // Show Y/N confirmation before running.
+                    self.state.pending_confirmation = Some(PendingConfirmation {
+                        description,
+                        command: cmd,
+                        args,
+                    });
+                } else {
+                    // Execute immediately without confirmation.
+                    run_shell_action(&mut self.state, &cmd, &args);
+                }
             }
         }
     }
@@ -530,6 +672,33 @@ fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Execute a shell command and display its output as raw text in the output pane.
+///
+/// Uses explicit args (no shell interpolation) for safety.
+fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
+    tracing::info!(command = cmd, args = ?args, "executing shell action");
+    match std::process::Command::new(cmd).args(args).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined = if stderr.is_empty() {
+                stdout.into_owned()
+            } else {
+                format!("{stdout}{stderr}")
+            };
+            state.plugin_output = Some(PluginOutput {
+                title: format!("{cmd} (exit {})", output.status),
+                raw_text: Some(combined),
+                ..Default::default()
+            });
+            state.output_mode = OutputMode::RawText;
+        }
+        Err(e) => {
+            state.plugin_error = Some(format!("shell command failed: {e}"));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Stub data (test only — replaced by PluginRegistry + ScriptPlugin in production)
 // ---------------------------------------------------------------------------
@@ -561,9 +730,12 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 version: "0.1.0".to_string(),
                 author: "taylor".to_string(),
                 icon: $icon.to_string(),
+                icon_nerd: None,
                 category: Some($cat.to_string()),
                 keybinding: None,
                 timeout: Duration::from_secs(10),
+                streaming: false,
+                entry_path: None,
             })) as Arc<dyn Plugin>
         }};
     }
@@ -737,20 +909,14 @@ mod tests {
             items: vec![
                 crate::plugin::traits::OutputItem {
                     label: "item 0".into(),
-                    detail: None,
-                    icon: None,
-                    url: None,
-                    actions: Vec::new(),
+                    ..Default::default()
                 },
                 crate::plugin::traits::OutputItem {
                     label: "item 1".into(),
-                    detail: None,
-                    icon: None,
-                    url: None,
-                    actions: Vec::new(),
+                    ..Default::default()
                 },
             ],
-            raw_text: None,
+            ..Default::default()
         });
         assert_eq!(app.state.output_selected, 0);
         app.handle_action(Action::MoveDown);
@@ -807,16 +973,13 @@ mod tests {
         let items = (0..25)
             .map(|i| crate::plugin::traits::OutputItem {
                 label: format!("item {i}"),
-                detail: None,
-                icon: None,
-                url: None,
-                actions: Vec::new(),
+                ..Default::default()
             })
             .collect();
         app.state.plugin_output = Some(PluginOutput {
             title: "test".into(),
             items,
-            raw_text: None,
+            ..Default::default()
         });
 
         assert_eq!(app.state.output_selected, 0);

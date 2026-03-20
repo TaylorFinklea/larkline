@@ -30,7 +30,10 @@ cargo run
 
 # CLI flags (no TUI launched)
 cargo run -- --version
+cargo run -- --help
 cargo run -- --print-alias zsh   # also: bash, fish
+cargo run -- init-plugin my-plugin          # Lua scaffold
+cargo run -- init-plugin my-plugin --shell  # Shell scaffold
 ```
 
 **Rust edition:** 2024
@@ -75,6 +78,10 @@ Core dependencies are locked in `docs/ARCHITECTURE.md` under Technology Stack. D
 - **Phase 2:** Favorites, configurable keybindings, direct-launch
 - **Phase 3:** Default plugin pre-selection, default config generation, graceful config error handling
 - **Phase 4 (Polish & UX):** Loading elapsed time, panic recovery in engine, Ctrl+D/U scroll, `t` output mode toggle, `R` plugin refresh, lazy entry validation, `--print-alias` shell integration
+- **Phase 4.5 (Vim Modes):** Normal/Insert/Command vim-style input modes, `h`/`l` navigation, `:q`/`:refresh` commands
+- **Phase 5 (Embedded Lua):** `LuaPlugin` backend via mlua (Lua 5.4), sandboxed VM, `lark.*` host API (`env`, `log`, `exec`, `json`, `http`), `PluginKind` detection, `reqwest` for async HTTP
+- **Phase 7 (Enhanced Output):** ANSI rendering (`ansi-to-tui`), shell action execution with Y/N confirmation, table output (`columns` + `metadata` on items), streaming output (newline-delimited JSON, engine-level dispatch), Nerd Font icon system (`icon_nerd` field, `icon_set` config toggle), standard plugin library (7 Lua + 2 shell plugins)
+- **Phase 6 (Distribution & Community):** `--help`/`-h` flag, `lark init-plugin <name>` scaffolder (Lua + `--shell`), README polish, `icon_set` in default config template
 
 ## Keybindings (defaults)
 
@@ -108,6 +115,32 @@ Plugin directory: `~/.config/larkline/plugins/`
 Each plugin is a directory with `manifest.toml` + an executable entry point.
 Entry script existence is checked at **execution time**, not at scan time — missing entries show in the list but fail gracefully when run.
 JSON output schema is defined in `docs/ARCHITECTURE.md` under JSON Schema Specification.
+
+### JSON Safety in Shell Plugins
+
+Shell variables interpolated directly into JSON strings will silently corrupt output if they contain quotes, backslashes, or newlines. Always use `jq` to build JSON values from shell variables:
+
+```bash
+# WRONG — breaks if $value contains quotes, backslashes, or newlines
+echo "{\"label\": \"$value\"}"
+
+# RIGHT — jq handles escaping
+jq -n --arg label "$label" --arg detail "$detail" \
+  '{label: $label, detail: $detail, icon: "📦"}'
+
+# RIGHT — building an items array from a loop
+items=()
+while IFS= read -r line; do
+  item=$(jq -n --arg l "$line" '{label: $l}')
+  items+=("$item")
+done < <(some-command)
+
+printf '{"title":"My Plugin","items":['
+( IFS=,; echo "${items[*]}" )
+printf ']}'
+```
+
+Any plugin that interpolates user-facing data (file paths, process names, git output, hostnames) **must** use `jq`.
 
 ## OPENAI_API_KEY
 

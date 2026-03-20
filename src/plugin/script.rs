@@ -18,8 +18,9 @@ pub struct ScriptPlugin {
 impl ScriptPlugin {
     /// Create a `ScriptPlugin` from a [`DiscoveredPlugin`].
     #[must_use]
-    pub fn from_discovered(discovered: DiscoveredPlugin) -> Self {
+    pub fn from_discovered(mut discovered: DiscoveredPlugin) -> Self {
         let entry_path = discovered.plugin_dir.join(&discovered.entry);
+        discovered.metadata.entry_path = Some(entry_path.clone());
         Self {
             metadata: discovered.metadata,
             entry_path,
@@ -68,8 +69,8 @@ impl Plugin for ScriptPlugin {
             Ok(output) => Ok(output),
             Err(_) => Ok(PluginOutput {
                 title: self.metadata.name.clone(),
-                items: Vec::new(),
                 raw_text: Some(stdout.into_owned()),
+                ..Default::default()
             }),
         }
     }

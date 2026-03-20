@@ -1,0 +1,11 @@
+[plugin]
+name = "Weather"
+description = "Current conditions from wttr.in (no API key needed)"
+version = "0.1.0"
+author = "taylor"
+icon = "🌤"
+icon_nerd = ""
+entry = "init.lua"
+timeout_seconds = 10
+
+category = "info"

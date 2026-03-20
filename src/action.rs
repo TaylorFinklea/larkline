@@ -16,8 +16,6 @@ pub enum Action {
     Search(char),
     /// Delete the last character from the search query.
     BackspaceSearch,
-    /// Clear the search query entirely.
-    ClearSearch,
     /// Go back / dismiss the current view.
     Back,
     /// Quit the application.
@@ -34,4 +32,20 @@ pub enum Action {
     ToggleOutputMode,
     /// Re-scan plugin directories and reload the plugin list.
     RefreshPlugins,
+    /// Switch to Vim Normal mode (navigation, j/k/q active).
+    EnterNormalMode,
+    /// Switch to Vim Insert mode (quickkeys and search active).
+    EnterInsertMode,
+    /// Switch to Vim Command mode (`:command` input).
+    EnterCommandMode,
+    /// Append a character to the command-mode input buffer.
+    CommandChar(char),
+    /// Delete the last character from the command-mode input buffer.
+    CommandBackspace,
+    /// Submit the current command-mode input.
+    CommandSubmit,
+    /// User confirmed the pending shell action.
+    Confirm,
+    /// User cancelled the pending shell action.
+    Cancel,
 }

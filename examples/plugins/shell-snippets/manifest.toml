@@ -1,0 +1,11 @@
+[plugin]
+name = "Shell Snippets"
+description = "Run saved shell commands with confirmation"
+version = "0.1.0"
+author = "taylor"
+icon = "⚡"
+icon_nerd = ""
+entry = "init.lua"
+timeout_seconds = 5
+
+category = "system"

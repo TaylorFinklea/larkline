@@ -5,6 +5,8 @@
 // Phase 2: types used throughout; suppress dead_code until all modules are wired up in Task 6.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -27,12 +29,18 @@ pub struct PluginMetadata {
     pub author: String,
     /// Emoji or single character shown as the plugin icon.
     pub icon: String,
+    /// Nerd Font glyph alternative (used when `icon_set = "nerd"` in config).
+    pub icon_nerd: Option<String>,
     /// Optional category for grouping (e.g., "dev", "system", "home").
     pub category: Option<String>,
     /// Optional direct-launch keybinding (e.g., "g p").
     pub keybinding: Option<String>,
     /// Maximum time to wait for the plugin to complete.
     pub timeout: Duration,
+    /// Whether this plugin uses streaming (newline-delimited JSON) output.
+    pub streaming: bool,
+    /// Absolute path to the entry script (used by the engine for streaming dispatch).
+    pub entry_path: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -53,10 +61,13 @@ pub struct PluginOutput {
     /// Raw text fallback — populated when stdout is not valid JSON.
     #[serde(skip)]
     pub raw_text: Option<String>,
+    /// Column definitions for table rendering. Empty = use list mode.
+    #[serde(default)]
+    pub columns: Vec<ColumnDef>,
 }
 
 /// A single item in a plugin's output list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OutputItem {
     /// Primary text displayed in the list row.
     pub label: String,
@@ -72,6 +83,9 @@ pub struct OutputItem {
     /// Actions the user can invoke on this item.
     #[serde(default)]
     pub actions: Vec<ItemAction>,
+    /// Arbitrary key-value pairs for table column resolution and future extensibility.
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 /// An action that can be invoked on an [`OutputItem`].
@@ -103,6 +117,36 @@ pub enum ActionKind {
     Clipboard,
     /// Run a shell command.
     Shell,
+}
+
+// ---------------------------------------------------------------------------
+// Table output types
+// ---------------------------------------------------------------------------
+
+/// Definition of a column for table rendering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnDef {
+    /// Column header text.
+    pub header: String,
+    /// Key to resolve the cell value: `"label"`, `"detail"`, `"icon"`, `"url"`,
+    /// or any key in [`OutputItem::metadata`].
+    pub key: String,
+    /// Text alignment within the column.
+    #[serde(default)]
+    pub align: ColumnAlign,
+}
+
+/// Text alignment for table columns.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColumnAlign {
+    /// Left-aligned (default).
+    #[default]
+    Left,
+    /// Right-aligned.
+    Right,
+    /// Center-aligned.
+    Center,
 }
 
 // ---------------------------------------------------------------------------
@@ -237,9 +281,12 @@ mod tests {
             version: "0.1.0".into(),
             author: "test".into(),
             icon: "T".into(),
+            icon_nerd: None,
             category: None,
             keybinding: None,
             timeout: std::time::Duration::from_secs(5),
+            streaming: false,
+            entry_path: None,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }

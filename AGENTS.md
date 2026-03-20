@@ -36,11 +36,15 @@ When modifying any contract, verify all producers and consumers still work. Run 
 
 ## Current Status
 
-Phases 0–4 complete. The app is feature-complete and ready for distribution.
+Phases 0–7 complete (including 4.5 and 6). Standard plugin library shipped.
 
-Next steps per `docs/ARCHITECTURE.md`:
-- Phase 5: Advanced features (ANSI output rendering, shell action execution with confirmation, Lua plugin support)
-- Phase 6: Distribution (crates.io publish, Homebrew tap live — `Formula/lark.rb` is ready pending SHA256 values after first release)
+- Phase 6 added: `--help`/`-h` flag, `lark init-plugin` scaffolder, README polish, `icon_set` in default config
+- Phase 7 added: ANSI rendering, shell action confirmation, table output, streaming output, Nerd Font icon system, standard plugin library
+- Phase 5 added: `LuaPlugin` backend (mlua, Lua 5.4), `PluginKind` enum in registry, `lark.*` host API, `reqwest` for async HTTP
+- Phase 4.5 added: Vim-style Normal/Insert/Command modes, `h`/`l` navigation
+
+Next steps:
+- Phase 8: Platform (themes, command history, mouse support)
 
 ## Release Artifacts
 
@@ -58,6 +62,23 @@ Next steps per `docs/ARCHITECTURE.md`:
 | `loading_started` | `Option<Instant>` | For elapsed time display |
 | `plugin_output` | `Option<PluginOutput>` | Last execution result |
 | `warnings` | `Vec<String>` | Status bar warnings (cleared on keypress) |
+
+## Plugin JSON Safety
+
+When writing or reviewing shell-based plugins, **never interpolate shell variables directly into JSON strings**. Variables containing quotes, backslashes, or newlines will silently produce invalid JSON.
+
+Always use `jq` to construct JSON values:
+
+```bash
+# WRONG
+echo "{\"label\": \"$value\"}"
+
+# RIGHT
+jq -n --arg label "$label" --arg detail "$detail" \
+  '{label: $label, detail: $detail, icon: "📦"}'
+```
+
+Any plugin that touches user-facing data (file paths, process names, git output, hostnames, command output) must use `jq`. This applies to all example plugins in `examples/plugins/` and test plugins.
 
 ## Subagent Guidance
 

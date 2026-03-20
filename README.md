@@ -61,9 +61,55 @@ Config is auto-generated on first run at `~/.config/larkline/config.toml`. All f
 
 ## Plugins
 
-Plugins live in `~/.config/larkline/plugins/`. Each plugin is a directory containing a `manifest.toml` and an executable entry script. See [`examples/plugins/`](examples/plugins/) for working examples.
+Plugins live in `~/.config/larkline/plugins/`. Each plugin is a directory containing a `manifest.toml` and an entry script (Lua or shell). Two backends are supported:
 
-Plugin output can be plain text or structured JSON — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the schema.
+- **Lua** (recommended) — sandboxed Lua 5.4 with a built-in `lark.*` API for exec, HTTP, JSON, and more. See [`docs/LUA_PLUGINS.md`](docs/LUA_PLUGINS.md).
+- **Shell** — any executable that prints JSON to stdout.
+
+Plugin output supports plain text, structured JSON items, and **table output** via `columns` metadata. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full schema.
+
+### Scaffold a new plugin
+
+```sh
+lark init-plugin my-plugin          # Lua plugin (recommended)
+lark init-plugin my-plugin --shell  # Shell plugin
+```
+
+This creates `~/.config/larkline/plugins/my-plugin/` with a working `manifest.toml` and entry script.
+
+### Standard plugins
+
+The following plugins ship in [`examples/plugins/`](examples/plugins/):
+
+| Plugin | Type | Description |
+|---|---|---|
+| `git-branches` | Lua | Recent local git branches with last-commit info |
+| `hello-world` | Shell | Minimal example — returns a greeting |
+| `hello-world-lua` | Lua | Minimal Lua example |
+| `ip-addresses` | Lua | Local + public IPv4 addresses |
+| `shell-snippets` | Lua | Run saved shell commands with confirmation |
+| `system-info` | Shell | CPU, memory, and disk usage |
+| `system-info-lua` | Lua | Same, via the `lark.*` API |
+| `top-processes` | Lua | Top 20 processes by CPU — table output |
+| `weather` | Lua | Current conditions from wttr.in |
+
+### Nerd Font icons
+
+Plugins can specify `icon_nerd` in their manifest for Nerd Font glyphs. Set `icon_set = "emoji"` in `config.toml` to fall back to standard emoji if you don't have a Nerd Font installed.
+
+### JSON safety (shell plugins)
+
+Never interpolate shell variables directly into JSON strings. Use `jq`:
+
+```bash
+jq -n --arg label "$label" --arg detail "$detail" \
+  '{label: $label, detail: $detail, icon: "📦"}'
+```
+
+## Documentation
+
+- [Architecture & JSON schema](docs/ARCHITECTURE.md)
+- [Lua plugin guide](docs/LUA_PLUGINS.md)
 
 ## License
 

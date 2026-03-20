@@ -1,11 +1,11 @@
 [plugin]
-name = "System Info"
-description = "CPU, memory, and disk usage at a glance"
+name = "System Info (Lua)"
+description = "CPU, memory, and disk usage via lark API"
 version = "0.1.0"
 author = "taylor"
 icon = "💻"
 icon_nerd = ""
-entry = "run.sh"
+entry = "init.lua"
 timeout_seconds = 5
 
 category = "system"

@@ -8,10 +8,15 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+        TableState,
+    },
 };
 
-use crate::app::{AppState, Mode, OutputMode};
+use ansi_to_tui::IntoText;
+
+use crate::app::{AppState, Mode, OutputMode, VimMode};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -170,6 +175,7 @@ fn render_plugin_list(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_output_pane(
     frame: &mut Frame,
     state: &AppState,
@@ -193,6 +199,21 @@ fn render_output_pane(
             format!(" {title_text} "),
             Style::default().fg(theme.accent).bold(),
         ));
+
+    // Confirmation dialog
+    if let Some(ref pending) = state.pending_confirmation {
+        let prompt = format!(
+            " {}\n Run: {} {}\n\n [Y]es  [N]o ",
+            pending.description,
+            pending.command,
+            pending.args.join(" ")
+        );
+        let paragraph = Paragraph::new(prompt)
+            .block(block)
+            .style(Style::default().fg(theme.accent));
+        frame.render_widget(paragraph, area);
+        return;
+    }
 
     // Loading state
     if state.is_loading {
@@ -237,14 +258,22 @@ fn render_output_pane(
                     return;
                 }
                 if let Some(ref raw) = output.raw_text {
-                    let paragraph = Paragraph::new(raw.as_str()).block(block);
+                    let text = raw
+                        .as_bytes()
+                        .into_text()
+                        .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
+                    let paragraph = Paragraph::new(text).block(block);
                     frame.render_widget(paragraph, area);
                     return;
                 }
             }
             OutputMode::RawText => {
                 if let Some(ref raw) = output.raw_text {
-                    let paragraph = Paragraph::new(raw.as_str()).block(block);
+                    let text = raw
+                        .as_bytes()
+                        .into_text()
+                        .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
+                    let paragraph = Paragraph::new(text).block(block);
                     frame.render_widget(paragraph, area);
                 } else {
                     // Format items as plain text lines.
@@ -258,6 +287,12 @@ fn render_output_pane(
                     frame.render_widget(paragraph, area);
                 }
                 return;
+            }
+            OutputMode::Table => {
+                if !output.columns.is_empty() {
+                    render_output_table(frame, state, theme, output, block, area);
+                    return;
+                }
             }
         }
     }
@@ -324,6 +359,74 @@ fn render_output_items(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
+fn render_output_table(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    output: &crate::plugin::PluginOutput,
+    block: Block,
+    area: ratatui::layout::Rect,
+) {
+    // Build header row.
+    let header_cells: Vec<Cell> = output
+        .columns
+        .iter()
+        .map(|col| {
+            Cell::from(col.header.clone()).style(Style::default().add_modifier(Modifier::BOLD))
+        })
+        .collect();
+    let header = Row::new(header_cells).bottom_margin(1);
+
+    // Build data rows.
+    let rows: Vec<Row> = output
+        .items
+        .iter()
+        .map(|item| {
+            let cells: Vec<Cell> = output
+                .columns
+                .iter()
+                .map(|col| {
+                    let value = match col.key.as_str() {
+                        "label" => item.label.clone(),
+                        "detail" => item.detail.clone().unwrap_or_default(),
+                        "icon" => item.icon.clone().unwrap_or_default(),
+                        "url" => item.url.clone().unwrap_or_default(),
+                        key => item.metadata.get(key).cloned().unwrap_or_default(),
+                    };
+                    Cell::from(value)
+                })
+                .collect();
+            Row::new(cells)
+        })
+        .collect();
+
+    // Column widths: distribute evenly.
+    #[allow(clippy::cast_possible_truncation)]
+    let col_count = output.columns.len().max(1) as u16; // Columns < 65535 in practice.
+    let width_pct = 100 / col_count;
+    let widths: Vec<Constraint> = output
+        .columns
+        .iter()
+        .map(|_| Constraint::Percentage(width_pct))
+        .collect();
+
+    let highlight_style = Style::default()
+        .bg(theme.highlight_bg)
+        .fg(theme.highlight_fg)
+        .add_modifier(Modifier::BOLD);
+
+    let table = Table::new(rows, &widths)
+        .header(header)
+        .block(block)
+        .row_highlight_style(highlight_style)
+        .highlight_symbol("▶ ");
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(state.output_selected));
+
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
 fn render_status_bar(
     frame: &mut Frame,
     state: &AppState,
@@ -352,31 +455,40 @@ fn render_status_bar(
         }
     };
 
-    let hint: String = match state.mode {
-        Mode::Browse => {
-            " j/k: navigate  Enter: select  /: search  R: refresh  q: quit ".to_string()
-        }
-        Mode::Search => " Type to filter  Esc: clear  Enter: select  ↑↓: navigate ".to_string(),
-        Mode::ViewOutput => {
-            if state.is_loading {
-                let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
-                let elapsed = state
-                    .loading_started
-                    .map_or(0.0, |t| t.elapsed().as_secs_f32());
-                let name = plugin_name_for_status();
-                format!(" {spinner} Loading {name}… ({elapsed:.1}s) ")
-            } else if state
-                .plugin_output
-                .as_ref()
-                .is_some_and(|o| !o.items.is_empty())
-            {
-                let name = plugin_name_for_status();
-                let n = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
-                format!(" {name} — {n} items  j/k: navigate  Enter: run action  Esc: back ")
-            } else {
-                let name = plugin_name_for_status();
-                format!(" {name}  Esc: back ")
+    let hint: String = if state.pending_confirmation.is_some() {
+        " Confirm action: [Y]es  [N]o ".to_string()
+    } else {
+        match state.vim_mode {
+            VimMode::Command => {
+                format!(" [C]  :{}\u{2588} ", state.command_input)
             }
+            VimMode::Insert => " [I]  type to search or use quickkeys  Esc: normal ".to_string(),
+            VimMode::Normal => match state.mode {
+                Mode::Browse | Mode::Search => {
+                    " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
+                }
+                Mode::ViewOutput => {
+                    if state.is_loading {
+                        let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
+                        let elapsed = state
+                            .loading_started
+                            .map_or(0.0, |t| t.elapsed().as_secs_f32());
+                        let name = plugin_name_for_status();
+                        format!(" [N]  {spinner} Loading {name}… ({elapsed:.1}s) ")
+                    } else if state
+                        .plugin_output
+                        .as_ref()
+                        .is_some_and(|o| !o.items.is_empty())
+                    {
+                        let name = plugin_name_for_status();
+                        let n = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
+                        format!(" [N]  {name} — {n} items  j/k: nav  Enter: run action  Esc: back ")
+                    } else {
+                        let name = plugin_name_for_status();
+                        format!(" [N]  {name}  Esc: back ")
+                    }
+                }
+            },
         }
     };
 

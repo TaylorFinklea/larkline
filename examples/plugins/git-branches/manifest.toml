@@ -1,0 +1,11 @@
+[plugin]
+name = "Git Branches"
+description = "Recent local git branches with last-commit info"
+version = "0.1.0"
+author = "taylor"
+icon = "🌿"
+icon_nerd = ""
+entry = "init.lua"
+timeout_seconds = 10
+
+category = "dev"

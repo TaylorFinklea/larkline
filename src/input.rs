@@ -3,34 +3,53 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::action::Action;
-use crate::app::Mode;
+use crate::app::{Mode, VimMode};
 use crate::config::{BrowseAction, ResolvedKeybindings, ViewOutputAction};
 
-/// Maps a raw crossterm key event to a semantic [`Action`], depending on the current UI mode.
+/// Maps a raw crossterm key event to a semantic [`Action`].
 ///
-/// The configurable keybinding map is checked first; hardcoded fallbacks handle keys that
-/// aren't in the map (search-mode char catch-all, Ctrl+C).
+/// Routing priority:
+/// 1. `VimMode::Command` → command input handler (regardless of UI mode)
+/// 2. `VimMode::Insert` + Browse/Search → quickkey / search handler
+/// 3. `VimMode::Normal` + Browse → normal browse handler (j/k/q active, no quickkeys)
+/// 4. `VimMode::Normal` + `ViewOutput` → output navigation handler
 ///
-/// Returns `None` for keys that have no binding in the current mode.
+/// Returns `None` for keys with no binding in the current mode combination.
 pub fn handle_key(
     event: KeyEvent,
     mode: &Mode,
+    vim_mode: &VimMode,
     keybindings: &ResolvedKeybindings,
+    has_pending_confirmation: bool,
 ) -> Option<Action> {
-    match mode {
-        Mode::Browse => handle_browse(event, keybindings),
-        Mode::Search => handle_search(event),
-        Mode::ViewOutput => handle_view_output(event, keybindings),
+    // Confirmation dialog intercepts all keys.
+    if has_pending_confirmation {
+        return handle_confirmation(event);
+    }
+
+    match vim_mode {
+        VimMode::Command => handle_command(event),
+        VimMode::Insert => handle_insert(event, keybindings),
+        VimMode::Normal => match mode {
+            Mode::Browse | Mode::Search => handle_browse_normal(event, keybindings),
+            Mode::ViewOutput => handle_view_output(event, keybindings),
+        },
     }
 }
 
-fn handle_browse(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
-    // Check direct-launch map first.
-    if let Some(plugin_name) = keybindings.launch_map.get(&event) {
-        return Some(Action::LaunchPlugin(plugin_name.clone()));
+/// Confirmation dialog handler: y/Enter confirms, n/Esc cancels.
+fn handle_confirmation(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(Action::Confirm),
+        KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Action::Cancel),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        _ => None,
     }
+}
 
-    // Check configurable browse map.
+/// Normal-mode browse handler: navigation keys active, no quickkeys or char search.
+fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
+    // Check configurable browse map (j/k/q/R/Enter).
     if let Some(action) = keybindings.browse_map.get(&event) {
         return Some(match action {
             BrowseAction::MoveUp => Action::MoveUp,
@@ -41,27 +60,76 @@ fn handle_browse(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<A
         });
     }
 
-    // Hardcoded fallbacks not covered by the configurable map.
     match event.code {
         // Ctrl+C is always quit — non-configurable.
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
-        // Enter search mode on '/' or any printable char not already mapped.
-        KeyCode::Char('/') => Some(Action::Search('/')),
-        KeyCode::Char(c) if !c.is_control() => Some(Action::Search(c)),
+        // Enter Insert mode via 'i' (quickkeys) or '/' (search). Both activate Insert.
+        KeyCode::Char('i' | '/') if event.modifiers == KeyModifiers::NONE => {
+            Some(Action::EnterInsertMode)
+        }
+        // Enter Command mode.
+        KeyCode::Char(':') if event.modifiers == KeyModifiers::NONE => {
+            Some(Action::EnterCommandMode)
+        }
         _ => None,
     }
 }
 
-fn handle_search(event: KeyEvent) -> Option<Action> {
-    // Search mode is fully hardcoded — no user overrides.
+/// Insert-mode handler: quickkeys checked first, then char → search, arrows still navigate.
+fn handle_insert(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
+    // Ctrl+C always quits.
+    if let KeyCode::Char('c') = event.code {
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            return Some(Action::Quit);
+        }
+    }
+
+    // Escape exits Insert mode → Normal mode (also clears search via EnterNormalMode handler).
+    if event.code == KeyCode::Esc {
+        return Some(Action::EnterNormalMode);
+    }
+
+    // Arrow keys navigate the list unambiguously.
+    if event.code == KeyCode::Up {
+        return Some(Action::MoveUp);
+    }
+    if event.code == KeyCode::Down {
+        return Some(Action::MoveDown);
+    }
+
+    // Enter selects the highlighted plugin.
+    if event.code == KeyCode::Enter {
+        return Some(Action::Select);
+    }
+
+    // Backspace / Delete edit the search query.
+    if matches!(event.code, KeyCode::Backspace | KeyCode::Delete) {
+        return Some(Action::BackspaceSearch);
+    }
+
+    // Check launch map first — j/k/q are valid quickkeys in Insert mode.
+    if let Some(plugin_name) = keybindings.launch_map.get(&event) {
+        return Some(Action::LaunchPlugin(plugin_name.clone()));
+    }
+
+    // Any remaining printable char goes to the search query.
+    if let KeyCode::Char(c) = event.code {
+        if !c.is_control() {
+            return Some(Action::Search(c));
+        }
+    }
+
+    None
+}
+
+/// Command-mode handler: accumulate `:command` input, Esc cancels, Enter submits.
+fn handle_command(event: KeyEvent) -> Option<Action> {
     match event.code {
-        KeyCode::Char(c) if !c.is_control() => Some(Action::Search(c)),
-        KeyCode::Backspace | KeyCode::Delete => Some(Action::BackspaceSearch),
-        KeyCode::Esc => Some(Action::ClearSearch),
-        KeyCode::Enter => Some(Action::Select),
-        KeyCode::Up => Some(Action::MoveUp),
-        KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Esc => Some(Action::EnterNormalMode),
+        KeyCode::Enter => Some(Action::CommandSubmit),
+        KeyCode::Backspace | KeyCode::Delete => Some(Action::CommandBackspace),
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        KeyCode::Char(c) if !c.is_control() => Some(Action::CommandChar(c)),
         _ => None,
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::plugin::traits::{Plugin, PluginError, PluginOutput};
+use crate::plugin::traits::{OutputItem, Plugin, PluginError, PluginOutput};
 
 /// Events sent from the engine to the app run loop.
 #[derive(Debug)]
@@ -25,6 +25,16 @@ pub enum EngineEvent {
         /// The execution result.
         result: Result<PluginOutput, PluginError>,
     },
+    /// Incremental output from a streaming plugin.
+    PartialOutput {
+        /// Index into the engine's plugin list.
+        #[allow(dead_code)]
+        plugin_index: usize,
+        /// Title (set only on the first partial).
+        title: Option<String>,
+        /// Items to append to the output.
+        items: Vec<OutputItem>,
+    },
 }
 
 /// Manages a set of plugins and dispatches them as async Tokio tasks.
@@ -42,12 +52,22 @@ impl PluginEngine {
 
     /// Spawn plugin execution on a Tokio task. Returns immediately.
     ///
-    /// Events are sent to the channel: `PluginStarted`, then `PluginFinished`.
+    /// Dispatches to streaming or normal mode based on plugin metadata.
+    pub fn execute(&self, plugin_index: usize) {
+        let meta = self.plugins[plugin_index].metadata();
+        if meta.streaming && meta.entry_path.is_some() {
+            self.execute_streaming(plugin_index);
+        } else {
+            self.execute_normal(plugin_index);
+        }
+    }
+
+    /// Normal (non-streaming) execution — waits for plugin to complete, then sends result.
     ///
     /// Uses an outer/inner task pattern so panics in the plugin are caught by the
     /// `JoinHandle` and converted to a `PluginError`, ensuring `PluginFinished` is
     /// always sent even when the plugin task panics.
-    pub fn execute(&self, plugin_index: usize) {
+    fn execute_normal(&self, plugin_index: usize) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let tx = self.tx.clone();
         tokio::spawn(async move {
@@ -63,6 +83,115 @@ impl PluginEngine {
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
                     result,
+                })
+                .await;
+        });
+    }
+
+    /// Streaming execution — reads stdout line-by-line and sends partial output events.
+    ///
+    /// First line is parsed as `PluginOutput` (header + initial items).
+    /// Subsequent lines are parsed as individual `OutputItem`.
+    /// Invalid lines are skipped with a warning.
+    #[allow(clippy::too_many_lines)]
+    fn execute_streaming(&self, plugin_index: usize) {
+        let meta = self.plugins[plugin_index].metadata().clone();
+        let entry_path = meta.entry_path.clone().expect("checked in execute()");
+        let plugin_dir = entry_path.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
+        let timeout = meta.timeout;
+        let tx = self.tx.clone();
+
+        tokio::spawn(async move {
+            let _ = tx.send(EngineEvent::PluginStarted { plugin_index }).await;
+
+            let result = tokio::time::timeout(timeout, async {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                use tokio::process::Command;
+
+                let mut child = match Command::new(&entry_path)
+                    .current_dir(&plugin_dir)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Err(PluginError::ExecutionFailed(format!(
+                            "failed to spawn streaming plugin: {e}"
+                        )));
+                    }
+                };
+
+                let stdout = child.stdout.take().expect("stdout was piped");
+                let mut lines = BufReader::new(stdout).lines();
+                let mut is_first = true;
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+
+                    if is_first {
+                        is_first = false;
+                        // First line: parse as PluginOutput header.
+                        match serde_json::from_str::<PluginOutput>(&line) {
+                            Ok(output) => {
+                                let _ = tx
+                                    .send(EngineEvent::PartialOutput {
+                                        plugin_index,
+                                        title: Some(output.title),
+                                        items: output.items,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    line = %line,
+                                    error = %e,
+                                    "streaming: invalid header line, skipping"
+                                );
+                            }
+                        }
+                    } else {
+                        // Subsequent lines: parse as OutputItem.
+                        match serde_json::from_str::<OutputItem>(&line) {
+                            Ok(item) => {
+                                let _ = tx
+                                    .send(EngineEvent::PartialOutput {
+                                        plugin_index,
+                                        title: None,
+                                        items: vec![item],
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    line = %line,
+                                    error = %e,
+                                    "streaming: invalid item line, skipping"
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Wait for the child to exit.
+                let _ = child.wait().await;
+                Ok(PluginOutput::default())
+            })
+            .await;
+
+            let finished_result = match result {
+                Ok(r) => r,
+                Err(_) => Err(PluginError::Timeout(timeout)),
+            };
+            let _ = tx
+                .send(EngineEvent::PluginFinished {
+                    plugin_index,
+                    result: finished_result,
                 })
                 .await;
         });
@@ -85,9 +214,12 @@ mod tests {
             version: "0.1.0".into(),
             author: "test".into(),
             icon: "T".into(),
+            icon_nerd: None,
             category: None,
             keybinding: None,
             timeout: std::time::Duration::from_secs(5),
+            streaming: false,
+            entry_path: None,
         }
     }
 

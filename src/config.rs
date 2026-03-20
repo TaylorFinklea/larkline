@@ -38,14 +38,27 @@ pub struct GeneralConfig {
     pub default_plugin: Option<String>,
 }
 
+/// Which icon set to display in the plugin list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IconSet {
+    /// Nerd Font glyphs (requires a Nerd Font installed). Falls back to emoji when `icon_nerd` is absent.
+    #[default]
+    Nerd,
+    /// Standard emoji icons (works in any terminal).
+    Emoji,
+}
+
 /// UI appearance settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
-    /// Show emoji icons next to plugin names.
+    /// Show icons next to plugin names.
     pub show_icons: bool,
     /// Maximum items visible in the plugin list before scrolling.
     pub visible_items: usize,
+    /// Which icon set to use: `"nerd"` (default) or `"emoji"`.
+    pub icon_set: IconSet,
 }
 
 /// Logging settings.
@@ -179,6 +192,11 @@ impl KeybindingsConfig {
             key(KeyCode::Enter, KeyModifiers::NONE),
             BrowseAction::Select,
         );
+        // l (vim: move right) — enter/select the highlighted plugin.
+        m.insert(
+            key(KeyCode::Char('l'), KeyModifiers::NONE),
+            BrowseAction::Select,
+        );
         m.insert(
             key(KeyCode::Char('q'), KeyModifiers::NONE),
             BrowseAction::Quit,
@@ -227,6 +245,11 @@ impl KeybindingsConfig {
         );
         m.insert(
             key(KeyCode::Esc, KeyModifiers::NONE),
+            ViewOutputAction::Back,
+        );
+        // h (vim: move left) — go back to the plugin list.
+        m.insert(
+            key(KeyCode::Char('h'), KeyModifiers::NONE),
             ViewOutputAction::Back,
         );
         m.insert(
@@ -395,6 +418,7 @@ impl Default for UiConfig {
         Self {
             show_icons: true,
             visible_items: 15,
+            icon_set: IconSet::default(),
         }
     }
 }
@@ -495,6 +519,9 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 # Maximum items visible before scrolling.
 # visible_items = 15
 
+# Icon set: "nerd" (default, requires Nerd Font) or "emoji".
+# icon_set = "nerd"
+
 [logging]
 # Log level written to stderr. Options: error, warn, info, debug, trace.
 # level = "warn"
@@ -586,7 +613,7 @@ pub fn config_path() -> PathBuf {
 }
 
 /// Returns the default plugin directory.
-fn default_plugin_dir() -> PathBuf {
+pub fn default_plugin_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg).join("larkline").join("plugins")
     } else {

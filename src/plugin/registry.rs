@@ -53,6 +53,17 @@ struct ManifestPlugin {
     timeout_seconds: Option<u64>,
     category: Option<String>,
     keybinding: Option<String>,
+    streaming: Option<bool>,
+    icon_nerd: Option<String>,
+}
+
+/// Which backend should execute this plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginKind {
+    /// External process (shell script, Python, etc.).
+    Script,
+    /// Embedded Lua VM via mlua.
+    Lua,
 }
 
 /// A plugin discovered on disk — metadata plus the location info needed to execute it.
@@ -64,6 +75,8 @@ pub struct DiscoveredPlugin {
     pub plugin_dir: PathBuf,
     /// The entry point filename (relative to `plugin_dir`).
     pub entry: String,
+    /// Which backend should execute this plugin.
+    pub kind: PluginKind,
 }
 
 /// Parse a single plugin directory's `manifest.toml`.
@@ -81,6 +94,14 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<DiscoveredPlugin, RegistryErr
         })?;
 
     let p = manifest.plugin;
+    let kind = if std::path::Path::new(&p.entry)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("lua"))
+    {
+        PluginKind::Lua
+    } else {
+        PluginKind::Script
+    };
     Ok(DiscoveredPlugin {
         metadata: PluginMetadata {
             name: p.name,
@@ -91,9 +112,13 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<DiscoveredPlugin, RegistryErr
             category: p.category,
             keybinding: p.keybinding,
             timeout: Duration::from_secs(p.timeout_seconds.unwrap_or(10)),
+            streaming: p.streaming.unwrap_or(false),
+            entry_path: None, // Set by the plugin backend constructors.
+            icon_nerd: p.icon_nerd,
         },
         plugin_dir: plugin_dir.to_path_buf(),
         entry: p.entry,
+        kind,
     })
 }
 

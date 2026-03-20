@@ -4,6 +4,7 @@ description = "IPv4 addresses — local interfaces + public via ip.me"
 version = "0.1.0"
 author = "taylor"
 icon = "🌐"
+icon_nerd = "󰛳"
 entry = "run.sh"
 timeout_seconds = 10
 
