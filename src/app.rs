@@ -86,6 +86,8 @@ pub enum CachedResult {
     Ready(PluginOutput),
     /// Plugin failed.
     Error(String),
+    /// Stale output shown while a background re-execution is in progress.
+    Revalidating(PluginOutput),
 }
 
 /// Vim-style input mode — describes *how keys are interpreted*.
@@ -341,10 +343,17 @@ impl App {
                     );
                 }
                 ExecutionSource::UserSelected => {
-                    self.state.is_loading = true;
-                    self.state.loading_started = Some(std::time::Instant::now());
-                    self.state.plugin_output = None;
-                    self.state.plugin_error = None;
+                    // Don't clear stale output during a stale-while-revalidate refresh.
+                    let is_revalidating = matches!(
+                        self.state.result_cache.get(&plugin_index),
+                        Some(CachedResult::Revalidating(_))
+                    );
+                    if !is_revalidating {
+                        self.state.is_loading = true;
+                        self.state.loading_started = Some(std::time::Instant::now());
+                        self.state.plugin_output = None;
+                        self.state.plugin_error = None;
+                    }
                 }
             },
             EngineEvent::PartialOutput {
@@ -418,34 +427,79 @@ impl App {
                     }
                 },
                 ExecutionSource::UserSelected => {
+                    let was_revalidating = matches!(
+                        self.state.result_cache.get(&plugin_index),
+                        Some(CachedResult::Revalidating(_))
+                    );
+                    let cache_enabled = self
+                        .state
+                        .plugins
+                        .get(plugin_index)
+                        .is_none_or(|p| p.cache);
+
                     self.state.is_loading = false;
                     self.state.loading_started = None;
+
                     match result {
                         Ok(output) => {
-                            // Don't overwrite if streaming already populated output.
-                            if self.state.plugin_output.is_none() {
-                                self.state.plugin_output = Some(output);
+                            if cache_enabled {
+                                self.state
+                                    .result_cache
+                                    .insert(plugin_index, CachedResult::Ready(output.clone()));
+                            } else {
+                                self.state.result_cache.remove(&plugin_index);
+                            }
+
+                            if was_revalidating {
+                                // Seamlessly update the pane if the user is still viewing it.
+                                if self.state.viewing_plugin_index == Some(plugin_index) {
+                                    let has_columns = !output.columns.is_empty();
+                                    self.state.plugin_output = Some(output);
+                                    self.state.output_mode = if has_columns {
+                                        OutputMode::Table
+                                    } else {
+                                        OutputMode::List
+                                    };
+                                }
+                            } else {
+                                // Fresh load: don't overwrite streaming output.
+                                if self.state.plugin_output.is_none() {
+                                    self.state.plugin_output = Some(output);
+                                }
                             }
                         }
                         Err(e) => {
-                            self.state.plugin_error = Some(e.to_string());
+                            if was_revalidating {
+                                // Keep showing stale data; silently update cache to Error.
+                                self.state
+                                    .result_cache
+                                    .insert(plugin_index, CachedResult::Error(e.to_string()));
+                            } else {
+                                self.state
+                                    .result_cache
+                                    .insert(plugin_index, CachedResult::Error(e.to_string()));
+                                self.state.plugin_error = Some(e.to_string());
+                            }
                         }
                     }
-                    if self.state.mode != Mode::ViewOutput {
-                        self.state.mode = Mode::ViewOutput;
+
+                    if !was_revalidating {
+                        if self.state.mode != Mode::ViewOutput {
+                            self.state.mode = Mode::ViewOutput;
+                        }
+                        self.state.output_selected = 0;
+                        // Auto-select Table mode when columns are defined.
+                        self.state.output_mode = if self
+                            .state
+                            .plugin_output
+                            .as_ref()
+                            .is_some_and(|o| !o.columns.is_empty())
+                        {
+                            OutputMode::Table
+                        } else {
+                            OutputMode::List
+                        };
                     }
-                    self.state.output_selected = 0;
-                    // Auto-select Table mode when columns are defined.
-                    self.state.output_mode = if self
-                        .state
-                        .plugin_output
-                        .as_ref()
-                        .is_some_and(|o| !o.columns.is_empty())
-                    {
-                        OutputMode::Table
-                    } else {
-                        OutputMode::List
-                    };
                 }
             },
         }
@@ -772,18 +826,38 @@ impl App {
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
         self.state.viewing_plugin_index = Some(plugin_index);
+        let cache_enabled = self
+            .state
+            .plugins
+            .get(plugin_index)
+            .is_none_or(|p| p.cache);
         match self.state.result_cache.get(&plugin_index).cloned() {
-            Some(CachedResult::Ready(output)) => {
+            Some(CachedResult::Ready(output)) if cache_enabled => {
+                // Stale-while-revalidate: show cached output immediately, refresh in background.
+                let has_columns = !output.columns.is_empty();
+                self.state.plugin_output = Some(output.clone());
+                self.state.plugin_error = None;
+                self.state.is_loading = false;
+                self.state.output_selected = 0;
+                self.state.output_mode = if has_columns {
+                    OutputMode::Table
+                } else {
+                    OutputMode::List
+                };
+                self.state.mode = Mode::ViewOutput;
+                self.state
+                    .result_cache
+                    .insert(plugin_index, CachedResult::Revalidating(output));
+                self.engine.execute(plugin_index);
+            }
+            Some(CachedResult::Revalidating(output)) => {
+                // Already revalidating — show stale data, don't trigger another execution.
+                let has_columns = !output.columns.is_empty();
                 self.state.plugin_output = Some(output);
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
                 self.state.output_selected = 0;
-                self.state.output_mode = if self
-                    .state
-                    .plugin_output
-                    .as_ref()
-                    .is_some_and(|o| !o.columns.is_empty())
-                {
+                self.state.output_mode = if has_columns {
                     OutputMode::Table
                 } else {
                     OutputMode::List
@@ -802,7 +876,8 @@ impl App {
                 self.state.is_loading = false;
                 self.state.mode = Mode::ViewOutput;
             }
-            None => {
+            // No cache, or Ready with cache disabled → execute fresh.
+            _ => {
                 self.state.is_loading = true;
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
