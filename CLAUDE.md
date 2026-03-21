@@ -82,6 +82,7 @@ Core dependencies are locked in `docs/ARCHITECTURE.md` under Technology Stack. D
 - **Phase 5 (Embedded Lua):** `LuaPlugin` backend via mlua (Lua 5.4), sandboxed VM, `lark.*` host API (`env`, `log`, `exec`, `json`, `http`), `PluginKind` detection, `reqwest` for async HTTP
 - **Phase 7 (Enhanced Output):** ANSI rendering (`ansi-to-tui`), shell action execution with Y/N confirmation, table output (`columns` + `metadata` on items), streaming output (newline-delimited JSON, engine-level dispatch), Nerd Font icon system (`icon_nerd` field, `icon_set` config toggle), standard plugin library (7 Lua + 2 shell plugins)
 - **Phase 6 (Distribution & Community):** `--help`/`-h` flag, `lark init-plugin <name>` scaffolder (Lua + `--shell`), README polish, `icon_set` in default config template
+- **Phase 8 (Unified Search):** Prefetch cache (`ExecutionSource`, `CachedResult`, `execute_all()`), `Mode::Unified` replaces Browse/Search, `UnifiedRow` grouped sections + items, nucleo item-level fuzzy filter, action feedback flash messages, `max_items_per_section` config, `prefetch: bool` manifest field
 
 ## Keybindings (defaults)
 
@@ -141,6 +142,30 @@ printf ']}'
 ```
 
 Any plugin that interpolates user-facing data (file paths, process names, git output, hostnames) **must** use `jq`.
+
+## Claude Code Workflow
+
+### Branch completion
+Always merge feature branches back to `main` locally. Never push unless explicitly asked.
+
+Create **one commit per sub-phase or feature** as work is completed (e.g., one commit for 9A, one for 9B, etc.) — not one giant commit at the end. Each commit should be self-contained and pass tests.
+
+### Shell commands — one at a time
+Run one command per Bash tool call unless you genuinely need to pipe output between two commands. Do not chain unrelated commands with `&&` or `;`.
+
+**Wrong** — unnecessary chaining:
+```bash
+cd /some/dir && git status
+cd /some/dir && git log
+```
+
+**Right** — use `-C` flag for git, separate calls for everything else:
+```bash
+git -C /some/dir status
+git -C /some/dir log
+```
+
+This keeps the allowed-command list manageable and makes each permission decision clear.
 
 ## OPENAI_API_KEY
 

@@ -29,22 +29,23 @@ When modifying any contract, verify all producers and consumers still work. Run 
 
 ## Commit Practices
 
-- Commit frequently with clear, descriptive messages
-- One logical change per commit
-- Run `cargo clippy -- -D warnings` and `cargo fmt -- --check` before committing
-- All tests must pass before committing
+- **One commit per sub-phase or feature** — commit as each piece of work is completed, not one giant commit at the end
+- Each commit must be self-contained and pass `cargo test && cargo clippy -- -D warnings && cargo fmt -- --check`
+- Clear, descriptive commit messages; reference the phase/sub-phase (e.g., "Phase 9A: fix Esc in ViewOutput")
+
+## Branch Workflow
+
+- Always implement on a feature branch (use git worktrees for isolation)
+- Merge back to `main` locally when complete — never push unless explicitly asked
+- One commit per sub-phase before merging; do not squash sub-phases into one commit
 
 ## Current Status
 
-Phases 0–7 complete (including 4.5 and 6). Standard plugin library shipped.
+Phases 0–9 complete (including 4.5, 6, 7, 8). Standard plugin library shipped.
 
-- Phase 6 added: `--help`/`-h` flag, `lark init-plugin` scaffolder, README polish, `icon_set` in default config
-- Phase 7 added: ANSI rendering, shell action confirmation, table output, streaming output, Nerd Font icon system, standard plugin library
-- Phase 5 added: `LuaPlugin` backend (mlua, Lua 5.4), `PluginKind` enum in registry, `lark.*` host API, `reqwest` for async HTTP
-- Phase 4.5 added: Vim-style Normal/Insert/Command modes, `h`/`l` navigation
-
-Next steps:
-- Phase 8: Platform (themes, command history, mouse support)
+- Phase 9 added: global item ranking, match highlighting, RunPlugin rows, Ctrl+D/U scroll in unified mode, vestigial state cleanup
+- Phase 8 added: prefetch cache, unified launcher mode, nucleo item-level fuzzy filter, flash messages, `max_items_per_section`
+- Phase 6/7 added: `--help`, scaffolder, ANSI rendering, shell confirmation, table output, streaming, Nerd Font icons
 
 ## Release Artifacts
 
@@ -56,12 +57,17 @@ Next steps:
 
 | Field | Type | Purpose |
 |---|---|---|
-| `mode` | `Mode` | Browse / Search / ViewOutput |
-| `output_mode` | `OutputMode` | List / RawText (toggled with `t`) |
-| `is_loading` | `bool` | Plugin executing |
-| `loading_started` | `Option<Instant>` | For elapsed time display |
+| `mode` | `Mode` | Unified / ViewOutput |
+| `vim_mode` | `VimMode` | Normal / Insert / Command |
+| `unified_rows` | `Vec<UnifiedRow>` | Flat row list (Section, Item, More, RunPlugin) |
+| `unified_selected` | `usize` | Index into `unified_rows` of highlighted row |
+| `result_cache` | `HashMap<usize, CachedResult>` | Prefetch results keyed by plugin index |
+| `query` | `String` | Active search query |
+| `output_mode` | `OutputMode` | List / RawText / Table (toggled with `t`) |
+| `is_loading` | `bool` | Plugin executing (UserSelected) |
 | `plugin_output` | `Option<PluginOutput>` | Last execution result |
 | `warnings` | `Vec<String>` | Status bar warnings (cleared on keypress) |
+| `status_message` | `Option<(String, Instant)>` | Flash message (expires after 2s) |
 
 ## Plugin JSON Safety
 
