@@ -49,57 +49,31 @@ pub enum Mode {
     ViewOutput,
 }
 
-/// Status of a plugin section in the unified list.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SectionStatus {
-    /// Plugin is still executing in the background.
-    Loading,
-    /// Plugin completed; shows item count.
-    Ready(usize),
-    /// Plugin failed.
-    Error,
-    /// Plugin completed with no results (or no matches for current query).
-    Empty,
-}
-
-/// A row in the unified result list.
+/// A row in the unified launcher list.
 #[derive(Debug, Clone)]
 pub enum UnifiedRow {
-    /// A plugin section header.
-    Section {
-        #[allow(dead_code)]
+    /// Non-selectable group header for multi-command plugins.
+    GroupHeader { name: String, icon: String },
+    /// A selectable command row.
+    Command {
+        /// Index into `AppState::plugins`.
         plugin_index: usize,
         name: String,
+        description: String,
         icon: String,
-        status: SectionStatus,
-    },
-    /// A result item from a plugin.
-    Item {
-        plugin_index: usize,
-        item_index: usize,
-        item: crate::plugin::traits::OutputItem,
-        /// Plugin name badge shown during global search (non-empty query).
-        plugin_name: Option<String>,
-        /// Nucleo match indices into `item.label` for character highlighting.
+        /// Quick-launch key badge (e.g., `"gb"`).
+        quickkey: Option<String>,
+        /// Parent group name shown as a dimmed badge during search (non-empty query).
+        group_name: Option<String>,
+        /// Nucleo match positions into `name` for character highlighting.
         match_positions: Vec<usize>,
-    },
-    /// "N more..." row — Enter opens `ViewOutput` for this plugin.
-    More { plugin_index: usize, count: usize },
-    /// On-demand plugin (prefetch = false) — Enter executes it immediately.
-    RunPlugin {
-        plugin_index: usize,
-        name: String,
-        icon: String,
     },
 }
 
 impl UnifiedRow {
     /// Returns true if this row can be selected by the user.
     pub fn is_selectable(&self) -> bool {
-        matches!(
-            self,
-            Self::Item { .. } | Self::More { .. } | Self::RunPlugin { .. }
-        )
+        matches!(self, Self::Command { .. })
     }
 }
 
@@ -168,20 +142,19 @@ pub struct AppState {
     pub command_input: String,
     /// Pending shell action awaiting user confirmation (Y/N).
     pub pending_confirmation: Option<PendingConfirmation>,
-    /// Cache of prefetch results keyed by plugin index.
+    /// Cache of execution results keyed by plugin index.
     pub result_cache: std::collections::HashMap<usize, CachedResult>,
-    /// Count of plugins that have finished prefetching (Ready or Error).
-    pub prefetch_ready: usize,
-    /// Total number of plugins being prefetched.
-    pub prefetch_total: usize,
-    /// Flat list of rows for the unified view (section headers + items).
+    /// Flat list of rows for the unified launcher view.
     pub unified_rows: Vec<UnifiedRow>,
     /// Index into `unified_rows` for the currently highlighted selectable row.
     pub unified_selected: usize,
-    /// Maximum items to show per section (0 = unlimited). From config.
+    /// Maximum items to show per section in the output pane (0 = unlimited). From config.
+    #[allow(dead_code)]
     pub max_items_per_section: usize,
     /// Flash message shown in status bar after an action completes.
     pub status_message: Option<(String, std::time::Instant)>,
+    /// Plugin index currently displayed in the [`Mode::ViewOutput`] pane, if any.
+    pub viewing_plugin_index: Option<usize>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -252,25 +225,20 @@ impl App {
         };
         app.rebuild_unified_list();
 
-        // Apply default_plugin pre-selection: find the first item or run-plugin row
-        // associated with the named plugin and move unified_selected to it.
+        // Apply default_plugin pre-selection: find the first Command row with the named plugin.
         if let Some(ref name) = config.general.default_plugin {
-            let target_idx = app.state.plugins.iter().position(|p| &p.name == name);
-            if let Some(plugin_idx) = target_idx {
-                let row_pos = app
-                    .state
-                    .unified_rows
-                    .iter()
-                    .enumerate()
-                    .find(|(_, r)| match r {
-                        UnifiedRow::Item { plugin_index, .. }
-                        | UnifiedRow::RunPlugin { plugin_index, .. } => *plugin_index == plugin_idx,
-                        _ => false,
-                    })
-                    .map(|(i, _)| i);
-                if let Some(pos) = row_pos {
-                    app.state.unified_selected = pos;
-                }
+            let row_pos = app
+                .state
+                .unified_rows
+                .iter()
+                .enumerate()
+                .find(|(_, r)| {
+                    matches!(r, UnifiedRow::Command { plugin_index, .. }
+                        if app.state.plugins[*plugin_index].name == *name)
+                })
+                .map(|(i, _)| i);
+            if let Some(pos) = row_pos {
+                app.state.unified_selected = pos;
             } else {
                 tracing::warn!(
                     plugin_name = %name,
@@ -278,9 +246,6 @@ impl App {
                 );
             }
         }
-
-        // prefetch_total is set here; execute_all() is called from run() once async is available.
-        app.state.prefetch_total = app.state.plugins.len();
 
         app
     }
@@ -389,7 +354,7 @@ impl App {
                 source,
             } => match source {
                 ExecutionSource::Prefetch => {
-                    // Accumulate partials into cache.
+                    // Accumulate partials into cache (for commands with prefetch = true).
                     let entry = self
                         .state
                         .result_cache
@@ -413,8 +378,6 @@ impl App {
                         new_output.items.extend(items);
                         *entry = CachedResult::Ready(new_output);
                     }
-                    // Show streaming items incrementally.
-                    self.rebuild_unified_list();
                 }
                 ExecutionSource::UserSelected => {
                     // Existing streaming behavior.
@@ -437,28 +400,23 @@ impl App {
                 result,
                 source,
             } => match source {
-                ExecutionSource::Prefetch => {
-                    self.state.prefetch_ready += 1;
-                    match result {
-                        Ok(output) => {
-                            let entry = self
-                                .state
-                                .result_cache
-                                .entry(plugin_index)
-                                .or_insert(CachedResult::Ready(output.clone()));
-                            if matches!(entry, CachedResult::Loading(_)) {
-                                *entry = CachedResult::Ready(output);
-                            }
-                        }
-                        Err(e) => {
-                            self.state
-                                .result_cache
-                                .insert(plugin_index, CachedResult::Error(e.to_string()));
+                ExecutionSource::Prefetch => match result {
+                    Ok(output) => {
+                        let entry = self
+                            .state
+                            .result_cache
+                            .entry(plugin_index)
+                            .or_insert(CachedResult::Ready(output.clone()));
+                        if matches!(entry, CachedResult::Loading(_)) {
+                            *entry = CachedResult::Ready(output);
                         }
                     }
-                    // Rebuild unified list to show new results.
-                    self.rebuild_unified_list();
-                }
+                    Err(e) => {
+                        self.state
+                            .result_cache
+                            .insert(plugin_index, CachedResult::Error(e.to_string()));
+                    }
+                },
                 ExecutionSource::UserSelected => {
                     self.state.is_loading = false;
                     self.state.loading_started = None;
@@ -575,40 +533,14 @@ impl App {
                         }
                     }
                 } else {
-                    // In Unified mode, act on the selected unified row.
+                    // In Unified mode, act on the selected command row.
                     let row = self
                         .state
                         .unified_rows
                         .get(self.state.unified_selected)
                         .cloned();
-                    match row {
-                        Some(UnifiedRow::Item {
-                            plugin_index,
-                            item_index,
-                            ..
-                        }) => {
-                            if let Some(CachedResult::Ready(output)) =
-                                self.state.result_cache.get(&plugin_index).cloned()
-                            {
-                                if let Some(item) = output.items.get(item_index) {
-                                    if let Some(action) = item.actions.first().cloned() {
-                                        self.execute_item_action(&action);
-                                    } else if let Some(ref url) = item.url.clone() {
-                                        open_url(url);
-                                    } else {
-                                        // No action — open ViewOutput for this plugin.
-                                        self.open_plugin_in_view_output(plugin_index);
-                                    }
-                                }
-                            }
-                        }
-                        Some(
-                            UnifiedRow::More { plugin_index, .. }
-                            | UnifiedRow::RunPlugin { plugin_index, .. },
-                        ) => {
-                            self.open_plugin_in_view_output(plugin_index);
-                        }
-                        _ => {}
+                    if let Some(UnifiedRow::Command { plugin_index, .. }) = row {
+                        self.open_plugin_in_view_output(plugin_index);
                     }
                 }
             }
@@ -619,6 +551,7 @@ impl App {
                 self.state.plugin_error = None;
                 self.state.output_selected = 0;
                 self.state.output_mode = OutputMode::List;
+                self.state.viewing_plugin_index = None;
             }
 
             Action::Execute => {
@@ -786,8 +719,7 @@ impl App {
                     self.state.is_loading = false;
                     self.state.loading_started = None;
                     self.state.result_cache.clear();
-                    self.state.prefetch_ready = 0;
-                    self.state.prefetch_total = self.state.plugins.len();
+                    self.state.viewing_plugin_index = None;
                     self.engine.execute_all();
                     self.rebuild_unified_list();
                 }
@@ -839,6 +771,7 @@ impl App {
 
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
+        self.state.viewing_plugin_index = Some(plugin_index);
         match self.state.result_cache.get(&plugin_index).cloned() {
             Some(CachedResult::Ready(output)) => {
                 self.state.plugin_output = Some(output);
@@ -879,128 +812,88 @@ impl App {
         }
     }
 
-    /// Rebuild the unified row list from cached plugin results, applying the current query filter.
+    /// Rebuild the unified launcher list from plugin metadata.
     ///
-    /// - **Empty query:** section-grouped display with favorites first then alphabetical.
-    ///   Items carry `plugin_name: None` and `match_positions: vec![]`.
-    /// - **Non-empty query:** globally-ranked flat list — all ready items scored by nucleo,
-    ///   sorted descending. Items carry `plugin_name` badge and `match_positions` for
-    ///   character-level highlight rendering.
+    /// - **Empty query:** commands grouped by `plugin_group`, with favorites first.
+    ///   Groups with >1 commands show a `GroupHeader` row before their `Command` rows.
+    /// - **Non-empty query:** globally-ranked flat `Command` list scored by nucleo on
+    ///   `name + description`. Each `Command` carries a `group_name` badge and
+    ///   `match_positions` for character-level highlighting.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn rebuild_unified_list(&mut self) {
         use nucleo_matcher::pattern::AtomKind;
         let query = self.state.query.clone();
-        let max_per_section = self.state.max_items_per_section;
 
-        // Build ordered plugin indices: favorites first (config order), then rest alphabetically.
+        let n = self.state.plugins.len();
+
+        // Compute the "group key" for each plugin: plugin_group if set, else the plugin name.
+        // This key determines how plugins are bucketed into display groups.
+        let group_keys: Vec<String> = (0..n)
+            .map(|i| {
+                self.state.plugins[i]
+                    .plugin_group
+                    .as_deref()
+                    .unwrap_or(&self.state.plugins[i].name)
+                    .to_string()
+            })
+            .collect();
+
+        // Build ordered plugin indices: favorites first (config order), then alphabetically.
         let favorites = self.state.favorites.clone();
-        let mut ordered: Vec<usize> = favorites
-            .iter()
-            .filter_map(|name| self.state.plugins.iter().position(|p| &p.name == name))
-            .collect();
-        let fav_set: std::collections::HashSet<usize> = ordered.iter().copied().collect();
-        let mut rest: Vec<usize> = (0..self.state.plugins.len())
-            .filter(|i| !fav_set.contains(i))
-            .collect();
-        rest.sort_unstable_by(|&a, &b| self.state.plugins[a].name.cmp(&self.state.plugins[b].name));
+        let mut ordered: Vec<usize> = Vec::new();
+        let mut fav_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for fav_name in &favorites {
+            for (i, key) in group_keys.iter().enumerate() {
+                if key == fav_name && !fav_set.contains(&i) {
+                    ordered.push(i);
+                    fav_set.insert(i);
+                }
+            }
+        }
+        let mut rest: Vec<usize> = (0..n).filter(|i| !fav_set.contains(i)).collect();
+        rest.sort_unstable_by(|&a, &b| group_keys[a].cmp(&group_keys[b]));
         ordered.extend(rest);
 
         let rows = if query.is_empty() {
-            // ── Section-grouped path (empty query) ───────────────────────────────
-            let mut section_rows: Vec<UnifiedRow> = Vec::new();
+            // ── Grouped display (empty query) ─────────────────────────────────────
+            // Walk `ordered`, collecting consecutive plugins with the same group key
+            // into display groups. Emit a GroupHeader only for groups with >1 command.
+            let mut result: Vec<UnifiedRow> = Vec::new();
+            let mut i = 0;
+            while i < ordered.len() {
+                let this_key = group_keys[ordered[i]].clone();
+                // Find the end of this group (first index with a different key).
+                let group_end = ordered[i..]
+                    .iter()
+                    .position(|&j| group_keys[j] != this_key)
+                    .map_or(ordered.len(), |pos| i + pos);
+                let group_indices = ordered[i..group_end].to_vec();
 
-            for &plugin_index in &ordered {
-                let plugin_name = self.state.plugins[plugin_index].name.clone();
-                let plugin_icon = self.state.plugins[plugin_index].icon.clone();
-                let plugin_prefetch = self.state.plugins[plugin_index].prefetch;
-
-                let cached = self.state.result_cache.get(&plugin_index).cloned();
-                match cached {
-                    None => {
-                        if plugin_prefetch {
-                            // prefetch=true but not yet started — show loading.
-                            section_rows.push(UnifiedRow::Section {
-                                plugin_index,
-                                name: plugin_name,
-                                icon: plugin_icon,
-                                status: SectionStatus::Loading,
-                            });
-                        } else {
-                            // prefetch=false — show on-demand run row.
-                            section_rows.push(UnifiedRow::RunPlugin {
-                                plugin_index,
-                                name: plugin_name,
-                                icon: plugin_icon,
-                            });
-                        }
-                    }
-                    Some(CachedResult::Loading(_)) => {
-                        section_rows.push(UnifiedRow::Section {
-                            plugin_index,
-                            name: plugin_name,
-                            icon: plugin_icon,
-                            status: SectionStatus::Loading,
-                        });
-                    }
-                    Some(CachedResult::Error(_)) => {
-                        section_rows.push(UnifiedRow::Section {
-                            plugin_index,
-                            name: plugin_name,
-                            icon: plugin_icon,
-                            status: SectionStatus::Error,
-                        });
-                    }
-                    Some(CachedResult::Ready(output)) => {
-                        let total = output.items.len();
-                        if total == 0 {
-                            section_rows.push(UnifiedRow::Section {
-                                plugin_index,
-                                name: plugin_name,
-                                icon: plugin_icon,
-                                status: SectionStatus::Empty,
-                            });
-                            continue;
-                        }
-
-                        let display_count = if max_per_section > 0 {
-                            total.min(max_per_section)
-                        } else {
-                            total
-                        };
-                        let overflow = total.saturating_sub(display_count);
-
-                        section_rows.push(UnifiedRow::Section {
-                            plugin_index,
-                            name: plugin_name,
-                            icon: plugin_icon,
-                            status: SectionStatus::Ready(total),
-                        });
-
-                        for (item_index, item) in
-                            output.items.iter().cloned().enumerate().take(display_count)
-                        {
-                            section_rows.push(UnifiedRow::Item {
-                                plugin_index,
-                                item_index,
-                                item,
-                                plugin_name: None,
-                                match_positions: vec![],
-                            });
-                        }
-
-                        if overflow > 0 {
-                            section_rows.push(UnifiedRow::More {
-                                plugin_index,
-                                count: overflow,
-                            });
-                        }
-                    }
+                if group_indices.len() > 1 {
+                    let icon = self.state.plugins[group_indices[0]].icon.clone();
+                    result.push(UnifiedRow::GroupHeader {
+                        name: this_key,
+                        icon,
+                    });
                 }
+                for pidx in group_indices {
+                    let meta = &self.state.plugins[pidx];
+                    result.push(UnifiedRow::Command {
+                        plugin_index: pidx,
+                        name: meta.name.clone(),
+                        description: meta.description.clone(),
+                        icon: meta.icon.clone(),
+                        quickkey: meta.quickkey.clone(),
+                        group_name: None,
+                        match_positions: vec![],
+                    });
+                }
+                i = group_end;
             }
-            section_rows
+            result
         } else {
-            // ── Global ranking path ───────────────────────────────────────────────
-            // Score every item from every ready plugin; sort descending; emit flat.
+            // ── Global search (non-empty query) ───────────────────────────────────
+            // Score each command's "name description" haystack; sort descending; emit flat.
             let pattern = Pattern::new(
                 &query,
                 CaseMatching::Ignore,
@@ -1009,52 +902,44 @@ impl App {
             );
             let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
             let mut indices_buf: Vec<u32> = Vec::new();
+            let mut scored: Vec<(usize, u32, Vec<usize>)> = Vec::new();
 
-            let mut scored: Vec<(
-                usize,
-                usize,
-                crate::plugin::traits::OutputItem,
-                u32,
-                Vec<usize>,
-            )> = Vec::new();
-
-            for &plugin_index in &ordered {
-                let cached = self.state.result_cache.get(&plugin_index).cloned();
-                if let Some(CachedResult::Ready(output)) = cached {
-                    for (item_index, item) in output.items.iter().cloned().enumerate() {
-                        let search_text = match &item.detail {
-                            Some(d) => format!("{} {}", item.label, d),
-                            None => item.label.clone(),
-                        };
-                        let mut chars: Vec<char> = search_text.chars().collect();
-                        let haystack = Utf32Str::new(&search_text, &mut chars);
-                        indices_buf.clear();
-                        if let Some(score) =
-                            pattern.indices(haystack, &mut matcher, &mut indices_buf)
-                        {
-                            let label_len = item.label.chars().count();
-                            let match_positions: Vec<usize> = indices_buf
-                                .iter()
-                                .map(|&i| i as usize)
-                                .filter(|&i| i < label_len)
-                                .collect();
-                            scored.push((plugin_index, item_index, item, score, match_positions));
-                        }
-                    }
+            for &pidx in &ordered {
+                let meta = &self.state.plugins[pidx];
+                let search_text = format!("{} {}", meta.name, meta.description);
+                let mut chars: Vec<char> = search_text.chars().collect();
+                let haystack = Utf32Str::new(&search_text, &mut chars);
+                indices_buf.clear();
+                if let Some(score) = pattern.indices(haystack, &mut matcher, &mut indices_buf) {
+                    let name_len = meta.name.chars().count();
+                    let match_positions: Vec<usize> = indices_buf
+                        .iter()
+                        .map(|&i| i as usize)
+                        .filter(|&i| i < name_len)
+                        .collect();
+                    scored.push((pidx, score, match_positions));
                 }
             }
-
-            scored.sort_unstable_by(|a, b| b.3.cmp(&a.3));
+            scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
             scored
                 .into_iter()
-                .map(|(plugin_index, item_index, item, _, match_positions)| {
-                    let plugin_name = Some(self.state.plugins[plugin_index].name.clone());
-                    UnifiedRow::Item {
-                        plugin_index,
-                        item_index,
-                        item,
-                        plugin_name,
+                .map(|(pidx, _, match_positions)| {
+                    let meta = &self.state.plugins[pidx];
+                    // group_name badge: show the group key so the user knows which plugin this is.
+                    let group_name = Some(
+                        meta.plugin_group
+                            .as_deref()
+                            .unwrap_or(&meta.name)
+                            .to_string(),
+                    );
+                    UnifiedRow::Command {
+                        plugin_index: pidx,
+                        name: meta.name.clone(),
+                        description: meta.description.clone(),
+                        icon: meta.icon.clone(),
+                        quickkey: meta.quickkey.clone(),
+                        group_name,
                         match_positions,
                     }
                 })
@@ -1233,110 +1118,74 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
 mod tests {
     use super::*;
 
-    /// Populate `result_cache` for a named plugin with the given items and rebuild the list.
-    fn populate_cache(
-        app: &mut App,
-        plugin_name: &str,
-        items: Vec<crate::plugin::traits::OutputItem>,
-    ) {
-        if let Some(idx) = app.state.plugins.iter().position(|p| p.name == plugin_name) {
-            app.state.result_cache.insert(
-                idx,
-                CachedResult::Ready(PluginOutput {
-                    title: plugin_name.to_string(),
-                    items,
-                    ..Default::default()
-                }),
-            );
-        }
-        app.rebuild_unified_list();
-    }
-
-    /// Extract section-header names in order from `unified_rows`.
-    fn section_names(app: &App) -> Vec<&str> {
+    /// Extract command names in order from `unified_rows` (Command rows only).
+    fn command_names(app: &App) -> Vec<&str> {
         app.state
             .unified_rows
             .iter()
             .filter_map(|r| match r {
-                UnifiedRow::Section { name, .. } => Some(name.as_str()),
-                _ => None,
+                UnifiedRow::Command { name, .. } => Some(name.as_str()),
+                UnifiedRow::GroupHeader { .. } => None,
             })
             .collect()
     }
 
-    /// Extract all Item labels visible in `unified_rows`.
-    fn item_labels(app: &App) -> Vec<&str> {
+    /// Returns true if any `GroupHeader` rows exist in `unified_rows`.
+    fn has_group_headers(app: &App) -> bool {
         app.state
             .unified_rows
             .iter()
-            .filter_map(|r| match r {
-                UnifiedRow::Item { item, .. } => Some(item.label.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn make_item(label: &str) -> crate::plugin::traits::OutputItem {
-        crate::plugin::traits::OutputItem {
-            label: label.to_string(),
-            ..Default::default()
-        }
+            .any(|r| matches!(r, UnifiedRow::GroupHeader { .. }))
     }
 
     #[test]
-    fn empty_query_shows_all_plugins_as_sections() {
+    fn empty_query_shows_all_commands() {
         let app = App::with_stubs();
-        // All 7 stubs should appear as Section rows (Loading, since cache is empty).
-        let sections = section_names(&app);
-        assert_eq!(sections.len(), app.state.plugins.len());
+        // All stubs are standalone (no plugin_group) → one Command row each, no GroupHeaders.
+        let names = command_names(&app);
+        assert_eq!(names.len(), app.state.plugins.len());
+        assert!(!has_group_headers(&app));
     }
 
     #[test]
     fn favorites_sort_to_top_with_empty_query() {
-        // "Weather" is alphabetically last among stubs, but favorited → should be first section.
+        // "Weather" is alphabetically last among stubs, but favorited → should be first command.
         let app = App::with_stubs_and_favorites(vec!["Weather".to_string()]);
-        let sections = section_names(&app);
-        assert!(!sections.is_empty());
-        assert_eq!(sections[0], "Weather");
+        let names = command_names(&app);
+        assert!(!names.is_empty());
+        assert_eq!(names[0], "Weather");
     }
 
     #[test]
     fn favorites_config_order_preserved() {
-        // Multiple favorites should appear in section order: Weather, then GitHub PRs.
+        // Multiple favorites should appear in command order: Weather, then GitHub PRs.
         let app =
             App::with_stubs_and_favorites(vec!["Weather".to_string(), "GitHub PRs".to_string()]);
-        let sections = section_names(&app);
-        assert_eq!(sections[0], "Weather");
-        assert_eq!(sections[1], "GitHub PRs");
+        let names = command_names(&app);
+        assert_eq!(names[0], "Weather");
+        assert_eq!(names[1], "GitHub PRs");
     }
 
     #[test]
-    fn non_favorite_sections_sorted_alphabetically() {
-        // With no favorites, sections should appear alphabetically.
+    fn non_favorite_commands_sorted_alphabetically() {
+        // With no favorites, commands should appear alphabetically.
         let app = App::with_stubs();
-        let names = section_names(&app);
+        let names = command_names(&app);
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted);
     }
 
     #[test]
-    fn default_plugin_preselects_first_item_when_cache_ready() {
-        // Populate Weather's cache so it has an item, then check unified_selected points to it.
-        let mut app = App::with_stubs_and_default("Weather");
-        populate_cache(&mut app, "Weather", vec![make_item("Sunny 72°F")]);
-        // Find the row index of the Weather item.
-        let weather_item_row = app
-            .state
-            .unified_rows
-            .iter()
-            .enumerate()
-            .find(|(_, r)| matches!(r, UnifiedRow::Item { item, .. } if item.label == "Sunny 72°F"))
-            .map(|(i, _)| i);
-        assert!(weather_item_row.is_some(), "Weather item row not found");
-        // Verify that unified_selected is a valid selectable row index for Weather.
+    fn default_plugin_preselects_command_row() {
+        // The selected row should be the Weather command (no cache needed).
+        let app = App::with_stubs_and_default("Weather");
         let sel = app.state.unified_selected;
         assert!(app.state.unified_rows[sel].is_selectable());
+        assert!(
+            matches!(&app.state.unified_rows[sel], UnifiedRow::Command { name, .. } if name == "Weather"),
+            "expected Weather command at row {sel}"
+        );
     }
 
     #[test]
@@ -1347,72 +1196,62 @@ mod tests {
     }
 
     #[test]
-    fn search_with_items_in_cache_shows_matching_items() {
+    fn search_matches_command_names() {
         let mut app = App::with_stubs();
-        populate_cache(
-            &mut app,
-            "GitHub PRs",
-            vec![make_item("fix/ci-pipeline"), make_item("feat/new-auth")],
-        );
-        // Trigger search for "ci"
-        app.handle_action(Action::Search('c'));
-        app.handle_action(Action::Search('i'));
-        let labels = item_labels(&app);
+        // "sys" should fuzzy-match "System Info".
+        app.handle_action(Action::Search('s'));
+        app.handle_action(Action::Search('y'));
+        app.handle_action(Action::Search('s'));
+        let names = command_names(&app);
         assert!(
-            labels.contains(&"fix/ci-pipeline"),
-            "expected 'fix/ci-pipeline' in {labels:?}"
+            names.contains(&"System Info"),
+            "expected 'System Info' in {names:?}"
         );
     }
 
     #[test]
     fn search_no_match_returns_empty_rows() {
         let mut app = App::with_stubs();
-        populate_cache(&mut app, "GitHub PRs", vec![make_item("fix/ci-pipeline")]);
         app.handle_action(Action::Search('z'));
         app.handle_action(Action::Search('z'));
         app.handle_action(Action::Search('z'));
-        assert!(item_labels(&app).is_empty());
+        assert!(command_names(&app).is_empty());
     }
 
     #[test]
-    fn search_results_carry_plugin_name_badge() {
+    fn search_results_carry_group_name_badge() {
         let mut app = App::with_stubs();
-        populate_cache(&mut app, "System Info", vec![make_item("CPU 45%")]);
-        app.handle_action(Action::Search('c'));
-        app.handle_action(Action::Search('p'));
-        app.handle_action(Action::Search('u'));
+        // "sys" matches "System Info"; group_name badge should be "System Info".
+        app.handle_action(Action::Search('s'));
+        app.handle_action(Action::Search('y'));
+        app.handle_action(Action::Search('s'));
         let has_badge = app.state.unified_rows.iter().any(|r| {
             matches!(r,
-                UnifiedRow::Item { plugin_name: Some(n), .. } if n == "System Info"
+                UnifiedRow::Command { name, group_name: Some(g), .. }
+                if name == "System Info" && g == "System Info"
             )
         });
-        assert!(has_badge, "expected plugin_name badge on search result");
+        assert!(
+            has_badge,
+            "expected group_name badge on System Info search result"
+        );
     }
 
     #[test]
-    fn search_globally_ranks_across_plugins() {
-        // Items from two different plugins; ensure both appear as flat Items (no Section headers).
+    fn search_ranks_commands_across_plugins() {
+        // "git" should match "GitHub PRs"; no group headers during search.
         let mut app = App::with_stubs();
-        populate_cache(&mut app, "GitHub PRs", vec![make_item("main branch")]);
-        populate_cache(&mut app, "Shell Snippets", vec![make_item("git status")]);
         app.handle_action(Action::Search('g'));
         app.handle_action(Action::Search('i'));
         app.handle_action(Action::Search('t'));
-        // During search, no Section headers should appear.
-        let has_sections = app
-            .state
-            .unified_rows
-            .iter()
-            .any(|r| matches!(r, UnifiedRow::Section { .. }));
         assert!(
-            !has_sections,
-            "section headers should not appear during global search"
+            !has_group_headers(&app),
+            "no group headers should appear during search"
         );
-        // Both matching items should be present.
-        let labels = item_labels(&app);
+        let names = command_names(&app);
         assert!(
-            labels.contains(&"main branch") || labels.contains(&"git status"),
-            "expected at least one matching item in {labels:?}"
+            !names.is_empty(),
+            "expected at least one match for 'git' in {names:?}"
         );
     }
 
