@@ -43,10 +43,16 @@ impl Plugin for ScriptPlugin {
             )));
         }
 
+        let store_path = crate::plugin::store::store_path_for(
+            &self.metadata.name,
+            self.metadata.plugin_group.as_deref(),
+        );
+
         let result = tokio::time::timeout(
             self.metadata.timeout,
             tokio::process::Command::new(&self.entry_path)
                 .current_dir(&self.plugin_dir)
+                .env("LARK_STORE_PATH", &store_path)
                 .output(),
         )
         .await

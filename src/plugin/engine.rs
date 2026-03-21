@@ -156,6 +156,10 @@ impl PluginEngine {
             std::path::Path::to_path_buf,
         );
         let timeout = meta.timeout;
+        let store_path = crate::plugin::store::store_path_for(
+            &meta.name,
+            meta.plugin_group.as_deref(),
+        );
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
@@ -172,6 +176,7 @@ impl PluginEngine {
 
                 let mut child = match Command::new(&entry_path)
                     .current_dir(&plugin_dir)
+                    .env("LARK_STORE_PATH", &store_path)
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::null())
                     .spawn()
