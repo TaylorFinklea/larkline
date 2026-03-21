@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::action::Action;
 use crate::config::{Config, KeybindingsConfig, ResolvedKeybindings, Theme};
 use crate::input;
-use crate::plugin::engine::{EngineEvent, PluginEngine};
+use crate::plugin::engine::{EngineEvent, ExecutionSource, PluginEngine};
 use crate::plugin::registry;
 use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
 use crate::plugin::{Plugin, PluginMetadata};
@@ -42,13 +42,63 @@ pub enum OutputMode {
 /// The current UI mode — describes *which pane is active*.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum Mode {
-    /// Browsing the plugin list.
+    /// Unified launcher view — plugin sections + items, filterable by query.
     #[default]
-    Browse,
-    /// Typing a fuzzy search query to filter the plugin list.
-    Search,
-    /// Viewing a plugin's output in the detail pane.
+    Unified,
+    /// Viewing a plugin's output in the detail pane (table/raw-text fallback).
     ViewOutput,
+}
+
+/// Status of a plugin section in the unified list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionStatus {
+    /// Plugin is still executing in the background.
+    Loading,
+    /// Plugin completed; shows item count.
+    Ready(usize),
+    /// Plugin failed.
+    Error,
+    /// Plugin completed with no results (or no matches for current query).
+    Empty,
+}
+
+/// A row in the unified result list.
+#[derive(Debug, Clone)]
+pub enum UnifiedRow {
+    /// A plugin section header.
+    Section {
+        #[allow(dead_code)]
+        plugin_index: usize,
+        name: String,
+        icon: String,
+        status: SectionStatus,
+    },
+    /// A result item from a plugin.
+    Item {
+        plugin_index: usize,
+        item_index: usize,
+        item: crate::plugin::traits::OutputItem,
+    },
+    /// "N more..." row — Enter opens `ViewOutput` for this plugin.
+    More { plugin_index: usize, count: usize },
+}
+
+impl UnifiedRow {
+    /// Returns true if this row can be selected by the user.
+    pub fn is_selectable(&self) -> bool {
+        matches!(self, Self::Item { .. } | Self::More { .. })
+    }
+}
+
+/// Cached execution result for a plugin (used by prefetch).
+#[derive(Debug, Clone)]
+pub enum CachedResult {
+    /// Plugin is currently executing in the background.
+    Loading(#[allow(dead_code)] std::time::Instant),
+    /// Plugin completed successfully.
+    Ready(PluginOutput),
+    /// Plugin failed.
+    Error(String),
 }
 
 /// Vim-style input mode — describes *how keys are interpreted*.
@@ -112,6 +162,20 @@ pub struct AppState {
     pub command_input: String,
     /// Pending shell action awaiting user confirmation (Y/N).
     pub pending_confirmation: Option<PendingConfirmation>,
+    /// Cache of prefetch results keyed by plugin index.
+    pub result_cache: std::collections::HashMap<usize, CachedResult>,
+    /// Count of plugins that have finished prefetching (Ready or Error).
+    pub prefetch_ready: usize,
+    /// Total number of plugins being prefetched.
+    pub prefetch_total: usize,
+    /// Flat list of rows for the unified view (section headers + items).
+    pub unified_rows: Vec<UnifiedRow>,
+    /// Index into `unified_rows` for the currently highlighted selectable row.
+    pub unified_selected: usize,
+    /// Maximum items to show per section (0 = unlimited). From config.
+    pub max_items_per_section: usize,
+    /// Flash message shown in status bar after an action completes.
+    pub status_message: Option<(String, std::time::Instant)>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -147,7 +211,8 @@ pub struct App {
 impl App {
     /// Create a new `App` with the given set of plugins and config.
     pub fn new(plugins: Vec<Arc<dyn Plugin>>, config: &Config, warnings: Vec<String>) -> Self {
-        let (tx, rx) = mpsc::channel(4);
+        let plugin_count = plugins.len();
+        let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
         let filtered: Vec<usize> = (0..metadata.len()).collect();
         let engine = PluginEngine::new(plugins, tx);
@@ -166,6 +231,11 @@ impl App {
                 show_icons: config.ui.show_icons,
                 favorites: config.favorites.pinned.clone(),
                 warnings,
+                max_items_per_section: config.ui.max_items_per_section,
+                result_cache: std::collections::HashMap::new(),
+                unified_rows: Vec::new(),
+                unified_selected: 0,
+                status_message: None,
                 ..Default::default()
             },
             theme,
@@ -178,6 +248,7 @@ impl App {
         };
         // Apply favorites ordering and alphabetical sort at startup.
         app.update_filter();
+        app.rebuild_unified_list();
 
         // Apply default_plugin pre-selection.
         if let Some(ref name) = config.general.default_plugin {
@@ -195,6 +266,9 @@ impl App {
                 );
             }
         }
+
+        // prefetch_total is set here; execute_all() is called from run() once async is available.
+        app.state.prefetch_total = app.state.plugins.len();
 
         app
     }
@@ -229,6 +303,9 @@ impl App {
     // No direct .await calls here, but `run` must be async so main can await it.
     #[allow(clippy::unused_async)]
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        // Kick off background prefetch for all eligible plugins.
+        self.engine.execute_all();
+
         while !self.state.should_quit {
             terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
 
@@ -266,60 +343,132 @@ impl App {
     /// Process a single engine event, updating app state.
     ///
     /// Extracted from the run loop so it can be called from tests.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn handle_engine_event(&mut self, event: EngineEvent) {
         match event {
-            EngineEvent::PluginStarted { .. } => {
-                self.state.is_loading = true;
-                self.state.loading_started = Some(std::time::Instant::now());
-                self.state.plugin_output = None;
-                self.state.plugin_error = None;
-            }
-            EngineEvent::PartialOutput { title, items, .. } => {
-                if let Some(ref t) = title {
-                    // First partial: create output and switch to ViewOutput.
-                    self.state.plugin_output = Some(PluginOutput {
-                        title: t.clone(),
-                        items,
-                        ..Default::default()
-                    });
-                    self.state.mode = Mode::ViewOutput;
-                    self.state.output_selected = 0;
-                    self.state.output_mode = OutputMode::List;
-                } else if let Some(ref mut output) = self.state.plugin_output {
-                    // Subsequent partials: extend items.
-                    output.items.extend(items);
+            EngineEvent::PluginStarted {
+                plugin_index,
+                source,
+            } => match source {
+                ExecutionSource::Prefetch => {
+                    self.state.result_cache.insert(
+                        plugin_index,
+                        CachedResult::Loading(std::time::Instant::now()),
+                    );
                 }
-            }
-            EngineEvent::PluginFinished { result, .. } => {
-                self.state.is_loading = false;
-                self.state.loading_started = None;
-                match result {
-                    Ok(output) => {
-                        // Don't overwrite if streaming already populated output.
-                        if self.state.plugin_output.is_none() {
-                            self.state.plugin_output = Some(output);
+                ExecutionSource::UserSelected => {
+                    self.state.is_loading = true;
+                    self.state.loading_started = Some(std::time::Instant::now());
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
+                }
+            },
+            EngineEvent::PartialOutput {
+                plugin_index,
+                title,
+                items,
+                source,
+            } => match source {
+                ExecutionSource::Prefetch => {
+                    // Accumulate partials into cache.
+                    let entry = self
+                        .state
+                        .result_cache
+                        .entry(plugin_index)
+                        .or_insert_with(|| {
+                            CachedResult::Ready(PluginOutput {
+                                title: String::new(),
+                                ..Default::default()
+                            })
+                        });
+                    if let CachedResult::Ready(output) = entry {
+                        if let Some(t) = title {
+                            output.title = t;
+                        }
+                        output.items.extend(items);
+                    } else {
+                        let mut new_output = PluginOutput {
+                            title: title.unwrap_or_default(),
+                            ..Default::default()
+                        };
+                        new_output.items.extend(items);
+                        *entry = CachedResult::Ready(new_output);
+                    }
+                }
+                ExecutionSource::UserSelected => {
+                    // Existing streaming behavior.
+                    if let Some(ref t) = title {
+                        self.state.plugin_output = Some(PluginOutput {
+                            title: t.clone(),
+                            items,
+                            ..Default::default()
+                        });
+                        self.state.mode = Mode::ViewOutput;
+                        self.state.output_selected = 0;
+                        self.state.output_mode = OutputMode::List;
+                    } else if let Some(ref mut output) = self.state.plugin_output {
+                        output.items.extend(items);
+                    }
+                }
+            },
+            EngineEvent::PluginFinished {
+                plugin_index,
+                result,
+                source,
+            } => match source {
+                ExecutionSource::Prefetch => {
+                    self.state.prefetch_ready += 1;
+                    match result {
+                        Ok(output) => {
+                            let entry = self
+                                .state
+                                .result_cache
+                                .entry(plugin_index)
+                                .or_insert(CachedResult::Ready(output.clone()));
+                            if matches!(entry, CachedResult::Loading(_)) {
+                                *entry = CachedResult::Ready(output);
+                            }
+                        }
+                        Err(e) => {
+                            self.state
+                                .result_cache
+                                .insert(plugin_index, CachedResult::Error(e.to_string()));
                         }
                     }
-                    Err(e) => {
-                        self.state.plugin_error = Some(e.to_string());
+                    // Rebuild unified list to show new results.
+                    self.rebuild_unified_list();
+                }
+                ExecutionSource::UserSelected => {
+                    self.state.is_loading = false;
+                    self.state.loading_started = None;
+                    match result {
+                        Ok(output) => {
+                            // Don't overwrite if streaming already populated output.
+                            if self.state.plugin_output.is_none() {
+                                self.state.plugin_output = Some(output);
+                            }
+                        }
+                        Err(e) => {
+                            self.state.plugin_error = Some(e.to_string());
+                        }
                     }
+                    if self.state.mode != Mode::ViewOutput {
+                        self.state.mode = Mode::ViewOutput;
+                    }
+                    self.state.output_selected = 0;
+                    // Auto-select Table mode when columns are defined.
+                    self.state.output_mode = if self
+                        .state
+                        .plugin_output
+                        .as_ref()
+                        .is_some_and(|o| !o.columns.is_empty())
+                    {
+                        OutputMode::Table
+                    } else {
+                        OutputMode::List
+                    };
                 }
-                if self.state.mode != Mode::ViewOutput {
-                    self.state.mode = Mode::ViewOutput;
-                }
-                self.state.output_selected = 0;
-                // Auto-select Table mode when columns are defined.
-                self.state.output_mode = if self
-                    .state
-                    .plugin_output
-                    .as_ref()
-                    .is_some_and(|o| !o.columns.is_empty())
-                {
-                    OutputMode::Table
-                } else {
-                    OutputMode::List
-                };
-            }
+            },
         }
     }
 
@@ -337,8 +486,18 @@ impl App {
                     if self.state.output_selected > 0 {
                         self.state.output_selected -= 1;
                     }
-                } else if self.state.selected > 0 {
-                    self.state.selected -= 1;
+                } else {
+                    // Move to previous selectable row in unified list.
+                    let current = self.state.unified_selected;
+                    if let Some(prev) = self.state.unified_rows[..current]
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|(_, r)| r.is_selectable())
+                        .map(|(i, _)| i)
+                    {
+                        self.state.unified_selected = prev;
+                    }
                 }
             }
 
@@ -353,49 +512,87 @@ impl App {
                         self.state.output_selected += 1;
                     }
                 } else {
-                    let max = self.state.filtered.len().saturating_sub(1);
-                    if self.state.selected < max {
-                        self.state.selected += 1;
+                    // Move to next selectable row in unified list.
+                    let current = self.state.unified_selected;
+                    if let Some(next) = self
+                        .state
+                        .unified_rows
+                        .iter()
+                        .enumerate()
+                        .skip(current + 1)
+                        .find(|(_, r)| r.is_selectable())
+                        .map(|(i, _)| i)
+                    {
+                        self.state.unified_selected = next;
                     }
                 }
             }
 
             Action::Search(c) => {
-                // Entering search mode if not already in it.
-                // The '/' key is the trigger but we don't add it to the query.
-                if self.state.mode == Mode::Search {
+                // '/' is the trigger key but we don't add it to the query.
+                if c != '/' {
                     self.state.query.push(c);
-                } else {
-                    self.state.mode = Mode::Search;
-                    if c != '/' {
-                        self.state.query.push(c);
-                    }
                 }
                 self.update_filter();
+                self.rebuild_unified_list();
             }
 
             Action::BackspaceSearch => {
                 self.state.query.pop();
-                if self.state.query.is_empty() {
-                    self.state.mode = Mode::Browse;
-                }
                 self.update_filter();
+                self.rebuild_unified_list();
             }
 
             Action::Select => {
-                if !self.state.filtered.is_empty() {
-                    let plugin_index = self.state.filtered[self.state.selected];
-                    self.state.is_loading = true;
-                    self.state.plugin_output = None;
-                    self.state.plugin_error = None;
-                    self.state.output_mode = OutputMode::List;
-                    self.state.mode = Mode::ViewOutput;
-                    self.engine.execute(plugin_index);
+                if self.state.mode == Mode::ViewOutput {
+                    // In ViewOutput, Select = Execute.
+                    if let Some(ref output) = self.state.plugin_output.clone() {
+                        if let Some(item) = output.items.get(self.state.output_selected) {
+                            if let Some(action) = item.actions.first() {
+                                self.execute_item_action(action);
+                            } else if let Some(ref url) = item.url {
+                                open_url(url);
+                            }
+                        }
+                    }
+                } else {
+                    // In Unified mode, act on the selected unified row.
+                    let row = self
+                        .state
+                        .unified_rows
+                        .get(self.state.unified_selected)
+                        .cloned();
+                    match row {
+                        Some(UnifiedRow::Item {
+                            plugin_index,
+                            item_index,
+                            ..
+                        }) => {
+                            if let Some(CachedResult::Ready(output)) =
+                                self.state.result_cache.get(&plugin_index).cloned()
+                            {
+                                if let Some(item) = output.items.get(item_index) {
+                                    if let Some(action) = item.actions.first().cloned() {
+                                        self.execute_item_action(&action);
+                                    } else if let Some(ref url) = item.url.clone() {
+                                        open_url(url);
+                                    } else {
+                                        // No action — open ViewOutput for this plugin.
+                                        self.open_plugin_in_view_output(plugin_index);
+                                    }
+                                }
+                            }
+                        }
+                        Some(UnifiedRow::More { plugin_index, .. }) => {
+                            self.open_plugin_in_view_output(plugin_index);
+                        }
+                        _ => {}
+                    }
                 }
             }
 
             Action::Back => {
-                self.state.mode = Mode::Browse;
+                self.state.mode = Mode::Unified;
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
                 self.state.output_selected = 0;
@@ -415,14 +612,8 @@ impl App {
             }
 
             Action::LaunchPlugin(name) => {
-                // Find the plugin by name and execute it directly.
                 if let Some(plugin_index) = self.state.plugins.iter().position(|p| p.name == name) {
-                    self.state.is_loading = true;
-                    self.state.plugin_output = None;
-                    self.state.plugin_error = None;
-                    self.state.output_mode = OutputMode::List;
-                    self.state.mode = Mode::ViewOutput;
-                    self.engine.execute(plugin_index);
+                    self.open_plugin_in_view_output(plugin_index);
                 } else {
                     tracing::warn!(plugin_name = %name, "LaunchPlugin: plugin not found");
                 }
@@ -475,8 +666,8 @@ impl App {
             Action::EnterNormalMode => {
                 self.state.vim_mode = VimMode::Normal;
                 self.state.query.clear();
-                self.state.mode = Mode::Browse;
-                self.update_filter();
+                self.state.mode = Mode::Unified;
+                self.rebuild_unified_list();
                 self.state.command_input.clear();
             }
 
@@ -525,19 +716,26 @@ impl App {
                         .collect();
                     let metadata: Vec<PluginMetadata> =
                         plugins.iter().map(|p| p.metadata().clone()).collect();
-                    let (tx, rx) = mpsc::channel(4);
+                    let plugin_count = plugins.len();
+                    let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
                     self.engine = PluginEngine::new(plugins, tx);
                     self.rx = rx;
                     self.keybindings = self.keybindings_config.resolve(&metadata);
                     self.state.plugins = metadata;
                     self.state.filtered = (0..self.state.plugins.len()).collect();
-                    self.state.mode = Mode::Browse;
+                    self.state.mode = Mode::Unified;
                     self.state.output_mode = OutputMode::List;
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
                     self.state.is_loading = false;
                     self.state.loading_started = None;
+                    self.state.result_cache.clear();
+                    self.state.prefetch_ready = 0;
+                    self.state.prefetch_total = 0;
                     self.update_filter();
+                    self.state.prefetch_total = self.state.plugins.len();
+                    self.engine.execute_all();
+                    self.rebuild_unified_list();
                 }
                 Err(e) => {
                     self.state.warnings = vec![format!("Refresh failed: {e}")];
@@ -551,12 +749,17 @@ impl App {
             ActionKind::Open => {
                 if let Some(url) = action.args.first() {
                     open_url(url);
+                    self.state.status_message =
+                        Some(("Opened in browser".to_string(), std::time::Instant::now()));
                 }
             }
             ActionKind::Clipboard => {
                 if let Some(text) = action.args.first() {
                     if let Err(e) = copy_to_clipboard(text) {
                         tracing::warn!(error = %e, "clipboard copy failed");
+                    } else {
+                        self.state.status_message =
+                            Some(("Copied to clipboard".to_string(), std::time::Instant::now()));
                     }
                 }
             }
@@ -578,6 +781,208 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
+    fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
+        match self.state.result_cache.get(&plugin_index).cloned() {
+            Some(CachedResult::Ready(output)) => {
+                self.state.plugin_output = Some(output);
+                self.state.plugin_error = None;
+                self.state.is_loading = false;
+                self.state.output_selected = 0;
+                self.state.output_mode = if self
+                    .state
+                    .plugin_output
+                    .as_ref()
+                    .is_some_and(|o| !o.columns.is_empty())
+                {
+                    OutputMode::Table
+                } else {
+                    OutputMode::List
+                };
+                self.state.mode = Mode::ViewOutput;
+            }
+            Some(CachedResult::Loading(_)) => {
+                self.state.plugin_output = None;
+                self.state.plugin_error = None;
+                self.state.is_loading = true;
+                self.state.mode = Mode::ViewOutput;
+            }
+            Some(CachedResult::Error(e)) => {
+                self.state.plugin_output = None;
+                self.state.plugin_error = Some(e);
+                self.state.is_loading = false;
+                self.state.mode = Mode::ViewOutput;
+            }
+            None => {
+                self.state.is_loading = true;
+                self.state.plugin_output = None;
+                self.state.plugin_error = None;
+                self.state.mode = Mode::ViewOutput;
+                self.engine.execute(plugin_index);
+            }
+        }
+    }
+
+    /// Rebuild the unified row list from cached plugin results, applying the current query filter.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn rebuild_unified_list(&mut self) {
+        use nucleo_matcher::pattern::AtomKind;
+        let mut rows = Vec::new();
+        let query = self.state.query.clone();
+        let max_per_section = self.state.max_items_per_section;
+
+        // Build ordered plugin indices: favorites first (config order), then rest alphabetically.
+        let favorites = &self.state.favorites;
+        let mut ordered: Vec<usize> = favorites
+            .iter()
+            .filter_map(|name| self.state.plugins.iter().position(|p| &p.name == name))
+            .collect();
+        let fav_set: std::collections::HashSet<usize> = ordered.iter().copied().collect();
+        let mut rest: Vec<usize> = (0..self.state.plugins.len())
+            .filter(|i| !fav_set.contains(i))
+            .collect();
+        rest.sort_unstable_by(|&a, &b| self.state.plugins[a].name.cmp(&self.state.plugins[b].name));
+        ordered.extend(rest);
+
+        let has_query = !query.is_empty();
+
+        for plugin_index in ordered {
+            let plugin = &self.state.plugins[plugin_index];
+
+            match self.state.result_cache.get(&plugin_index) {
+                None | Some(CachedResult::Loading(_)) => {
+                    if has_query {
+                        // Don't show loading sections when filtering.
+                        continue;
+                    }
+                    rows.push(UnifiedRow::Section {
+                        plugin_index,
+                        name: plugin.name.clone(),
+                        icon: plugin.icon.clone(),
+                        status: SectionStatus::Loading,
+                    });
+                }
+                Some(CachedResult::Error(_)) => {
+                    if has_query {
+                        continue;
+                    }
+                    rows.push(UnifiedRow::Section {
+                        plugin_index,
+                        name: plugin.name.clone(),
+                        icon: plugin.icon.clone(),
+                        status: SectionStatus::Error,
+                    });
+                }
+                Some(CachedResult::Ready(output)) => {
+                    let output = output.clone();
+                    let filtered_items: Vec<(usize, crate::plugin::traits::OutputItem)> =
+                        if has_query {
+                            // Nucleo fuzzy filter on label + detail.
+                            let pattern = Pattern::new(
+                                &query,
+                                CaseMatching::Ignore,
+                                Normalization::Smart,
+                                AtomKind::Fuzzy,
+                            );
+                            let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
+                            let mut indices_buf = Vec::new();
+
+                            output
+                                .items
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(idx, item)| {
+                                    let search_text = match &item.detail {
+                                        Some(d) => format!("{} {}", item.label, d),
+                                        None => item.label.clone(),
+                                    };
+                                    let mut chars: Vec<char> = search_text.chars().collect();
+                                    let haystack = Utf32Str::new(&search_text, &mut chars);
+                                    indices_buf.clear();
+                                    pattern
+                                        .indices(haystack, &mut matcher, &mut indices_buf)
+                                        .map(|_| (idx, item.clone()))
+                                })
+                                .collect()
+                        } else {
+                            output.items.iter().cloned().enumerate().collect()
+                        };
+
+                    if filtered_items.is_empty() {
+                        if has_query {
+                            // Collapse section with no matches.
+                            continue;
+                        }
+                        rows.push(UnifiedRow::Section {
+                            plugin_index,
+                            name: plugin.name.clone(),
+                            icon: plugin.icon.clone(),
+                            status: SectionStatus::Empty,
+                        });
+                        continue;
+                    }
+
+                    let total = filtered_items.len();
+                    let display_count = if max_per_section > 0 {
+                        total.min(max_per_section)
+                    } else {
+                        total
+                    };
+                    let overflow = total.saturating_sub(display_count);
+
+                    rows.push(UnifiedRow::Section {
+                        plugin_index,
+                        name: plugin.name.clone(),
+                        icon: plugin.icon.clone(),
+                        status: SectionStatus::Ready(total),
+                    });
+
+                    for (item_index, item) in filtered_items.into_iter().take(display_count) {
+                        rows.push(UnifiedRow::Item {
+                            plugin_index,
+                            item_index,
+                            item,
+                        });
+                    }
+
+                    if overflow > 0 {
+                        rows.push(UnifiedRow::More {
+                            plugin_index,
+                            count: overflow,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Preserve selection on the same selectable row if possible.
+        let old_selected = self.state.unified_selected;
+        self.state.unified_rows = rows;
+
+        // Clamp selection to a valid selectable row.
+        let selectable_count = self
+            .state
+            .unified_rows
+            .iter()
+            .filter(|r| r.is_selectable())
+            .count();
+        if selectable_count == 0 {
+            self.state.unified_selected = 0;
+            return;
+        }
+
+        // Find the nth selectable row where n = min(old_selected, selectable_count - 1).
+        let target = old_selected.min(selectable_count.saturating_sub(1));
+        self.state.unified_selected = self
+            .state
+            .unified_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.is_selectable())
+            .nth(target)
+            .map_or(0, |(i, _)| i);
     }
 
     /// Recompute the filtered list based on the current query using nucleo fuzzy matching.
@@ -738,6 +1143,7 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 timeout: Duration::from_secs(10),
                 streaming: false,
                 entry_path: None,
+                prefetch: true,
             })) as Arc<dyn Plugin>
         }};
     }
@@ -906,6 +1312,7 @@ mod tests {
         let mut app = App::with_stubs();
         // Set up ViewOutput mode with some items.
         app.state.mode = Mode::ViewOutput;
+        app.state.unified_selected = 0;
         app.state.plugin_output = Some(PluginOutput {
             title: "test".into(),
             items: vec![
@@ -945,7 +1352,7 @@ mod tests {
         app.state.plugin_output = Some(PluginOutput::default());
         app.state.output_selected = 2;
         app.handle_action(Action::Back);
-        assert_eq!(app.state.mode, Mode::Browse);
+        assert_eq!(app.state.mode, Mode::Unified);
         assert!(app.state.plugin_output.is_none());
         assert_eq!(app.state.output_selected, 0);
     }
@@ -956,13 +1363,17 @@ mod tests {
         let mut app = App::with_stubs();
         assert!(app.state.loading_started.is_none());
 
-        app.handle_engine_event(EngineEvent::PluginStarted { plugin_index: 0 });
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            source: crate::plugin::engine::ExecutionSource::UserSelected,
+        });
         assert!(app.state.loading_started.is_some());
         assert!(app.state.is_loading);
 
         app.handle_engine_event(EngineEvent::PluginFinished {
             plugin_index: 0,
             result: Ok(PluginOutput::default()),
+            source: crate::plugin::engine::ExecutionSource::UserSelected,
         });
         assert!(app.state.loading_started.is_none());
         assert!(!app.state.is_loading);
@@ -1048,6 +1459,6 @@ entry = "run.sh"
 
         assert_eq!(app.state.plugins.len(), 1);
         assert_eq!(app.state.plugins[0].name, "New Plugin");
-        assert_eq!(app.state.mode, Mode::Browse);
+        assert_eq!(app.state.mode, Mode::Unified);
     }
 }

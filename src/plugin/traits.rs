@@ -41,6 +41,9 @@ pub struct PluginMetadata {
     pub streaming: bool,
     /// Absolute path to the entry script (used by the engine for streaming dispatch).
     pub entry_path: Option<PathBuf>,
+    /// Whether this plugin should be executed in the background on startup.
+    /// Defaults to `true`. Set `prefetch = false` in the manifest to opt out.
+    pub prefetch: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +290,7 @@ mod tests {
             timeout: std::time::Duration::from_secs(5),
             streaming: false,
             entry_path: None,
+            prefetch: true,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }

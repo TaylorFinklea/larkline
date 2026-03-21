@@ -55,6 +55,7 @@ struct ManifestPlugin {
     keybinding: Option<String>,
     streaming: Option<bool>,
     icon_nerd: Option<String>,
+    prefetch: Option<bool>,
 }
 
 /// Which backend should execute this plugin.
@@ -115,6 +116,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<DiscoveredPlugin, RegistryErr
             streaming: p.streaming.unwrap_or(false),
             entry_path: None, // Set by the plugin backend constructors.
             icon_nerd: p.icon_nerd,
+            prefetch: p.prefetch.unwrap_or(true),
         },
         plugin_dir: plugin_dir.to_path_buf(),
         entry: p.entry,

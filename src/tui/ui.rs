@@ -16,7 +16,7 @@ use ratatui::{
 
 use ansi_to_tui::IntoText;
 
-use crate::app::{AppState, Mode, OutputMode, VimMode};
+use crate::app::{AppState, Mode, OutputMode, SectionStatus, UnifiedRow, VimMode};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -39,16 +39,16 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     render_status_bar(frame, state, theme, chunks[2]);
 
     if state.mode == Mode::ViewOutput {
-        // Horizontal split: plugin list (left) | output pane (right)
+        // Horizontal split: unified list (left) | output pane (right)
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[1]);
 
-        render_plugin_list(frame, state, theme, content_chunks[0]);
+        render_unified_list(frame, state, theme, content_chunks[0]);
         render_output_pane(frame, state, theme, content_chunks[1]);
     } else {
-        render_plugin_list(frame, state, theme, chunks[1]);
+        render_unified_list(frame, state, theme, chunks[1]);
     }
 }
 
@@ -58,7 +58,7 @@ fn render_search_bar(
     theme: &Theme,
     area: ratatui::layout::Rect,
 ) {
-    let is_searching = state.mode == Mode::Search;
+    let is_searching = !state.query.is_empty() || state.vim_mode == VimMode::Insert;
 
     let border_style = if is_searching {
         Style::default().fg(theme.accent)
@@ -93,69 +93,72 @@ fn render_search_bar(
     frame.render_widget(paragraph, area);
 }
 
-fn render_plugin_list(
+fn render_unified_list(
     frame: &mut Frame,
     state: &AppState,
     theme: &Theme,
     area: ratatui::layout::Rect,
 ) {
     let items: Vec<ListItem> = state
-        .filtered
+        .unified_rows
         .iter()
-        .enumerate()
-        .map(|(list_pos, &idx)| {
-            let plugin = &state.plugins[idx];
-
-            // Match indices from nucleo point into plugin.name characters.
-            let matched: std::collections::HashSet<usize> = state
-                .match_indices
-                .get(list_pos)
-                .map(|v| v.iter().copied().collect())
-                .unwrap_or_default();
-
-            let mut spans: Vec<Span> = Vec::new();
-
-            // Favorite star indicator.
-            if state.favorites.contains(&plugin.name) {
-                spans.push(Span::styled("★ ", Style::default().fg(theme.accent).bold()));
-            }
-
-            // Icon (conditionally shown).
-            if state.show_icons {
-                let icon = format!("{} ", plugin.icon);
-                for c in icon.chars() {
-                    spans.push(Span::styled(c.to_string(), Style::default().bold()));
-                }
-            }
-
-            // Build name spans with per-character highlighting.
-            for (char_idx, c) in plugin.name.chars().enumerate() {
-                let style = if matched.contains(&char_idx) {
-                    Style::default().fg(theme.accent).bold()
-                } else {
-                    Style::default().fg(theme.text).bold()
+        .map(|row| match row {
+            UnifiedRow::Section {
+                name, icon, status, ..
+            } => {
+                let status_text = match status {
+                    SectionStatus::Loading => " loading…".to_string(),
+                    SectionStatus::Ready(n) => format!(" ({n})"),
+                    SectionStatus::Error => " error".to_string(),
+                    SectionStatus::Empty => " (empty)".to_string(),
                 };
-                spans.push(Span::styled(c.to_string(), style));
+                let sep = "─".repeat(2);
+                let line = Line::from(vec![
+                    Span::styled(format!(" {sep} "), Style::default().fg(theme.text_dimmed)),
+                    if state.show_icons {
+                        Span::styled(format!("{icon} "), Style::default().bold())
+                    } else {
+                        Span::raw("")
+                    },
+                    Span::styled(name.as_str(), Style::default().fg(theme.text).bold()),
+                    Span::styled(status_text, Style::default().fg(theme.text_dimmed)),
+                    Span::styled(format!(" {sep}"), Style::default().fg(theme.text_dimmed)),
+                ]);
+                ListItem::new(line)
             }
-
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                plugin.description.as_str(),
-                Style::default().fg(theme.text_dimmed),
-            ));
-
-            ListItem::new(Line::from(spans))
+            UnifiedRow::Item { item, .. } => {
+                let mut spans = Vec::new();
+                if state.show_icons {
+                    if let Some(ref icon) = item.icon {
+                        spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
+                    } else {
+                        spans.push(Span::raw("  "));
+                    }
+                }
+                spans.push(Span::styled(
+                    item.label.as_str(),
+                    Style::default().fg(theme.text).bold(),
+                ));
+                if let Some(ref detail) = item.detail {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        detail.as_str(),
+                        Style::default().fg(theme.text_dimmed),
+                    ));
+                }
+                ListItem::new(Line::from(spans))
+            }
+            UnifiedRow::More { count, .. } => ListItem::new(Line::from(vec![Span::styled(
+                format!("  … {count} more"),
+                Style::default().fg(theme.accent),
+            )])),
         })
         .collect();
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme.text_dimmed))
-        .title(Span::styled(
-            format!(" {} plugins ", state.filtered.len()),
-            Style::default().fg(theme.text_dimmed),
-        ));
+        .border_style(Style::default().fg(theme.text_dimmed));
 
     let highlight_style = Style::default()
         .bg(theme.highlight_bg)
@@ -168,8 +171,8 @@ fn render_plugin_list(
         .highlight_symbol("▶ ");
 
     let mut list_state = ListState::default();
-    if !state.filtered.is_empty() {
-        list_state.select(Some(state.selected));
+    if !state.unified_rows.is_empty() && state.unified_rows.iter().any(UnifiedRow::is_selectable) {
+        list_state.select(Some(state.unified_selected));
     }
 
     frame.render_stateful_widget(list, area, &mut list_state);
@@ -185,8 +188,6 @@ fn render_output_pane(
     // Determine output title from the selected plugin.
     let title_text = if let Some(ref output) = state.plugin_output {
         output.title.clone()
-    } else if let Some(&idx) = state.filtered.get(state.selected) {
-        state.plugins[idx].name.clone()
     } else {
         "output".to_string()
     };
@@ -445,11 +446,23 @@ fn render_status_bar(
         return;
     }
 
+    // Flash message (expires after 2 seconds).
+    if let Some((ref msg, ref started)) = state.status_message {
+        if started.elapsed().as_secs_f32() < 2.0 {
+            let bar = Paragraph::new(format!(" ✓ {msg} ")).style(
+                Style::default()
+                    .fg(theme.accent)
+                    .bg(theme.status_bar_bg)
+                    .add_modifier(Modifier::BOLD),
+            );
+            frame.render_widget(bar, area);
+            return;
+        }
+    }
+
     let plugin_name_for_status = || -> String {
         if let Some(ref output) = state.plugin_output {
             output.title.clone()
-        } else if let Some(&idx) = state.filtered.get(state.selected) {
-            state.plugins[idx].name.clone()
         } else {
             "output".to_string()
         }
@@ -464,8 +477,17 @@ fn render_status_bar(
             }
             VimMode::Insert => " [I]  type to search or use quickkeys  Esc: normal ".to_string(),
             VimMode::Normal => match state.mode {
-                Mode::Browse | Mode::Search => {
-                    " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
+                Mode::Unified => {
+                    let progress = if state.prefetch_ready < state.prefetch_total {
+                        format!("{}/{} ready", state.prefetch_ready, state.prefetch_total)
+                    } else {
+                        String::new()
+                    };
+                    if progress.is_empty() {
+                        " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
+                    } else {
+                        format!(" [N]  {progress}  j/k: nav  Enter: run  i: insert  q: quit ")
+                    }
                 }
                 Mode::ViewOutput => {
                     if state.is_loading {

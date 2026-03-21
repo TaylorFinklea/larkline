@@ -59,6 +59,8 @@ pub struct UiConfig {
     pub visible_items: usize,
     /// Which icon set to use: `"nerd"` (default) or `"emoji"`.
     pub icon_set: IconSet,
+    /// Maximum items shown per section in the unified list (0 = unlimited).
+    pub max_items_per_section: usize,
 }
 
 /// Logging settings.
@@ -419,6 +421,7 @@ impl Default for UiConfig {
             show_icons: true,
             visible_items: 15,
             icon_set: IconSet::default(),
+            max_items_per_section: 5,
         }
     }
 }

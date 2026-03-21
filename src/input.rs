@@ -31,7 +31,7 @@ pub fn handle_key(
         VimMode::Command => handle_command(event),
         VimMode::Insert => handle_insert(event, keybindings),
         VimMode::Normal => match mode {
-            Mode::Browse | Mode::Search => handle_browse_normal(event, keybindings),
+            Mode::Unified => handle_browse_normal(event, keybindings),
             Mode::ViewOutput => handle_view_output(event, keybindings),
         },
     }
