@@ -2,8 +2,6 @@
 //!
 //! Each plugin gets its own JSON-backed store file under `$XDG_DATA_HOME/larkline/stores/`.
 //! Multi-command plugins sharing a `plugin_group` share a single store.
-// Phase 13: types used by lua.rs and script.rs; suppress dead_code until wired in 13B/13C.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;
