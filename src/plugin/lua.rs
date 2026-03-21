@@ -51,7 +51,11 @@ impl LuaPlugin {
 
     /// Register the `lark.*` host API on the given Lua VM.
     #[allow(clippy::too_many_lines)]
-    fn register_api(lua: &Lua, plugin_name: String) -> Result<(), PluginError> {
+    fn register_api(
+        lua: &Lua,
+        plugin_name: String,
+        store: std::sync::Arc<std::sync::Mutex<crate::plugin::store::PluginStore>>,
+    ) -> Result<(), PluginError> {
         let lark = lua
             .create_table()
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
@@ -192,6 +196,66 @@ impl LuaPlugin {
         lark.set("http", http_table)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.store — persistent key-value storage sub-table.
+        let store_table = lua
+            .create_table()
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let store_for_get = store.clone();
+        let store_get = lua
+            .create_function(move |lua, key: String| {
+                let guard = store_for_get.lock().expect("store lock");
+                match guard.get(&key) {
+                    Some(val) => lua.to_value(val).map_err(LuaError::external),
+                    None => Ok(LuaValue::Nil),
+                }
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        store_table
+            .set("get", store_get)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let store_for_set = store.clone();
+        let store_set = lua
+            .create_function(move |lua, (key, value): (String, LuaValue)| {
+                let json_value: serde_json::Value =
+                    lua.from_value(value).map_err(LuaError::external)?;
+                let mut guard = store_for_set.lock().expect("store lock");
+                guard.set(key, json_value).map_err(LuaError::external)?;
+                Ok(())
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        store_table
+            .set("set", store_set)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let store_for_delete = store.clone();
+        let store_delete = lua
+            .create_function(move |_, key: String| {
+                let mut guard = store_for_delete.lock().expect("store lock");
+                Ok(guard.delete(&key))
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        store_table
+            .set("delete", store_delete)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let store_for_keys = store;
+        let store_keys = lua
+            .create_function(move |lua, ()| {
+                let guard = store_for_keys.lock().expect("store lock");
+                let keys = guard.keys();
+                let table = lua.create_sequence_from(keys)?;
+                Ok(table)
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        store_table
+            .set("keys", store_keys)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        lark.set("store", store_table)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // lark.register(config) — store the plugin config in a named registry slot.
         let register_fn = lua
             .create_function(|lua, config: LuaTable| {
@@ -229,14 +293,25 @@ impl Plugin for LuaPlugin {
             .map_err(|e| PluginError::ExecutionFailed(format!("failed to read Lua script: {e}")))?;
 
         let plugin_name = self.metadata.name.clone();
+        let plugin_name_for_save = self.metadata.name.clone();
         let timeout = self.metadata.timeout;
+
+        // Load the plugin's persistent store.
+        let store_path = crate::plugin::store::store_path_for(
+            &self.metadata.name,
+            self.metadata.plugin_group.as_deref(),
+        );
+        let store = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::plugin::store::PluginStore::load(store_path),
+        ));
+        let store_for_save = store.clone();
 
         // Run the entire Lua execution inside a timeout.
         tokio::time::timeout(timeout, async move {
             let lua = Self::create_vm()?;
-            Self::register_api(&lua, plugin_name)?;
+            Self::register_api(&lua, plugin_name, store)?;
 
-            // Load and execute the plugin script (defines on_run via lark.register).
+            // Load the plugin script (defines on_run via lark.register).
             lua.load(&script)
                 .exec()
                 .map_err(|e| PluginError::InvalidOutput(format!("Lua syntax/load error: {e}")))?;
@@ -261,11 +336,18 @@ impl Plugin for LuaPlugin {
             let thread = lua
                 .create_thread(on_run)
                 .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
-            let result: LuaValue = thread
+            let run_result: Result<LuaValue, _> = thread
                 .into_async::<LuaValue>(())
                 .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?
                 .await
-                .map_err(|e| PluginError::ExecutionFailed(format!("on_run error: {e}")))?;
+                .map_err(|e| PluginError::ExecutionFailed(format!("on_run error: {e}")));
+
+            // Always save the store, even if on_run failed.
+            if let Err(e) = store_for_save.lock().expect("store lock").save() {
+                tracing::warn!(plugin = %plugin_name_for_save, error = %e, "failed to save plugin store");
+            }
+
+            let result = run_result?;
 
             // Deserialize the returned table into PluginOutput.
             let output: PluginOutput = lua
