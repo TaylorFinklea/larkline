@@ -90,7 +90,7 @@ mod tests {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/plugins")
             .join(name);
-        let discovered = parse_manifest(&dir).unwrap();
+        let discovered = parse_manifest(&dir).unwrap().remove(0);
         ScriptPlugin::from_discovered(discovered)
     }
 
@@ -98,7 +98,7 @@ mod tests {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("examples/plugins")
             .join(name);
-        let discovered = parse_manifest(&dir).unwrap();
+        let discovered = parse_manifest(&dir).unwrap().remove(0);
         ScriptPlugin::from_discovered(discovered)
     }
 
@@ -148,7 +148,7 @@ entry = "nonexistent.sh"
         .unwrap();
 
         // parse_manifest no longer checks entry existence — succeeds here.
-        let discovered = parse_manifest(&plugin_dir).unwrap();
+        let discovered = parse_manifest(&plugin_dir).unwrap().remove(0);
         let plugin = ScriptPlugin::from_discovered(discovered);
 
         // But execute() should catch the missing entry and return an error.

@@ -305,7 +305,9 @@ timeout_seconds = 5
         )
         .unwrap();
 
-        let discovered = crate::plugin::registry::parse_manifest(&plugin_dir).unwrap();
+        let discovered = crate::plugin::registry::parse_manifest(&plugin_dir)
+            .unwrap()
+            .remove(0);
         // Keep the tempdir alive by leaking it (test only).
         std::mem::forget(dir);
         LuaPlugin::from_discovered(discovered)

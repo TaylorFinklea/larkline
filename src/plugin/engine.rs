@@ -283,6 +283,9 @@ mod tests {
             streaming: false,
             entry_path: None,
             prefetch: true,
+            plugin_group: None,
+            quickkey: None,
+            cache: true,
         }
     }
 

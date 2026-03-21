@@ -1177,6 +1177,9 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 streaming: false,
                 entry_path: None,
                 prefetch: true,
+                plugin_group: None,
+                quickkey: None,
+                cache: true,
             })) as Arc<dyn Plugin>
         }};
     }

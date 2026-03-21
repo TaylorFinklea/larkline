@@ -44,6 +44,14 @@ pub struct PluginMetadata {
     /// Whether this plugin should be executed in the background on startup.
     /// Defaults to `true`. Set `prefetch = false` in the manifest to opt out.
     pub prefetch: bool,
+    /// Parent plugin name when this command belongs to a multi-command plugin.
+    /// `None` for single-command (legacy) plugins.
+    pub plugin_group: Option<String>,
+    /// Quick-launch key shown as a badge in the unified list (e.g., `"gb"`).
+    pub quickkey: Option<String>,
+    /// Whether to use stale-while-revalidate caching. Default `true`.
+    /// Set `cache = false` in the manifest to always execute fresh.
+    pub cache: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +299,9 @@ mod tests {
             streaming: false,
             entry_path: None,
             prefetch: true,
+            plugin_group: None,
+            quickkey: None,
+            cache: true,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }
