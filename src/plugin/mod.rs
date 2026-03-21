@@ -8,6 +8,7 @@ pub mod engine;
 pub mod lua;
 pub mod registry;
 pub mod script;
+pub mod store;
 pub mod traits;
 
 // Re-export the types most commonly needed by the rest of the application.
