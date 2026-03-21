@@ -94,6 +94,11 @@ pub struct OutputItem {
     /// Actions the user can invoke on this item.
     #[serde(default)]
     pub actions: Vec<ItemAction>,
+    /// Plugin-defined default text for `y` (copy). When set, `y` copies this instead of `label`.
+    /// Use for items where the label is decorative but the useful value is something else
+    /// (e.g., PID for a process list, raw branch name for git branches).
+    #[serde(default)]
+    pub copy_text: Option<String>,
     /// Arbitrary key-value pairs for table column resolution and future extensibility.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
@@ -243,7 +248,16 @@ mod tests {
         assert!(item.detail.is_none());
         assert!(item.icon.is_none());
         assert!(item.url.is_none());
+        assert!(item.copy_text.is_none());
         assert!(item.actions.is_empty());
+    }
+
+    #[test]
+    fn copy_text_deserializes_when_present() {
+        let json = r#"{"label": "Chrome", "copy_text": "12345"}"#;
+        let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
+        assert_eq!(item.label, "Chrome");
+        assert_eq!(item.copy_text.as_deref(), Some("12345"));
     }
 
     #[test]

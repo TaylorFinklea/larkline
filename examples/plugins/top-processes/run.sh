@@ -17,7 +17,7 @@ while IFS= read -r line; do
     --arg pid "$pid" \
     --arg cpu "$cpu" \
     --arg mem "${mem_mb}MB" \
-    '{label: $label, metadata: {pid: $pid, cpu: $cpu, mem: $mem}}')
+    '{label: $label, copy_text: $pid, metadata: {pid: $pid, cpu: $cpu, mem: $mem}}')
   items+=("$item")
 done < <(ps aux | sort -k3 -rn | awk 'NR>1 {printf "%s %s %s ", $2, $3, $6; for(i=11;i<=NF;i++) printf "%s ", $i; print ""}' | head -20)
 

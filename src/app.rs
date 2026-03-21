@@ -728,14 +728,19 @@ impl App {
 
             Action::CopyLabel => {
                 if self.state.mode == Mode::ViewOutput {
-                    let label = self
+                    let text = self
                         .state
                         .plugin_output
                         .as_ref()
                         .and_then(|o| o.items.get(self.state.output_selected))
-                        .map(|item| item.label.clone());
-                    if let Some(label) = label {
-                        copy_and_flash(&label, &mut self.state);
+                        .map(|item| {
+                            item.copy_text
+                                .as_ref()
+                                .unwrap_or(&item.label)
+                                .clone()
+                        });
+                    if let Some(text) = text {
+                        copy_and_flash(&text, &mut self.state);
                     }
                 }
             }
