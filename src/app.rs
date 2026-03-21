@@ -627,6 +627,7 @@ impl App {
                 self.state.output_selected = 0;
                 self.state.output_mode = OutputMode::List;
                 self.state.viewing_plugin_index = None;
+                self.state.copy_menu = None;
             }
 
             Action::Execute => {
