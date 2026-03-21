@@ -157,6 +157,8 @@ pub struct AppState {
     pub status_message: Option<(String, std::time::Instant)>,
     /// Plugin index currently displayed in the [`Mode::ViewOutput`] pane, if any.
     pub viewing_plugin_index: Option<usize>,
+    /// Plugin index of the highlighted command in Unified mode (for preview pane).
+    pub preview_plugin_index: Option<usize>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -241,6 +243,7 @@ impl App {
                 .map(|(i, _)| i);
             if let Some(pos) = row_pos {
                 app.state.unified_selected = pos;
+                app.sync_preview_index();
             } else {
                 tracing::warn!(
                     plugin_name = %name,
@@ -527,6 +530,7 @@ impl App {
                         .map(|(i, _)| i)
                     {
                         self.state.unified_selected = prev;
+                        self.sync_preview_index();
                     }
                 }
             }
@@ -554,6 +558,7 @@ impl App {
                         .map(|(i, _)| i)
                     {
                         self.state.unified_selected = next;
+                        self.sync_preview_index();
                     }
                 }
             }
@@ -648,6 +653,7 @@ impl App {
                         let next_pos = (pos + 10).min(selectable.len().saturating_sub(1));
                         if let Some(&next_row) = selectable.get(next_pos) {
                             self.state.unified_selected = next_row;
+                            self.sync_preview_index();
                         }
                     }
                 }
@@ -671,6 +677,7 @@ impl App {
                         let prev_pos = pos.saturating_sub(10);
                         if let Some(&prev_row) = selectable.get(prev_pos) {
                             self.state.unified_selected = prev_row;
+                            self.sync_preview_index();
                         }
                     }
                 }
@@ -1040,6 +1047,19 @@ impl App {
             .filter(|(_, r)| r.is_selectable())
             .nth(target)
             .map_or(0, |(i, _)| i);
+        self.sync_preview_index();
+    }
+
+    /// Update `preview_plugin_index` to match the currently selected unified row.
+    fn sync_preview_index(&mut self) {
+        self.state.preview_plugin_index = self
+            .state
+            .unified_rows
+            .get(self.state.unified_selected)
+            .and_then(|r| match r {
+                UnifiedRow::Command { plugin_index, .. } => Some(*plugin_index),
+                UnifiedRow::GroupHeader { .. } => None,
+            });
     }
 }
 

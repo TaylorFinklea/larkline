@@ -38,15 +38,24 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     render_search_bar(frame, state, theme, chunks[0]);
     render_status_bar(frame, state, theme, chunks[2]);
 
-    if state.mode == Mode::ViewOutput {
-        // Horizontal split: unified list (left) | output pane (right)
+    let show_right_pane = state.mode == Mode::ViewOutput
+        || (state.mode == Mode::Unified
+            && state.preview_plugin_index.is_some()
+            && chunks[1].width >= 80);
+
+    if show_right_pane {
+        // Horizontal split: unified list (left) | right pane (right)
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[1]);
 
         render_unified_list(frame, state, theme, content_chunks[0]);
-        render_output_pane(frame, state, theme, content_chunks[1]);
+        if state.mode == Mode::ViewOutput {
+            render_output_pane(frame, state, theme, content_chunks[1]);
+        } else {
+            render_preview_pane(frame, state, theme, content_chunks[1]);
+        }
     } else {
         render_unified_list(frame, state, theme, chunks[1]);
     }
@@ -197,6 +206,105 @@ fn render_unified_list(
     }
 
     frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn render_preview_pane(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
+    use crate::app::CachedResult;
+
+    let Some(idx) = state.preview_plugin_index else {
+        // No command selected — render an empty bordered block.
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.text_dimmed));
+        frame.render_widget(block, area);
+        return;
+    };
+
+    let meta = &state.plugins[idx];
+    let icon_str = if state.show_icons {
+        format!("{} ", meta.icon)
+    } else {
+        String::new()
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header: icon + name.
+    lines.push(Line::from(vec![
+        Span::styled(&icon_str, Style::default().bold()),
+        Span::styled(meta.name.as_str(), Style::default().fg(theme.text).bold()),
+    ]));
+
+    // Description.
+    if !meta.description.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            meta.description.as_str(),
+            Style::default().fg(theme.text_dimmed),
+        )));
+    }
+
+    lines.push(Line::raw(""));
+
+    // Cache status + item preview.
+    match state.result_cache.get(&idx) {
+        Some(CachedResult::Ready(output) | CachedResult::Revalidating(output)) => {
+            let n = output.items.len();
+            lines.push(Line::from(Span::styled(
+                format!("{n} item{}", if n == 1 { "" } else { "s" }),
+                Style::default().fg(theme.text_dimmed),
+            )));
+            lines.push(Line::raw(""));
+            for item in output.items.iter().take(5) {
+                let bullet_icon = item.icon.as_deref().unwrap_or("·");
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {bullet_icon} "),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
+                    Span::styled(item.label.as_str(), Style::default().fg(theme.text)),
+                ]));
+            }
+            if n > 5 {
+                lines.push(Line::from(Span::styled(
+                    format!("  … and {} more", n - 5),
+                    Style::default().fg(theme.text_dimmed),
+                )));
+            }
+        }
+        Some(CachedResult::Loading(_)) => {
+            lines.push(Line::from(Span::styled(
+                "Loading…",
+                Style::default().fg(theme.text_dimmed),
+            )));
+        }
+        Some(CachedResult::Error(e)) => {
+            lines.push(Line::from(Span::styled(
+                format!("Error: {e}"),
+                Style::default().fg(theme.accent),
+            )));
+        }
+        None => {
+            lines.push(Line::from(Span::styled(
+                "Press Enter to run",
+                Style::default().fg(theme.text_dimmed),
+            )));
+        }
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.text_dimmed));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 #[allow(clippy::too_many_lines)]
