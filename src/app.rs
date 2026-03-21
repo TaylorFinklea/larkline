@@ -760,6 +760,18 @@ impl App {
                         if let Some(ref url) = item.url {
                             entries.push(("URL".to_string(), url.clone()));
                         }
+                        if let Some(ref copy_text) = item.copy_text {
+                            if copy_text != &item.label {
+                                entries.push(("Copy Text".to_string(), copy_text.clone()));
+                            }
+                        }
+                        let mut meta_keys: Vec<&String> = item.metadata.keys().collect();
+                        meta_keys.sort();
+                        for key in meta_keys {
+                            if let Some(val) = item.metadata.get(key) {
+                                entries.push((key.clone(), val.clone()));
+                            }
+                        }
                         entries.push((
                             "JSON".to_string(),
                             serde_json::to_string(item).unwrap_or_default(),
