@@ -16,7 +16,7 @@ use ratatui::{
 
 use ansi_to_tui::IntoText;
 
-use crate::app::{AppState, Mode, OutputMode, SectionStatus, UnifiedRow, VimMode};
+use crate::app::{AppState, Mode, OutputMode, UnifiedRow, VimMode};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -104,15 +104,8 @@ fn render_unified_list(
         .unified_rows
         .iter()
         .map(|row| match row {
-            UnifiedRow::Section {
-                name, icon, status, ..
-            } => {
-                let status_text = match status {
-                    SectionStatus::Loading => " loading…".to_string(),
-                    SectionStatus::Ready(n) => format!(" ({n})"),
-                    SectionStatus::Error => " error".to_string(),
-                    SectionStatus::Empty => " (empty)".to_string(),
-                };
+            UnifiedRow::GroupHeader { name, icon } => {
+                // Non-selectable group separator: ─── icon Name ───
                 let sep = "─".repeat(2);
                 let line = Line::from(vec![
                     Span::styled(format!(" {sep} "), Style::default().fg(theme.text_dimmed)),
@@ -122,33 +115,31 @@ fn render_unified_list(
                         Span::raw("")
                     },
                     Span::styled(name.as_str(), Style::default().fg(theme.text).bold()),
-                    Span::styled(status_text, Style::default().fg(theme.text_dimmed)),
                     Span::styled(format!(" {sep}"), Style::default().fg(theme.text_dimmed)),
                 ]);
                 ListItem::new(line)
             }
-            UnifiedRow::Item {
-                item,
-                plugin_name,
+            UnifiedRow::Command {
+                name,
+                description,
+                icon,
+                quickkey,
+                group_name,
                 match_positions,
                 ..
             } => {
                 let mut spans = Vec::new();
                 if state.show_icons {
-                    if let Some(ref icon) = item.icon {
-                        spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
-                    } else {
-                        spans.push(Span::raw("  "));
-                    }
+                    spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
                 }
-                // Render label with character-level match highlighting when positions are set.
+                // Name with character-level match highlighting.
                 if match_positions.is_empty() {
                     spans.push(Span::styled(
-                        item.label.clone(),
+                        name.as_str(),
                         Style::default().fg(theme.text).bold(),
                     ));
                 } else {
-                    for (char_idx, ch) in item.label.chars().enumerate() {
+                    for (char_idx, ch) in name.chars().enumerate() {
                         let style = if match_positions.contains(&char_idx) {
                             Style::default().fg(theme.accent).bold()
                         } else {
@@ -157,37 +148,30 @@ fn render_unified_list(
                         spans.push(Span::styled(ch.to_string(), style));
                     }
                 }
-                if let Some(ref detail) = item.detail {
+                // Description.
+                if !description.is_empty() {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
-                        detail.as_str(),
+                        description.as_str(),
                         Style::default().fg(theme.text_dimmed),
                     ));
                 }
-                // Plugin-name badge shown during global search.
-                if let Some(name) = plugin_name {
+                // Group badge shown during search.
+                if let Some(group) = group_name {
                     spans.push(Span::styled(
-                        format!("  — {name}"),
+                        format!("  — {group}"),
                         Style::default().fg(theme.text_dimmed),
+                    ));
+                }
+                // Quickkey badge on the right: [gb]
+                if let Some(qk) = quickkey {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        format!("[{qk}]"),
+                        Style::default().fg(theme.accent),
                     ));
                 }
                 ListItem::new(Line::from(spans))
-            }
-            UnifiedRow::More { count, .. } => ListItem::new(Line::from(vec![Span::styled(
-                format!("  … {count} more"),
-                Style::default().fg(theme.accent),
-            )])),
-            UnifiedRow::RunPlugin { name, icon, .. } => {
-                let line = Line::from(vec![
-                    if state.show_icons {
-                        Span::styled(format!("{icon} "), Style::default().bold())
-                    } else {
-                        Span::raw("")
-                    },
-                    Span::styled("▷ Run ", Style::default().fg(theme.accent)),
-                    Span::styled(name.as_str(), Style::default().fg(theme.text).bold()),
-                ]);
-                ListItem::new(line)
             }
         })
         .collect();
@@ -515,16 +499,7 @@ fn render_status_bar(
             VimMode::Insert => " [I]  type to search or use quickkeys  Esc: normal ".to_string(),
             VimMode::Normal => match state.mode {
                 Mode::Unified => {
-                    let progress = if state.prefetch_ready < state.prefetch_total {
-                        format!("{}/{} ready", state.prefetch_ready, state.prefetch_total)
-                    } else {
-                        String::new()
-                    };
-                    if progress.is_empty() {
-                        " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
-                    } else {
-                        format!(" [N]  {progress}  j/k: nav  Enter: run  i: insert  q: quit ")
-                    }
+                    " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
                 }
                 Mode::ViewOutput => {
                     if state.is_loading {
