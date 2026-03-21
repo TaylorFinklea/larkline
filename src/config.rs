@@ -153,8 +153,12 @@ impl KeybindingsConfig {
         let mut launch_map: HashMap<KeyEvent, String> = HashMap::new();
 
         // Populate from plugin metadata keybindings first (lower priority).
+        // For multi-command plugins, `quickkey` takes precedence over the legacy
+        // `keybinding` field (multi-char quickkeys like "gb" are visual badges only
+        // and are skipped by `parse_key`; single-char quickkeys become real shortcuts).
         for plugin in plugins {
-            if let Some(ref kb) = plugin.keybinding {
+            let kb = plugin.quickkey.as_deref().or(plugin.keybinding.as_deref());
+            if let Some(kb) = kb {
                 if let Ok(ev) = parse_key(kb) {
                     launch_map.entry(ev).or_insert_with(|| plugin.name.clone());
                 }
