@@ -431,11 +431,8 @@ impl App {
                         self.state.result_cache.get(&plugin_index),
                         Some(CachedResult::Revalidating(_))
                     );
-                    let cache_enabled = self
-                        .state
-                        .plugins
-                        .get(plugin_index)
-                        .is_none_or(|p| p.cache);
+                    let cache_enabled =
+                        self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
 
                     self.state.is_loading = false;
                     self.state.loading_started = None;
@@ -826,11 +823,7 @@ impl App {
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
         self.state.viewing_plugin_index = Some(plugin_index);
-        let cache_enabled = self
-            .state
-            .plugins
-            .get(plugin_index)
-            .is_none_or(|p| p.cache);
+        let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
         match self.state.result_cache.get(&plugin_index).cloned() {
             Some(CachedResult::Ready(output)) if cache_enabled => {
                 // Stale-while-revalidate: show cached output immediately, refresh in background.

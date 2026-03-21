@@ -52,7 +52,7 @@ fn print_help() {
 lark — a keyboard-driven terminal command palette
 
 Usage: lark [OPTIONS]
-       lark init-plugin <NAME> [--shell]
+       lark init-plugin <NAME> [--shell|--multi]
 
 Options:
   --help, -h              Show this help message
@@ -61,15 +61,16 @@ Options:
 
 Commands:
   init-plugin <NAME>      Scaffold a new plugin directory
-    --shell               Generate a shell (bash) plugin instead of Lua"
+    --shell               Generate a shell (bash) plugin instead of Lua
+    --multi               Generate a multi-command plugin with [[commands]]"
     );
 }
 
 /// Scaffold a new plugin at `~/.config/larkline/plugins/<name>/`.
 ///
-/// Creates `manifest.toml` and either `init.lua` (default) or `run.sh` (if `shell` is true).
-/// Returns `Err` if the directory already exists or cannot be created.
-fn init_plugin(name: &str, shell: bool) -> Result<()> {
+/// Creates `manifest.toml` and either `init.lua` (default), `run.sh` (`--shell`), or a
+/// two-command Lua scaffold (`--multi`). Returns `Err` if the directory already exists.
+fn init_plugin(name: &str, shell: bool, multi: bool) -> Result<()> {
     let plugin_dir = config::default_plugin_dir().join(name);
     if plugin_dir.exists() {
         anyhow::bail!("Plugin directory already exists: {}", plugin_dir.display());
@@ -77,24 +78,34 @@ fn init_plugin(name: &str, shell: bool) -> Result<()> {
 
     std::fs::create_dir_all(&plugin_dir)?;
 
-    let (entry, template) = if shell {
-        ("run.sh", generate_shell_template(name))
+    if multi {
+        // Multi-command scaffold: two Lua commands under [[commands]].
+        let manifest = generate_multi_manifest(name);
+        std::fs::write(plugin_dir.join("manifest.toml"), manifest)?;
+        let cmd1 = generate_lua_template(&format!("{name} — Command One"));
+        let cmd2 = generate_lua_template(&format!("{name} — Command Two"));
+        std::fs::write(plugin_dir.join("command_one.lua"), cmd1)?;
+        std::fs::write(plugin_dir.join("command_two.lua"), cmd2)?;
+        println!("Created multi-command plugin at {}", plugin_dir.display());
+        println!("  manifest.toml");
+        println!("  command_one.lua");
+        println!("  command_two.lua");
     } else {
-        ("init.lua", generate_lua_template(name))
-    };
-
-    let manifest = generate_manifest(name, entry);
-    std::fs::write(plugin_dir.join("manifest.toml"), manifest)?;
-    std::fs::write(plugin_dir.join(entry), template)?;
-
-    // Make shell scripts executable.
-    if shell {
-        make_executable(&plugin_dir.join(entry))?;
+        let (entry, template) = if shell {
+            ("run.sh", generate_shell_template(name))
+        } else {
+            ("init.lua", generate_lua_template(name))
+        };
+        let manifest = generate_manifest(name, entry);
+        std::fs::write(plugin_dir.join("manifest.toml"), manifest)?;
+        std::fs::write(plugin_dir.join(entry), template)?;
+        if shell {
+            make_executable(&plugin_dir.join(entry))?;
+        }
+        println!("Created plugin at {}", plugin_dir.display());
+        println!("  manifest.toml");
+        println!("  {entry}");
     }
-
-    println!("Created plugin at {}", plugin_dir.display());
-    println!("  manifest.toml");
-    println!("  {entry}");
     Ok(())
 }
 
@@ -111,6 +122,32 @@ entry = "{entry}"
 timeout_seconds = 10
 
 category = "custom"
+"#
+    )
+}
+
+fn generate_multi_manifest(name: &str) -> String {
+    format!(
+        r#"[plugin]
+name = "{name}"
+description = "A new multi-command Larkline plugin"
+version = "0.1.0"
+author = ""
+icon = "🔧"
+icon_nerd = ""
+category = "custom"
+
+[[commands]]
+name = "Command One"
+description = "First command — edit command_one.lua to customize"
+entry = "command_one.lua"
+quickkey = "c1"
+
+[[commands]]
+name = "Command Two"
+description = "Second command — edit command_two.lua to customize"
+entry = "command_two.lua"
+quickkey = "c2"
 "#
     )
 }
@@ -178,9 +215,10 @@ async fn main() -> Result<()> {
     if args.get(1).is_some_and(|a| a == "init-plugin") {
         let name = args
             .get(2)
-            .ok_or_else(|| anyhow::anyhow!("Usage: lark init-plugin <NAME> [--shell]"))?;
-        let shell = args.get(3).is_some_and(|a| a == "--shell");
-        return init_plugin(name, shell);
+            .ok_or_else(|| anyhow::anyhow!("Usage: lark init-plugin <NAME> [--shell|--multi]"))?;
+        let shell = args.iter().any(|a| a == "--shell");
+        let multi = args.iter().any(|a| a == "--multi");
+        return init_plugin(name, shell, multi);
     }
 
     // Generate a commented default config on first run.
@@ -280,7 +318,7 @@ mod tests {
 lark — a keyboard-driven terminal command palette
 
 Usage: lark [OPTIONS]
-       lark init-plugin <NAME> [--shell]
+       lark init-plugin <NAME> [--shell|--multi]
 
 Options:
   --help, -h              Show this help message
@@ -289,7 +327,8 @@ Options:
 
 Commands:
   init-plugin <NAME>      Scaffold a new plugin directory
-    --shell               Generate a shell (bash) plugin instead of Lua";
+    --shell               Generate a shell (bash) plugin instead of Lua
+    --multi               Generate a multi-command plugin with [[commands]]";
         assert!(help.contains("--help"));
         assert!(help.contains("--version"));
         assert!(help.contains("--print-alias"));

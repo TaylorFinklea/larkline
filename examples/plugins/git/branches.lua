@@ -1,4 +1,4 @@
--- Git Branches — recent local branches with last-commit info.
+-- Recent Branches — recent local git branches with last-commit info.
 -- Note: lark.exec() uses tokio::process::Command with explicit args (safe, no shell).
 
 lark.register({

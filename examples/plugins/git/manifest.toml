@@ -1,0 +1,20 @@
+[plugin]
+name = "Git"
+description = "Git operations for the current directory"
+version = "0.1.0"
+author = "taylor"
+icon = "🌿"
+icon_nerd = ""
+category = "dev"
+
+[[commands]]
+name = "Recent Branches"
+description = "Recent local git branches with last-commit info"
+entry = "branches.lua"
+quickkey = "gb"
+
+[[commands]]
+name = "Status"
+description = "Working tree changes (git status)"
+entry = "status.lua"
+quickkey = "gs"
