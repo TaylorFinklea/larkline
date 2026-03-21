@@ -93,6 +93,7 @@ fn render_search_bar(
     frame.render_widget(paragraph, area);
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_unified_list(
     frame: &mut Frame,
     state: &AppState,
@@ -126,7 +127,12 @@ fn render_unified_list(
                 ]);
                 ListItem::new(line)
             }
-            UnifiedRow::Item { item, .. } => {
+            UnifiedRow::Item {
+                item,
+                plugin_name,
+                match_positions,
+                ..
+            } => {
                 let mut spans = Vec::new();
                 if state.show_icons {
                     if let Some(ref icon) = item.icon {
@@ -135,14 +141,33 @@ fn render_unified_list(
                         spans.push(Span::raw("  "));
                     }
                 }
-                spans.push(Span::styled(
-                    item.label.as_str(),
-                    Style::default().fg(theme.text).bold(),
-                ));
+                // Render label with character-level match highlighting when positions are set.
+                if match_positions.is_empty() {
+                    spans.push(Span::styled(
+                        item.label.clone(),
+                        Style::default().fg(theme.text).bold(),
+                    ));
+                } else {
+                    for (char_idx, ch) in item.label.chars().enumerate() {
+                        let style = if match_positions.contains(&char_idx) {
+                            Style::default().fg(theme.accent).bold()
+                        } else {
+                            Style::default().fg(theme.text).bold()
+                        };
+                        spans.push(Span::styled(ch.to_string(), style));
+                    }
+                }
                 if let Some(ref detail) = item.detail {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
                         detail.as_str(),
+                        Style::default().fg(theme.text_dimmed),
+                    ));
+                }
+                // Plugin-name badge shown during global search.
+                if let Some(name) = plugin_name {
+                    spans.push(Span::styled(
+                        format!("  — {name}"),
                         Style::default().fg(theme.text_dimmed),
                     ));
                 }
@@ -152,6 +177,18 @@ fn render_unified_list(
                 format!("  … {count} more"),
                 Style::default().fg(theme.accent),
             )])),
+            UnifiedRow::RunPlugin { name, icon, .. } => {
+                let line = Line::from(vec![
+                    if state.show_icons {
+                        Span::styled(format!("{icon} "), Style::default().bold())
+                    } else {
+                        Span::raw("")
+                    },
+                    Span::styled("▷ Run ", Style::default().fg(theme.accent)),
+                    Span::styled(name.as_str(), Style::default().fg(theme.text).bold()),
+                ]);
+                ListItem::new(line)
+            }
         })
         .collect();
 

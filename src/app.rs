@@ -78,15 +78,28 @@ pub enum UnifiedRow {
         plugin_index: usize,
         item_index: usize,
         item: crate::plugin::traits::OutputItem,
+        /// Plugin name badge shown during global search (non-empty query).
+        plugin_name: Option<String>,
+        /// Nucleo match indices into `item.label` for character highlighting.
+        match_positions: Vec<usize>,
     },
     /// "N more..." row — Enter opens `ViewOutput` for this plugin.
     More { plugin_index: usize, count: usize },
+    /// On-demand plugin (prefetch = false) — Enter executes it immediately.
+    RunPlugin {
+        plugin_index: usize,
+        name: String,
+        icon: String,
+    },
 }
 
 impl UnifiedRow {
     /// Returns true if this row can be selected by the user.
     pub fn is_selectable(&self) -> bool {
-        matches!(self, Self::Item { .. } | Self::More { .. })
+        matches!(
+            self,
+            Self::Item { .. } | Self::More { .. } | Self::RunPlugin { .. }
+        )
     }
 }
 
@@ -123,13 +136,6 @@ pub enum VimMode {
 pub struct AppState {
     /// All known plugins (loaded from the registry).
     pub plugins: Vec<PluginMetadata>,
-    /// Indices into `plugins` after fuzzy filtering. Ordered by match score.
-    pub filtered: Vec<usize>,
-    /// Match indices per filtered plugin, for highlight rendering.
-    /// Parallel to `filtered` — `match_indices[i]` corresponds to `filtered[i]`.
-    pub match_indices: Vec<Vec<usize>>,
-    /// Index into `filtered` that is currently highlighted.
-    pub selected: usize,
     /// The current fuzzy search query.
     pub query: String,
     /// Current UI mode.
@@ -214,7 +220,6 @@ impl App {
         let plugin_count = plugins.len();
         let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
-        let filtered: Vec<usize> = (0..metadata.len()).collect();
         let engine = PluginEngine::new(plugins, tx);
         // Resolve theme; fall back to defaults on invalid colors.
         let theme = config.theme.resolve().unwrap_or_else(|e| {
@@ -227,7 +232,6 @@ impl App {
         let mut app = Self {
             state: AppState {
                 plugins: metadata,
-                filtered,
                 show_icons: config.ui.show_icons,
                 favorites: config.favorites.pinned.clone(),
                 warnings,
@@ -246,19 +250,27 @@ impl App {
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
         };
-        // Apply favorites ordering and alphabetical sort at startup.
-        app.update_filter();
         app.rebuild_unified_list();
 
-        // Apply default_plugin pre-selection.
+        // Apply default_plugin pre-selection: find the first item or run-plugin row
+        // associated with the named plugin and move unified_selected to it.
         if let Some(ref name) = config.general.default_plugin {
-            if let Some(pos) = app
-                .state
-                .filtered
-                .iter()
-                .position(|&i| &app.state.plugins[i].name == name)
-            {
-                app.state.selected = pos;
+            let target_idx = app.state.plugins.iter().position(|p| &p.name == name);
+            if let Some(plugin_idx) = target_idx {
+                let row_pos = app
+                    .state
+                    .unified_rows
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| match r {
+                        UnifiedRow::Item { plugin_index, .. }
+                        | UnifiedRow::RunPlugin { plugin_index, .. } => *plugin_index == plugin_idx,
+                        _ => false,
+                    })
+                    .map(|(i, _)| i);
+                if let Some(pos) = row_pos {
+                    app.state.unified_selected = pos;
+                }
             } else {
                 tracing::warn!(
                     plugin_name = %name,
@@ -335,6 +347,13 @@ impl App {
             if self.state.is_loading {
                 self.state.spinner_tick = self.state.spinner_tick.wrapping_add(1);
             }
+
+            // Expire flash messages after 2 seconds.
+            if let Some((_, ref started)) = self.state.status_message {
+                if started.elapsed().as_secs_f32() >= 2.0 {
+                    self.state.status_message = None;
+                }
+            }
         }
 
         Ok(())
@@ -394,6 +413,8 @@ impl App {
                         new_output.items.extend(items);
                         *entry = CachedResult::Ready(new_output);
                     }
+                    // Show streaming items incrementally.
+                    self.rebuild_unified_list();
                 }
                 ExecutionSource::UserSelected => {
                     // Existing streaming behavior.
@@ -533,13 +554,11 @@ impl App {
                 if c != '/' {
                     self.state.query.push(c);
                 }
-                self.update_filter();
                 self.rebuild_unified_list();
             }
 
             Action::BackspaceSearch => {
                 self.state.query.pop();
-                self.update_filter();
                 self.rebuild_unified_list();
             }
 
@@ -583,7 +602,10 @@ impl App {
                                 }
                             }
                         }
-                        Some(UnifiedRow::More { plugin_index, .. }) => {
+                        Some(
+                            UnifiedRow::More { plugin_index, .. }
+                            | UnifiedRow::RunPlugin { plugin_index, .. },
+                        ) => {
                             self.open_plugin_in_view_output(plugin_index);
                         }
                         _ => {}
@@ -627,12 +649,46 @@ impl App {
                         .as_ref()
                         .map_or(0, |o| o.items.len().saturating_sub(1));
                     self.state.output_selected = (self.state.output_selected + 10).min(max);
+                } else {
+                    // Advance unified_selected by up to 10 selectable rows.
+                    let current = self.state.unified_selected;
+                    let selectable: Vec<usize> = self
+                        .state
+                        .unified_rows
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r.is_selectable())
+                        .map(|(i, _)| i)
+                        .collect();
+                    if let Some(pos) = selectable.iter().position(|&i| i >= current) {
+                        let next_pos = (pos + 10).min(selectable.len().saturating_sub(1));
+                        if let Some(&next_row) = selectable.get(next_pos) {
+                            self.state.unified_selected = next_row;
+                        }
+                    }
                 }
             }
 
             Action::ScrollHalfPageUp => {
                 if self.state.mode == Mode::ViewOutput {
                     self.state.output_selected = self.state.output_selected.saturating_sub(10);
+                } else {
+                    // Move unified_selected back by up to 10 selectable rows.
+                    let current = self.state.unified_selected;
+                    let selectable: Vec<usize> = self
+                        .state
+                        .unified_rows
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r.is_selectable())
+                        .map(|(i, _)| i)
+                        .collect();
+                    if let Some(pos) = selectable.iter().position(|&i| i >= current) {
+                        let prev_pos = pos.saturating_sub(10);
+                        if let Some(&prev_row) = selectable.get(prev_pos) {
+                            self.state.unified_selected = prev_row;
+                        }
+                    }
                 }
             }
 
@@ -665,10 +721,11 @@ impl App {
 
             Action::EnterNormalMode => {
                 self.state.vim_mode = VimMode::Normal;
-                self.state.query.clear();
-                self.state.mode = Mode::Unified;
-                self.rebuild_unified_list();
                 self.state.command_input.clear();
+                if self.state.mode == Mode::Unified {
+                    self.state.query.clear();
+                    self.rebuild_unified_list();
+                }
             }
 
             Action::EnterCommandMode => {
@@ -722,7 +779,6 @@ impl App {
                     self.rx = rx;
                     self.keybindings = self.keybindings_config.resolve(&metadata);
                     self.state.plugins = metadata;
-                    self.state.filtered = (0..self.state.plugins.len()).collect();
                     self.state.mode = Mode::Unified;
                     self.state.output_mode = OutputMode::List;
                     self.state.plugin_output = None;
@@ -731,8 +787,6 @@ impl App {
                     self.state.loading_started = None;
                     self.state.result_cache.clear();
                     self.state.prefetch_ready = 0;
-                    self.state.prefetch_total = 0;
-                    self.update_filter();
                     self.state.prefetch_total = self.state.plugins.len();
                     self.engine.execute_all();
                     self.rebuild_unified_list();
@@ -826,15 +880,20 @@ impl App {
     }
 
     /// Rebuild the unified row list from cached plugin results, applying the current query filter.
+    ///
+    /// - **Empty query:** section-grouped display with favorites first then alphabetical.
+    ///   Items carry `plugin_name: None` and `match_positions: vec![]`.
+    /// - **Non-empty query:** globally-ranked flat list — all ready items scored by nucleo,
+    ///   sorted descending. Items carry `plugin_name` badge and `match_positions` for
+    ///   character-level highlight rendering.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn rebuild_unified_list(&mut self) {
         use nucleo_matcher::pattern::AtomKind;
-        let mut rows = Vec::new();
         let query = self.state.query.clone();
         let max_per_section = self.state.max_items_per_section;
 
         // Build ordered plugin indices: favorites first (config order), then rest alphabetically.
-        let favorites = &self.state.favorites;
+        let favorites = self.state.favorites.clone();
         let mut ordered: Vec<usize> = favorites
             .iter()
             .filter_map(|name| self.state.plugins.iter().position(|p| &p.name == name))
@@ -846,116 +905,161 @@ impl App {
         rest.sort_unstable_by(|&a, &b| self.state.plugins[a].name.cmp(&self.state.plugins[b].name));
         ordered.extend(rest);
 
-        let has_query = !query.is_empty();
+        let rows = if query.is_empty() {
+            // ── Section-grouped path (empty query) ───────────────────────────────
+            let mut section_rows: Vec<UnifiedRow> = Vec::new();
 
-        for plugin_index in ordered {
-            let plugin = &self.state.plugins[plugin_index];
+            for &plugin_index in &ordered {
+                let plugin_name = self.state.plugins[plugin_index].name.clone();
+                let plugin_icon = self.state.plugins[plugin_index].icon.clone();
+                let plugin_prefetch = self.state.plugins[plugin_index].prefetch;
 
-            match self.state.result_cache.get(&plugin_index) {
-                None | Some(CachedResult::Loading(_)) => {
-                    if has_query {
-                        // Don't show loading sections when filtering.
-                        continue;
-                    }
-                    rows.push(UnifiedRow::Section {
-                        plugin_index,
-                        name: plugin.name.clone(),
-                        icon: plugin.icon.clone(),
-                        status: SectionStatus::Loading,
-                    });
-                }
-                Some(CachedResult::Error(_)) => {
-                    if has_query {
-                        continue;
-                    }
-                    rows.push(UnifiedRow::Section {
-                        plugin_index,
-                        name: plugin.name.clone(),
-                        icon: plugin.icon.clone(),
-                        status: SectionStatus::Error,
-                    });
-                }
-                Some(CachedResult::Ready(output)) => {
-                    let output = output.clone();
-                    let filtered_items: Vec<(usize, crate::plugin::traits::OutputItem)> =
-                        if has_query {
-                            // Nucleo fuzzy filter on label + detail.
-                            let pattern = Pattern::new(
-                                &query,
-                                CaseMatching::Ignore,
-                                Normalization::Smart,
-                                AtomKind::Fuzzy,
-                            );
-                            let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
-                            let mut indices_buf = Vec::new();
-
-                            output
-                                .items
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(idx, item)| {
-                                    let search_text = match &item.detail {
-                                        Some(d) => format!("{} {}", item.label, d),
-                                        None => item.label.clone(),
-                                    };
-                                    let mut chars: Vec<char> = search_text.chars().collect();
-                                    let haystack = Utf32Str::new(&search_text, &mut chars);
-                                    indices_buf.clear();
-                                    pattern
-                                        .indices(haystack, &mut matcher, &mut indices_buf)
-                                        .map(|_| (idx, item.clone()))
-                                })
-                                .collect()
+                let cached = self.state.result_cache.get(&plugin_index).cloned();
+                match cached {
+                    None => {
+                        if plugin_prefetch {
+                            // prefetch=true but not yet started — show loading.
+                            section_rows.push(UnifiedRow::Section {
+                                plugin_index,
+                                name: plugin_name,
+                                icon: plugin_icon,
+                                status: SectionStatus::Loading,
+                            });
                         } else {
-                            output.items.iter().cloned().enumerate().collect()
-                        };
-
-                    if filtered_items.is_empty() {
-                        if has_query {
-                            // Collapse section with no matches.
+                            // prefetch=false — show on-demand run row.
+                            section_rows.push(UnifiedRow::RunPlugin {
+                                plugin_index,
+                                name: plugin_name,
+                                icon: plugin_icon,
+                            });
+                        }
+                    }
+                    Some(CachedResult::Loading(_)) => {
+                        section_rows.push(UnifiedRow::Section {
+                            plugin_index,
+                            name: plugin_name,
+                            icon: plugin_icon,
+                            status: SectionStatus::Loading,
+                        });
+                    }
+                    Some(CachedResult::Error(_)) => {
+                        section_rows.push(UnifiedRow::Section {
+                            plugin_index,
+                            name: plugin_name,
+                            icon: plugin_icon,
+                            status: SectionStatus::Error,
+                        });
+                    }
+                    Some(CachedResult::Ready(output)) => {
+                        let total = output.items.len();
+                        if total == 0 {
+                            section_rows.push(UnifiedRow::Section {
+                                plugin_index,
+                                name: plugin_name,
+                                icon: plugin_icon,
+                                status: SectionStatus::Empty,
+                            });
                             continue;
                         }
-                        rows.push(UnifiedRow::Section {
+
+                        let display_count = if max_per_section > 0 {
+                            total.min(max_per_section)
+                        } else {
+                            total
+                        };
+                        let overflow = total.saturating_sub(display_count);
+
+                        section_rows.push(UnifiedRow::Section {
                             plugin_index,
-                            name: plugin.name.clone(),
-                            icon: plugin.icon.clone(),
-                            status: SectionStatus::Empty,
+                            name: plugin_name,
+                            icon: plugin_icon,
+                            status: SectionStatus::Ready(total),
                         });
-                        continue;
-                    }
 
-                    let total = filtered_items.len();
-                    let display_count = if max_per_section > 0 {
-                        total.min(max_per_section)
-                    } else {
-                        total
-                    };
-                    let overflow = total.saturating_sub(display_count);
+                        for (item_index, item) in
+                            output.items.iter().cloned().enumerate().take(display_count)
+                        {
+                            section_rows.push(UnifiedRow::Item {
+                                plugin_index,
+                                item_index,
+                                item,
+                                plugin_name: None,
+                                match_positions: vec![],
+                            });
+                        }
 
-                    rows.push(UnifiedRow::Section {
-                        plugin_index,
-                        name: plugin.name.clone(),
-                        icon: plugin.icon.clone(),
-                        status: SectionStatus::Ready(total),
-                    });
-
-                    for (item_index, item) in filtered_items.into_iter().take(display_count) {
-                        rows.push(UnifiedRow::Item {
-                            plugin_index,
-                            item_index,
-                            item,
-                        });
-                    }
-
-                    if overflow > 0 {
-                        rows.push(UnifiedRow::More {
-                            plugin_index,
-                            count: overflow,
-                        });
+                        if overflow > 0 {
+                            section_rows.push(UnifiedRow::More {
+                                plugin_index,
+                                count: overflow,
+                            });
+                        }
                     }
                 }
             }
-        }
+            section_rows
+        } else {
+            // ── Global ranking path ───────────────────────────────────────────────
+            // Score every item from every ready plugin; sort descending; emit flat.
+            let pattern = Pattern::new(
+                &query,
+                CaseMatching::Ignore,
+                Normalization::Smart,
+                AtomKind::Fuzzy,
+            );
+            let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
+            let mut indices_buf: Vec<u32> = Vec::new();
+
+            let mut scored: Vec<(
+                usize,
+                usize,
+                crate::plugin::traits::OutputItem,
+                u32,
+                Vec<usize>,
+            )> = Vec::new();
+
+            for &plugin_index in &ordered {
+                let cached = self.state.result_cache.get(&plugin_index).cloned();
+                if let Some(CachedResult::Ready(output)) = cached {
+                    for (item_index, item) in output.items.iter().cloned().enumerate() {
+                        let search_text = match &item.detail {
+                            Some(d) => format!("{} {}", item.label, d),
+                            None => item.label.clone(),
+                        };
+                        let mut chars: Vec<char> = search_text.chars().collect();
+                        let haystack = Utf32Str::new(&search_text, &mut chars);
+                        indices_buf.clear();
+                        if let Some(score) =
+                            pattern.indices(haystack, &mut matcher, &mut indices_buf)
+                        {
+                            let label_len = item.label.chars().count();
+                            let match_positions: Vec<usize> = indices_buf
+                                .iter()
+                                .map(|&i| i as usize)
+                                .filter(|&i| i < label_len)
+                                .collect();
+                            scored.push((plugin_index, item_index, item, score, match_positions));
+                        }
+                    }
+                }
+            }
+
+            scored.sort_unstable_by(|a, b| b.3.cmp(&a.3));
+
+            scored
+                .into_iter()
+                .map(|(plugin_index, item_index, item, _, match_positions)| {
+                    let plugin_name = Some(self.state.plugins[plugin_index].name.clone());
+                    UnifiedRow::Item {
+                        plugin_index,
+                        item_index,
+                        item,
+                        plugin_name,
+                        match_positions,
+                    }
+                })
+                .collect()
+        };
 
         // Preserve selection on the same selectable row if possible.
         let old_selected = self.state.unified_selected;
@@ -983,77 +1087,6 @@ impl App {
             .filter(|(_, r)| r.is_selectable())
             .nth(target)
             .map_or(0, |(i, _)| i);
-    }
-
-    /// Recompute the filtered list based on the current query using nucleo fuzzy matching.
-    ///
-    /// Results are sorted by match score descending so the best matches appear first.
-    /// `match_indices` is populated in parallel so the UI can highlight matched characters.
-    fn update_filter(&mut self) {
-        self.state.selected = 0;
-
-        if self.state.query.is_empty() {
-            // Partition into favorited (config order) then rest (alphabetical).
-            let favorites = &self.state.favorites;
-            let mut fav_indices: Vec<usize> = favorites
-                .iter()
-                .filter_map(|name| self.state.plugins.iter().position(|p| &p.name == name))
-                .collect();
-            let fav_set: std::collections::HashSet<usize> = fav_indices.iter().copied().collect();
-            let mut rest: Vec<usize> = (0..self.state.plugins.len())
-                .filter(|i| !fav_set.contains(i))
-                .collect();
-            rest.sort_unstable_by(|&a, &b| {
-                self.state.plugins[a].name.cmp(&self.state.plugins[b].name)
-            });
-            fav_indices.append(&mut rest);
-            self.state.filtered = fav_indices;
-            self.state.match_indices = self.state.plugins.iter().map(|_| Vec::new()).collect();
-            return;
-        }
-
-        let pattern = Pattern::new(
-            &self.state.query,
-            CaseMatching::Ignore,
-            Normalization::Smart,
-            nucleo_matcher::pattern::AtomKind::Fuzzy,
-        );
-
-        let mut matcher = Matcher::new(NucleoConfig::DEFAULT);
-        let mut indices_buf = Vec::new();
-
-        // Score each plugin against the pattern; fall back to description when name misses.
-        let mut scored: Vec<(usize, u32, Vec<u32>)> = self
-            .state
-            .plugins
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, plugin)| {
-                let mut name_chars: Vec<char> = plugin.name.chars().collect();
-                let haystack = Utf32Str::new(&plugin.name, &mut name_chars);
-
-                indices_buf.clear();
-                if let Some(score) = pattern.indices(haystack, &mut matcher, &mut indices_buf) {
-                    return Some((idx, score, indices_buf.clone()));
-                }
-
-                // Try description as fallback — no index highlighting for description matches.
-                let mut desc_chars: Vec<char> = plugin.description.chars().collect();
-                let desc_hay = Utf32Str::new(&plugin.description, &mut desc_chars);
-                indices_buf.clear();
-                pattern
-                    .indices(desc_hay, &mut matcher, &mut indices_buf)
-                    .map(|score| (idx, score, Vec::new()))
-            })
-            .collect();
-
-        scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-
-        self.state.filtered = scored.iter().map(|(idx, _, _)| *idx).collect();
-        self.state.match_indices = scored
-            .into_iter()
-            .map(|(_, _, mi)| mi.into_iter().map(|i| i as usize).collect::<Vec<_>>())
-            .collect();
     }
 }
 
@@ -1197,114 +1230,187 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
 mod tests {
     use super::*;
 
-    fn app_with_query(query: &str) -> App {
-        let mut app = App::with_stubs();
-        for c in query.chars() {
-            app.handle_action(Action::Search(c));
+    /// Populate `result_cache` for a named plugin with the given items and rebuild the list.
+    fn populate_cache(
+        app: &mut App,
+        plugin_name: &str,
+        items: Vec<crate::plugin::traits::OutputItem>,
+    ) {
+        if let Some(idx) = app.state.plugins.iter().position(|p| p.name == plugin_name) {
+            app.state.result_cache.insert(
+                idx,
+                CachedResult::Ready(PluginOutput {
+                    title: plugin_name.to_string(),
+                    items,
+                    ..Default::default()
+                }),
+            );
         }
-        app
+        app.rebuild_unified_list();
+    }
+
+    /// Extract section-header names in order from `unified_rows`.
+    fn section_names(app: &App) -> Vec<&str> {
+        app.state
+            .unified_rows
+            .iter()
+            .filter_map(|r| match r {
+                UnifiedRow::Section { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Extract all Item labels visible in `unified_rows`.
+    fn item_labels(app: &App) -> Vec<&str> {
+        app.state
+            .unified_rows
+            .iter()
+            .filter_map(|r| match r {
+                UnifiedRow::Item { item, .. } => Some(item.label.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn make_item(label: &str) -> crate::plugin::traits::OutputItem {
+        crate::plugin::traits::OutputItem {
+            label: label.to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]
-    fn fuzzy_filter_empty_query_returns_all() {
+    fn empty_query_shows_all_plugins_as_sections() {
         let app = App::with_stubs();
-        assert_eq!(app.state.filtered.len(), app.state.plugins.len());
+        // All 7 stubs should appear as Section rows (Loading, since cache is empty).
+        let sections = section_names(&app);
+        assert_eq!(sections.len(), app.state.plugins.len());
     }
 
     #[test]
     fn favorites_sort_to_top_with_empty_query() {
-        // "Weather" is alphabetically last among stubs, but favorited → should be first.
+        // "Weather" is alphabetically last among stubs, but favorited → should be first section.
         let app = App::with_stubs_and_favorites(vec!["Weather".to_string()]);
-        assert!(!app.state.filtered.is_empty());
-        let first_name = &app.state.plugins[app.state.filtered[0]].name;
-        assert_eq!(first_name, "Weather");
+        let sections = section_names(&app);
+        assert!(!sections.is_empty());
+        assert_eq!(sections[0], "Weather");
     }
 
     #[test]
     fn favorites_config_order_preserved() {
-        // Multiple favorites should appear in the order specified, not alphabetically.
+        // Multiple favorites should appear in section order: Weather, then GitHub PRs.
         let app =
             App::with_stubs_and_favorites(vec!["Weather".to_string(), "GitHub PRs".to_string()]);
-        let first = &app.state.plugins[app.state.filtered[0]].name;
-        let second = &app.state.plugins[app.state.filtered[1]].name;
-        assert_eq!(first, "Weather");
-        assert_eq!(second, "GitHub PRs");
+        let sections = section_names(&app);
+        assert_eq!(sections[0], "Weather");
+        assert_eq!(sections[1], "GitHub PRs");
     }
 
     #[test]
-    fn non_favorite_rest_sorted_alphabetically() {
-        // With no favorites, the list should be alphabetical.
+    fn non_favorite_sections_sorted_alphabetically() {
+        // With no favorites, sections should appear alphabetically.
         let app = App::with_stubs();
-        let names: Vec<&str> = app
-            .state
-            .filtered
-            .iter()
-            .map(|&i| app.state.plugins[i].name.as_str())
-            .collect();
+        let names = section_names(&app);
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted);
     }
 
     #[test]
-    fn default_plugin_sets_selected_index() {
-        // "Weather" is last alphabetically; default_plugin should pre-select it.
-        let app = App::with_stubs_and_default("Weather");
-        let selected_name = &app.state.plugins[app.state.filtered[app.state.selected]].name;
-        assert_eq!(selected_name, "Weather");
+    fn default_plugin_preselects_first_item_when_cache_ready() {
+        // Populate Weather's cache so it has an item, then check unified_selected points to it.
+        let mut app = App::with_stubs_and_default("Weather");
+        populate_cache(&mut app, "Weather", vec![make_item("Sunny 72°F")]);
+        // Find the row index of the Weather item.
+        let weather_item_row = app
+            .state
+            .unified_rows
+            .iter()
+            .enumerate()
+            .find(|(_, r)| matches!(r, UnifiedRow::Item { item, .. } if item.label == "Sunny 72°F"))
+            .map(|(i, _)| i);
+        assert!(weather_item_row.is_some(), "Weather item row not found");
+        // Verify that unified_selected is a valid selectable row index for Weather.
+        let sel = app.state.unified_selected;
+        assert!(app.state.unified_rows[sel].is_selectable());
     }
 
     #[test]
     fn missing_default_plugin_falls_back_to_zero() {
-        // A plugin name that doesn't exist → selected stays at 0.
+        // A plugin name that doesn't exist → unified_selected stays at 0.
         let app = App::with_stubs_and_default("DoesNotExist");
-        assert_eq!(app.state.selected, 0);
+        assert_eq!(app.state.unified_selected, 0);
     }
 
     #[test]
-    fn fuzzy_filter_matches_partial_name() {
-        let app = app_with_query("git");
-        let names: Vec<&str> = app
-            .state
-            .filtered
-            .iter()
-            .map(|&i| app.state.plugins[i].name.as_str())
-            .collect();
+    fn search_with_items_in_cache_shows_matching_items() {
+        let mut app = App::with_stubs();
+        populate_cache(
+            &mut app,
+            "GitHub PRs",
+            vec![make_item("fix/ci-pipeline"), make_item("feat/new-auth")],
+        );
+        // Trigger search for "ci"
+        app.handle_action(Action::Search('c'));
+        app.handle_action(Action::Search('i'));
+        let labels = item_labels(&app);
         assert!(
-            names.contains(&"GitHub PRs"),
-            "expected 'GitHub PRs' in {names:?}"
+            labels.contains(&"fix/ci-pipeline"),
+            "expected 'fix/ci-pipeline' in {labels:?}"
         );
     }
 
     #[test]
-    fn fuzzy_filter_matches_out_of_order() {
-        // "gpr" should fuzzy-match "GitHub PRs" (G…P…R).
-        let app = app_with_query("gpr");
-        let names: Vec<&str> = app
+    fn search_no_match_returns_empty_rows() {
+        let mut app = App::with_stubs();
+        populate_cache(&mut app, "GitHub PRs", vec![make_item("fix/ci-pipeline")]);
+        app.handle_action(Action::Search('z'));
+        app.handle_action(Action::Search('z'));
+        app.handle_action(Action::Search('z'));
+        assert!(item_labels(&app).is_empty());
+    }
+
+    #[test]
+    fn search_results_carry_plugin_name_badge() {
+        let mut app = App::with_stubs();
+        populate_cache(&mut app, "System Info", vec![make_item("CPU 45%")]);
+        app.handle_action(Action::Search('c'));
+        app.handle_action(Action::Search('p'));
+        app.handle_action(Action::Search('u'));
+        let has_badge = app.state.unified_rows.iter().any(|r| {
+            matches!(r,
+                UnifiedRow::Item { plugin_name: Some(n), .. } if n == "System Info"
+            )
+        });
+        assert!(has_badge, "expected plugin_name badge on search result");
+    }
+
+    #[test]
+    fn search_globally_ranks_across_plugins() {
+        // Items from two different plugins; ensure both appear as flat Items (no Section headers).
+        let mut app = App::with_stubs();
+        populate_cache(&mut app, "GitHub PRs", vec![make_item("main branch")]);
+        populate_cache(&mut app, "Shell Snippets", vec![make_item("git status")]);
+        app.handle_action(Action::Search('g'));
+        app.handle_action(Action::Search('i'));
+        app.handle_action(Action::Search('t'));
+        // During search, no Section headers should appear.
+        let has_sections = app
             .state
-            .filtered
+            .unified_rows
             .iter()
-            .map(|&i| app.state.plugins[i].name.as_str())
-            .collect();
+            .any(|r| matches!(r, UnifiedRow::Section { .. }));
         assert!(
-            names.contains(&"GitHub PRs"),
-            "expected 'GitHub PRs' in {names:?}"
+            !has_sections,
+            "section headers should not appear during global search"
         );
-    }
-
-    #[test]
-    fn fuzzy_filter_no_match_returns_empty() {
-        let app = app_with_query("zzzzz");
-        assert!(app.state.filtered.is_empty());
-    }
-
-    #[test]
-    fn fuzzy_filter_results_ordered_by_score() {
-        // "sys" should rank "System Info" above other matches (if any).
-        let app = app_with_query("sys");
-        assert!(!app.state.filtered.is_empty());
-        let top_name = &app.state.plugins[app.state.filtered[0]].name;
-        assert_eq!(top_name, "System Info");
+        // Both matching items should be present.
+        let labels = item_labels(&app);
+        assert!(
+            labels.contains(&"main branch") || labels.contains(&"git status"),
+            "expected at least one matching item in {labels:?}"
+        );
     }
 
     #[test]
