@@ -143,6 +143,10 @@ pub enum ViewOutputAction {
     CopyLabel,
     /// Open the copy-menu overlay.
     CopyMenu,
+    /// Enter search mode to filter output items.
+    Search,
+    /// Open the selected item's URL in the system browser.
+    OpenUrl,
 }
 
 impl KeybindingsConfig {
@@ -331,6 +335,16 @@ impl KeybindingsConfig {
         m.insert(
             key(KeyCode::Char('Y'), KeyModifiers::SHIFT),
             ViewOutputAction::CopyMenu,
+        );
+        // Search within output items.
+        m.insert(
+            key(KeyCode::Char('/'), KeyModifiers::NONE),
+            ViewOutputAction::Search,
+        );
+        // Open URL shortcut.
+        m.insert(
+            key(KeyCode::Char('o'), KeyModifiers::NONE),
+            ViewOutputAction::OpenUrl,
         );
         // Config overrides for scroll bindings.
         if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {

@@ -56,4 +56,14 @@ pub enum Action {
     CopyMenuSelect,
     /// Dismiss the copy menu without copying.
     CopyMenuDismiss,
+    /// Enter output search mode (triggered by `/` in `ViewOutput`).
+    OutputEnterSearch,
+    /// Append a character to the output search query.
+    OutputSearch(char),
+    /// Delete the last character from the output search query.
+    OutputBackspaceSearch,
+    /// Clear output search and exit search mode.
+    OutputClearSearch,
+    /// Open the selected item's URL in the system browser.
+    OpenUrl,
 }

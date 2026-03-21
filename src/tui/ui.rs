@@ -315,10 +315,21 @@ fn render_output_pane(
     area: ratatui::layout::Rect,
 ) {
     // Determine output title from the selected plugin.
-    let title_text = if let Some(ref output) = state.plugin_output {
+    let base_title = if let Some(ref output) = state.plugin_output {
         output.title.clone()
     } else {
         "output".to_string()
+    };
+
+    let title_text = if state.output_searching || !state.output_query.is_empty() {
+        let total = state
+            .plugin_output
+            .as_ref()
+            .map_or(0, |o| o.items.len());
+        let filtered = state.output_filtered_indices.len();
+        format!(" {base_title} /{} ({filtered}/{total}) ", state.output_query)
+    } else {
+        format!(" {base_title} ")
     };
 
     let block = Block::default()
@@ -326,7 +337,7 @@ fn render_output_pane(
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
-            format!(" {title_text} "),
+            title_text,
             Style::default().fg(theme.accent).bold(),
         ));
 
@@ -387,7 +398,7 @@ fn render_output_pane(
         let elapsed = state
             .loading_started
             .map_or(0.0, |t| t.elapsed().as_secs_f32());
-        let loading_text = format!("{spinner} Running {title_text}… ({elapsed:.1}s)");
+        let loading_text = format!("{spinner} Running {base_title}… ({elapsed:.1}s)");
         let paragraph = Paragraph::new(Line::from(Span::styled(
             loading_text,
             Style::default().fg(theme.accent),
@@ -480,9 +491,17 @@ fn render_output_items(
     block: Block,
     area: ratatui::layout::Rect,
 ) {
-    let items: Vec<ListItem> = output
-        .items
+    // Use filtered indices when output search is active, else show all items.
+    let visible_indices: Vec<usize> =
+        if !state.output_filtered_indices.is_empty() || !state.output_query.is_empty() {
+            state.output_filtered_indices.clone()
+        } else {
+            (0..output.items.len()).collect()
+        };
+
+    let items: Vec<ListItem> = visible_indices
         .iter()
+        .filter_map(|&i| output.items.get(i))
         .map(|item| {
             let mut spans = Vec::new();
 
@@ -543,10 +562,18 @@ fn render_output_table(
         .collect();
     let header = Row::new(header_cells).bottom_margin(1);
 
+    // Use filtered indices when output search is active.
+    let visible_indices: Vec<usize> =
+        if !state.output_filtered_indices.is_empty() || !state.output_query.is_empty() {
+            state.output_filtered_indices.clone()
+        } else {
+            (0..output.items.len()).collect()
+        };
+
     // Build data rows.
-    let rows: Vec<Row> = output
-        .items
+    let rows: Vec<Row> = visible_indices
         .iter()
+        .filter_map(|&i| output.items.get(i))
         .map(|item| {
             let cells: Vec<Cell> = output
                 .columns

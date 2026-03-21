@@ -22,6 +22,7 @@ pub fn handle_key(
     keybindings: &ResolvedKeybindings,
     has_pending_confirmation: bool,
     has_copy_menu: bool,
+    has_output_search: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -31,6 +32,11 @@ pub fn handle_key(
     // Copy menu intercepts keys when open.
     if has_copy_menu {
         return handle_copy_menu(event);
+    }
+
+    // Output search mode intercepts keys in ViewOutput.
+    if has_output_search && *mode == Mode::ViewOutput {
+        return handle_output_search(event);
     }
 
     match vim_mode {
@@ -168,12 +174,28 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
             ViewOutputAction::ToggleOutputMode => Action::ToggleOutputMode,
             ViewOutputAction::CopyLabel => Action::CopyLabel,
             ViewOutputAction::CopyMenu => Action::CopyMenu,
+            ViewOutputAction::Search => Action::OutputEnterSearch,
+            ViewOutputAction::OpenUrl => Action::OpenUrl,
         });
     }
 
     // Hardcoded fallback: Ctrl+C.
     match event.code {
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        _ => None,
+    }
+}
+
+/// Output search handler: chars append to query, Backspace removes, Esc clears.
+fn handle_output_search(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Backspace | KeyCode::Delete => Some(Action::OutputBackspaceSearch),
+        KeyCode::Esc | KeyCode::Enter => Some(Action::OutputClearSearch),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        // Navigation still works during search.
+        KeyCode::Up => Some(Action::MoveUp),
+        KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Char(c) if !c.is_control() => Some(Action::OutputSearch(c)),
         _ => None,
     }
 }

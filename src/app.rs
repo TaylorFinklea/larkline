@@ -109,6 +109,7 @@ pub enum VimMode {
 /// The TUI layer reads this struct to render; it never writes to it.
 /// State transitions happen here in [`App`].
 #[derive(Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AppState {
     /// All known plugins (loaded from the registry).
     pub plugins: Vec<PluginMetadata>,
@@ -161,6 +162,13 @@ pub struct AppState {
     pub preview_plugin_index: Option<usize>,
     /// Copy-menu overlay state (shown over `ViewOutput` pane).
     pub copy_menu: Option<CopyMenuState>,
+    /// Active search query within the output pane.
+    pub output_query: String,
+    /// Whether output search mode is active (user pressed `/` in `ViewOutput`).
+    pub output_searching: bool,
+    /// Indices into `plugin_output.items` that match `output_query`.
+    /// When empty and `output_query` is empty, all items are shown.
+    pub output_filtered_indices: Vec<usize>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -313,6 +321,7 @@ impl App {
                             &self.keybindings,
                             self.state.pending_confirmation.is_some(),
                             self.state.copy_menu.is_some(),
+                            self.state.output_searching,
                         ) {
                             self.handle_action(action);
                         }
@@ -472,11 +481,13 @@ impl App {
                                     } else {
                                         OutputMode::List
                                     };
+                                    self.rebuild_output_filter();
                                 }
                             } else {
                                 // Fresh load: don't overwrite streaming output.
                                 if self.state.plugin_output.is_none() {
                                     self.state.plugin_output = Some(output);
+                                    self.rebuild_output_filter();
                                 }
                             }
                         }
@@ -556,11 +567,7 @@ impl App {
                         menu.selected += 1;
                     }
                 } else if self.state.mode == Mode::ViewOutput {
-                    let max = self
-                        .state
-                        .plugin_output
-                        .as_ref()
-                        .map_or(0, |o| o.items.len().saturating_sub(1));
+                    let max = self.visible_output_count().saturating_sub(1);
                     if self.state.output_selected < max {
                         self.state.output_selected += 1;
                     }
@@ -598,13 +605,11 @@ impl App {
             Action::Select => {
                 if self.state.mode == Mode::ViewOutput {
                     // In ViewOutput, Select = Execute.
-                    if let Some(ref output) = self.state.plugin_output.clone() {
-                        if let Some(item) = output.items.get(self.state.output_selected) {
-                            if let Some(action) = item.actions.first() {
-                                self.execute_item_action(action);
-                            } else if let Some(ref url) = item.url {
-                                open_url(url);
-                            }
+                    if let Some(item) = self.selected_output_item().cloned() {
+                        if let Some(action) = item.actions.first() {
+                            self.execute_item_action(action);
+                        } else if let Some(ref url) = item.url {
+                            open_url(url);
                         }
                     }
                 } else {
@@ -628,16 +633,15 @@ impl App {
                 self.state.output_mode = OutputMode::List;
                 self.state.viewing_plugin_index = None;
                 self.state.copy_menu = None;
+                self.reset_output_search();
             }
 
             Action::Execute => {
-                if let Some(ref output) = self.state.plugin_output.clone() {
-                    if let Some(item) = output.items.get(self.state.output_selected) {
-                        if let Some(action) = item.actions.first() {
-                            self.execute_item_action(action);
-                        } else if let Some(ref url) = item.url {
-                            open_url(url);
-                        }
+                if let Some(item) = self.selected_output_item().cloned() {
+                    if let Some(action) = item.actions.first() {
+                        self.execute_item_action(action);
+                    } else if let Some(ref url) = item.url {
+                        open_url(url);
                     }
                 }
             }
@@ -652,11 +656,7 @@ impl App {
 
             Action::ScrollHalfPageDown => {
                 if self.state.mode == Mode::ViewOutput {
-                    let max = self
-                        .state
-                        .plugin_output
-                        .as_ref()
-                        .map_or(0, |o| o.items.len().saturating_sub(1));
+                    let max = self.visible_output_count().saturating_sub(1);
                     self.state.output_selected = (self.state.output_selected + 10).min(max);
                 } else {
                     // Advance unified_selected by up to 10 selectable rows.
@@ -729,10 +729,7 @@ impl App {
             Action::CopyLabel => {
                 if self.state.mode == Mode::ViewOutput {
                     let text = self
-                        .state
-                        .plugin_output
-                        .as_ref()
-                        .and_then(|o| o.items.get(self.state.output_selected))
+                        .selected_output_item()
                         .map(|item| {
                             item.copy_text
                                 .as_ref()
@@ -747,12 +744,8 @@ impl App {
 
             Action::CopyMenu => {
                 if self.state.mode == Mode::ViewOutput {
-                    if let Some(item) = self
-                        .state
-                        .plugin_output
-                        .as_ref()
-                        .and_then(|o| o.items.get(self.state.output_selected))
-                    {
+                    if let Some(item) = self.selected_output_item().cloned() {
+                        let item = &item;
                         let mut entries = vec![("Label".to_string(), item.label.clone())];
                         if let Some(ref detail) = item.detail {
                             entries.push(("Detail".to_string(), detail.clone()));
@@ -794,6 +787,51 @@ impl App {
 
             Action::CopyMenuDismiss => {
                 self.state.copy_menu = None;
+            }
+
+            Action::OutputEnterSearch => {
+                if self.state.mode == Mode::ViewOutput {
+                    self.state.output_searching = true;
+                }
+            }
+
+            Action::OutputSearch(c) => {
+                self.state.output_query.push(c);
+                self.rebuild_output_filter();
+            }
+
+            Action::OutputBackspaceSearch => {
+                if self.state.output_query.pop().is_none() {
+                    // Empty query + backspace → exit search mode.
+                    self.state.output_searching = false;
+                }
+                self.rebuild_output_filter();
+            }
+
+            Action::OutputClearSearch => {
+                self.state.output_query.clear();
+                self.state.output_searching = false;
+                self.rebuild_output_filter();
+            }
+
+            Action::OpenUrl => {
+                if self.state.mode == Mode::ViewOutput {
+                    let url = self
+                        .selected_output_item()
+                        .and_then(|item| item.url.clone());
+                    if let Some(url) = url {
+                        open_url(&url);
+                        self.state.status_message = Some((
+                            format!("Opened: {url}"),
+                            std::time::Instant::now(),
+                        ));
+                    } else {
+                        self.state.status_message = Some((
+                            "No URL on this item".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
             }
 
             Action::EnterInsertMode => {
@@ -919,6 +957,7 @@ impl App {
 
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
+        self.reset_output_search();
         self.state.viewing_plugin_index = Some(plugin_index);
         let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
         match self.state.result_cache.get(&plugin_index).cloned() {
@@ -975,6 +1014,74 @@ impl App {
                 self.engine.execute(plugin_index);
             }
         }
+        self.rebuild_output_filter();
+    }
+
+    /// Number of visible output items (filtered count when searching, total otherwise).
+    fn visible_output_count(&self) -> usize {
+        if !self.state.output_filtered_indices.is_empty() || !self.state.output_query.is_empty() {
+            self.state.output_filtered_indices.len()
+        } else {
+            self.state
+                .plugin_output
+                .as_ref()
+                .map_or(0, |o| o.items.len())
+        }
+    }
+
+    /// Returns the output item at the current `output_selected` position,
+    /// mapped through `output_filtered_indices` when a search is active.
+    fn selected_output_item(&self) -> Option<&crate::plugin::traits::OutputItem> {
+        let items = &self.state.plugin_output.as_ref()?.items;
+        if self.state.output_filtered_indices.is_empty() && self.state.output_query.is_empty() {
+            items.get(self.state.output_selected)
+        } else {
+            let real_index = *self.state.output_filtered_indices.get(self.state.output_selected)?;
+            items.get(real_index)
+        }
+    }
+
+    /// Rebuild `output_filtered_indices` based on `output_query`.
+    ///
+    /// Empty query → all item indices. Non-empty → case-insensitive substring match on label+detail.
+    fn rebuild_output_filter(&mut self) {
+        let items = if let Some(ref o) = self.state.plugin_output {
+            &o.items
+        } else {
+            self.state.output_filtered_indices.clear();
+            return;
+        };
+
+        if self.state.output_query.is_empty() {
+            self.state.output_filtered_indices = (0..items.len()).collect();
+        } else {
+            let query_lower = self.state.output_query.to_lowercase();
+            self.state.output_filtered_indices = items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| {
+                    let haystack = match item.detail {
+                        Some(ref d) => format!("{} {d}", item.label),
+                        None => item.label.clone(),
+                    };
+                    haystack.to_lowercase().contains(&query_lower)
+                })
+                .map(|(i, _)| i)
+                .collect();
+        }
+
+        // Clamp selection to filtered range.
+        let max = self.state.output_filtered_indices.len().saturating_sub(1);
+        if self.state.output_selected > max {
+            self.state.output_selected = max;
+        }
+    }
+
+    /// Reset output search state (called when entering `ViewOutput` or going Back).
+    fn reset_output_search(&mut self) {
+        self.state.output_query.clear();
+        self.state.output_searching = false;
+        self.state.output_filtered_indices.clear();
     }
 
     /// Rebuild the unified launcher list from plugin metadata.
