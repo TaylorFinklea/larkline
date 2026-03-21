@@ -345,6 +345,42 @@ fn render_output_pane(
         return;
     }
 
+    // Copy menu overlay
+    if let Some(ref menu) = state.copy_menu {
+        let items: Vec<ListItem> = menu
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, (label, value))| {
+                let preview = if value.len() > 40 {
+                    format!("{}…", &value[..40])
+                } else {
+                    value.clone()
+                };
+                let style = if i == menu.selected {
+                    Style::default()
+                        .bg(theme.highlight_bg)
+                        .fg(theme.highlight_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.text)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {label}: "), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(preview, style),
+                ]))
+            })
+            .collect();
+
+        let copy_block = block.title(Span::styled(
+            " Copy ",
+            Style::default().fg(theme.accent).bold(),
+        ));
+        let list = List::new(items).block(copy_block);
+        frame.render_widget(list, area);
+        return;
+    }
+
     // Loading state
     if state.is_loading {
         let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];

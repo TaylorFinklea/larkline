@@ -139,6 +139,10 @@ pub enum ViewOutputAction {
     ScrollHalfPageUp,
     /// Toggle between list and raw-text view.
     ToggleOutputMode,
+    /// Copy the selected item's label to the clipboard.
+    CopyLabel,
+    /// Open the copy-menu overlay.
+    CopyMenu,
 }
 
 impl KeybindingsConfig {
@@ -318,6 +322,15 @@ impl KeybindingsConfig {
         m.insert(
             key(KeyCode::Char('t'), KeyModifiers::NONE),
             ViewOutputAction::ToggleOutputMode,
+        );
+        // Clipboard: y copies label, Y (shift) opens copy menu.
+        m.insert(
+            key(KeyCode::Char('y'), KeyModifiers::NONE),
+            ViewOutputAction::CopyLabel,
+        );
+        m.insert(
+            key(KeyCode::Char('Y'), KeyModifiers::SHIFT),
+            ViewOutputAction::CopyMenu,
         );
         // Config overrides for scroll bindings.
         if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {

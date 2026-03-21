@@ -48,4 +48,12 @@ pub enum Action {
     Confirm,
     /// User cancelled the pending shell action.
     Cancel,
+    /// Copy the selected item's label to the system clipboard.
+    CopyLabel,
+    /// Open the copy menu overlay (label / detail / JSON / URL).
+    CopyMenu,
+    /// Select the highlighted entry in the copy menu.
+    CopyMenuSelect,
+    /// Dismiss the copy menu without copying.
+    CopyMenuDismiss,
 }

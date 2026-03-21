@@ -21,10 +21,16 @@ pub fn handle_key(
     vim_mode: &VimMode,
     keybindings: &ResolvedKeybindings,
     has_pending_confirmation: bool,
+    has_copy_menu: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
         return handle_confirmation(event);
+    }
+
+    // Copy menu intercepts keys when open.
+    if has_copy_menu {
+        return handle_copy_menu(event);
     }
 
     match vim_mode {
@@ -136,6 +142,18 @@ fn handle_command(event: KeyEvent) -> Option<Action> {
     }
 }
 
+/// Copy menu handler: j/k navigate, Enter selects, Esc dismisses.
+fn handle_copy_menu(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
+        KeyCode::Enter => Some(Action::CopyMenuSelect),
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::CopyMenuDismiss),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        _ => None,
+    }
+}
+
 fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
     // Check configurable view_output map.
     if let Some(action) = keybindings.view_output_map.get(&event) {
@@ -148,6 +166,8 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
             ViewOutputAction::ScrollHalfPageDown => Action::ScrollHalfPageDown,
             ViewOutputAction::ScrollHalfPageUp => Action::ScrollHalfPageUp,
             ViewOutputAction::ToggleOutputMode => Action::ToggleOutputMode,
+            ViewOutputAction::CopyLabel => Action::CopyLabel,
+            ViewOutputAction::CopyMenu => Action::CopyMenu,
         });
     }
 

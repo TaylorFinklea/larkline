@@ -159,6 +159,8 @@ pub struct AppState {
     pub viewing_plugin_index: Option<usize>,
     /// Plugin index of the highlighted command in Unified mode (for preview pane).
     pub preview_plugin_index: Option<usize>,
+    /// Copy-menu overlay state (shown over `ViewOutput` pane).
+    pub copy_menu: Option<CopyMenuState>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -170,6 +172,15 @@ pub struct PendingConfirmation {
     pub command: String,
     /// Arguments to pass.
     pub args: Vec<String>,
+}
+
+/// Overlay state for the copy-to-clipboard menu.
+#[derive(Debug, Clone)]
+pub struct CopyMenuState {
+    /// Available entries: `(label, value)` pairs.
+    pub entries: Vec<(String, String)>,
+    /// Index of the highlighted menu entry.
+    pub selected: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +312,7 @@ impl App {
                             &self.state.vim_mode,
                             &self.keybindings,
                             self.state.pending_confirmation.is_some(),
+                            self.state.copy_menu.is_some(),
                         ) {
                             self.handle_action(action);
                         }
@@ -515,7 +527,9 @@ impl App {
             Action::Quit => self.state.should_quit = true,
 
             Action::MoveUp => {
-                if self.state.mode == Mode::ViewOutput {
+                if let Some(ref mut menu) = self.state.copy_menu {
+                    menu.selected = menu.selected.saturating_sub(1);
+                } else if self.state.mode == Mode::ViewOutput {
                     if self.state.output_selected > 0 {
                         self.state.output_selected -= 1;
                     }
@@ -536,7 +550,12 @@ impl App {
             }
 
             Action::MoveDown => {
-                if self.state.mode == Mode::ViewOutput {
+                if let Some(ref mut menu) = self.state.copy_menu {
+                    let max = menu.entries.len().saturating_sub(1);
+                    if menu.selected < max {
+                        menu.selected += 1;
+                    }
+                } else if self.state.mode == Mode::ViewOutput {
                     let max = self
                         .state
                         .plugin_output
@@ -704,6 +723,59 @@ impl App {
 
             Action::Cancel => {
                 self.state.pending_confirmation = None;
+            }
+
+            Action::CopyLabel => {
+                if self.state.mode == Mode::ViewOutput {
+                    let label = self
+                        .state
+                        .plugin_output
+                        .as_ref()
+                        .and_then(|o| o.items.get(self.state.output_selected))
+                        .map(|item| item.label.clone());
+                    if let Some(label) = label {
+                        copy_and_flash(&label, &mut self.state);
+                    }
+                }
+            }
+
+            Action::CopyMenu => {
+                if self.state.mode == Mode::ViewOutput {
+                    if let Some(item) = self
+                        .state
+                        .plugin_output
+                        .as_ref()
+                        .and_then(|o| o.items.get(self.state.output_selected))
+                    {
+                        let mut entries = vec![("Label".to_string(), item.label.clone())];
+                        if let Some(ref detail) = item.detail {
+                            entries.push(("Detail".to_string(), detail.clone()));
+                        }
+                        if let Some(ref url) = item.url {
+                            entries.push(("URL".to_string(), url.clone()));
+                        }
+                        entries.push((
+                            "JSON".to_string(),
+                            serde_json::to_string(item).unwrap_or_default(),
+                        ));
+                        self.state.copy_menu = Some(CopyMenuState {
+                            entries,
+                            selected: 0,
+                        });
+                    }
+                }
+            }
+
+            Action::CopyMenuSelect => {
+                if let Some(menu) = self.state.copy_menu.take() {
+                    if let Some((_, value)) = menu.entries.get(menu.selected) {
+                        copy_and_flash(value, &mut self.state);
+                    }
+                }
+            }
+
+            Action::CopyMenuDismiss => {
+                self.state.copy_menu = None;
             }
 
             Action::EnterInsertMode => {
@@ -1108,6 +1180,24 @@ fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
         }
         Err(e) => {
             state.plugin_error = Some(format!("shell command failed: {e}"));
+        }
+    }
+}
+
+/// Copy a string to the system clipboard and show a flash message on the status bar.
+fn copy_and_flash(text: &str, state: &mut AppState) {
+    match copy_to_clipboard(text) {
+        Ok(()) => {
+            let preview = if text.len() > 40 {
+                format!("{}…", &text[..40])
+            } else {
+                text.to_string()
+            };
+            state.status_message = Some((format!("Copied: {preview}"), std::time::Instant::now()));
+        }
+        Err(e) => {
+            state.status_message =
+                Some((format!("Clipboard error: {e}"), std::time::Instant::now()));
         }
     }
 }
