@@ -57,6 +57,8 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
             BrowseAction::Select => Action::Select,
             BrowseAction::Quit => Action::Quit,
             BrowseAction::Refresh => Action::RefreshPlugins,
+            BrowseAction::ScrollHalfPageDown => Action::ScrollHalfPageDown,
+            BrowseAction::ScrollHalfPageUp => Action::ScrollHalfPageUp,
         });
     }
 

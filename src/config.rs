@@ -119,6 +119,10 @@ pub enum BrowseAction {
     Quit,
     /// Re-scan plugin directories.
     Refresh,
+    /// Scroll the unified list down by half a page.
+    ScrollHalfPageDown,
+    /// Scroll the unified list up by half a page.
+    ScrollHalfPageUp,
 }
 
 /// Actions available in `ViewOutput` mode (subset of all actions).
@@ -224,6 +228,22 @@ impl KeybindingsConfig {
             key(KeyCode::Char('R'), KeyModifiers::SHIFT),
             BrowseAction::Refresh,
         );
+        // Default half-page scroll bindings for unified list.
+        m.insert(
+            key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            BrowseAction::ScrollHalfPageDown,
+        );
+        m.insert(
+            key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            BrowseAction::ScrollHalfPageUp,
+        );
+        // Config overrides for scroll bindings.
+        if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {
+            m.insert(ev, BrowseAction::ScrollHalfPageDown);
+        }
+        if let Some(ev) = parse_key_opt(self.scroll_half_page_up.as_deref()) {
+            m.insert(ev, BrowseAction::ScrollHalfPageUp);
+        }
         m
     }
 
@@ -524,6 +544,9 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 
 # Icon set: "nerd" (default, requires Nerd Font) or "emoji".
 # icon_set = "nerd"
+
+# Maximum items shown per section in the unified list (0 = unlimited).
+# max_items_per_section = 5
 
 [logging]
 # Log level written to stderr. Options: error, warn, info, debug, trace.
