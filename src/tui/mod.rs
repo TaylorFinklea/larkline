@@ -1,5 +1,6 @@
 //! Terminal initialization and teardown.
 
+pub mod markdown;
 pub mod ui;
 
 use anyhow::Result;
