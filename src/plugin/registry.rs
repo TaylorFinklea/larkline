@@ -43,6 +43,10 @@ pub enum RegistryError {
     },
 }
 
+fn default_icon() -> String {
+    "\u{1F527}".to_string() // 🔧
+}
+
 #[derive(Deserialize)]
 struct ManifestFile {
     plugin: ManifestPlugin,
@@ -56,6 +60,7 @@ struct ManifestPlugin {
     description: String,
     version: String,
     author: String,
+    #[serde(default = "default_icon")]
     icon: String,
     /// Entry script — required for single-command plugins; ignored when `[[commands]]` is declared.
     entry: Option<String>,
