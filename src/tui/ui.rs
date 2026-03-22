@@ -392,6 +392,12 @@ fn render_output_pane(
         return;
     }
 
+    // Form overlay (replaces items area when a form is active).
+    if let Some(ref form) = state.form_state {
+        render_form(frame, form, theme, block, area);
+        return;
+    }
+
     // Loading state
     if state.is_loading {
         let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
@@ -618,6 +624,143 @@ fn render_output_table(
     table_state.select(Some(state.output_selected));
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+#[allow(clippy::too_many_lines)]
+fn render_form(
+    frame: &mut Frame,
+    form: &crate::app::FormState,
+    theme: &Theme,
+    block: Block,
+    area: ratatui::layout::Rect,
+) {
+    use crate::plugin::traits::FieldType;
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::raw("")); // top padding
+
+    for (i, field) in form.fields.iter().enumerate() {
+        let is_focused = i == form.focused;
+        let label_style = if is_focused {
+            Style::default().fg(theme.accent).bold()
+        } else {
+            Style::default().fg(theme.text)
+        };
+
+        match &field.spec.field_type {
+            FieldType::Text => {
+                // Label row.
+                let mut label_spans = vec![Span::styled(
+                    format!("  {} ", field.spec.label),
+                    label_style,
+                )];
+                if field.spec.required {
+                    label_spans
+                        .push(Span::styled("*", Style::default().fg(theme.error)));
+                }
+                lines.push(Line::from(label_spans));
+
+                // Input row.
+                if field.value.is_empty() {
+                    let placeholder =
+                        field.spec.placeholder.as_deref().unwrap_or("");
+                    let ph_style = Style::default().fg(theme.text_dimmed);
+                    let cursor = if is_focused { "█" } else { "" };
+                    lines.push(Line::from(vec![
+                        Span::raw("  ["),
+                        Span::styled(placeholder, ph_style),
+                        Span::styled(cursor, Style::default().fg(theme.accent)),
+                        Span::raw("]"),
+                    ]));
+                } else if is_focused {
+                    let before = &field.value[..field.cursor];
+                    let after = &field.value[field.cursor..];
+                    let val_style = Style::default().fg(theme.text);
+                    lines.push(Line::from(vec![
+                        Span::raw("  ["),
+                        Span::styled(before, val_style),
+                        Span::styled("█", Style::default().fg(theme.accent)),
+                        Span::styled(after, val_style),
+                        Span::raw("]"),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  ["),
+                        Span::styled(
+                            field.value.as_str(),
+                            Style::default().fg(theme.text),
+                        ),
+                        Span::raw("]"),
+                    ]));
+                }
+            }
+            FieldType::Select { options } => {
+                let mut label_spans = vec![Span::styled(
+                    format!("  {} ", field.spec.label),
+                    label_style,
+                )];
+                if field.spec.required {
+                    label_spans
+                        .push(Span::styled("*", Style::default().fg(theme.error)));
+                }
+                lines.push(Line::from(label_spans));
+
+                let selected = options
+                    .get(field.selected_option)
+                    .map_or("", String::as_str);
+                let sel_style = if is_focused {
+                    Style::default()
+                        .fg(theme.highlight_fg)
+                        .bg(theme.highlight_bg)
+                } else {
+                    Style::default().fg(theme.text)
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(format!("[▼ {selected}]"), sel_style),
+                ]));
+            }
+            FieldType::Toggle => {
+                let check = if field.toggled { "x" } else { " " };
+                let tog_style = if is_focused {
+                    Style::default()
+                        .fg(theme.highlight_fg)
+                        .bg(theme.highlight_bg)
+                } else {
+                    Style::default().fg(theme.text)
+                };
+                let mut spans = vec![
+                    Span::raw("  "),
+                    Span::styled(format!("[{check}] "), tog_style),
+                    Span::styled(field.spec.label.as_str(), label_style),
+                ];
+                if field.spec.required {
+                    spans.push(Span::styled(" *", Style::default().fg(theme.error)));
+                }
+                lines.push(Line::from(spans));
+            }
+        }
+        lines.push(Line::raw("")); // spacing between fields
+    }
+
+    // Submit button.
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            format!("[ {} ]", form.submit_label),
+            Style::default().fg(theme.accent).bold(),
+        ),
+    ]));
+
+    // Hint.
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab: next  Shift+Tab: prev  Enter: submit  Esc: cancel",
+        Style::default().fg(theme.text_dimmed),
+    )));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_status_bar(
