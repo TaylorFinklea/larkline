@@ -44,7 +44,7 @@ pub enum RegistryError {
 }
 
 fn default_icon() -> String {
-    "\u{1F527}".to_string() // 🔧
+    "◆".to_string()
 }
 
 #[derive(Deserialize)]

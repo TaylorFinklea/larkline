@@ -43,9 +43,9 @@ pub struct GeneralConfig {
 #[serde(rename_all = "lowercase")]
 pub enum IconSet {
     /// Nerd Font glyphs (requires a Nerd Font installed). Falls back to emoji when `icon_nerd` is absent.
-    #[default]
     Nerd,
     /// Standard emoji icons (works in any terminal).
+    #[default]
     Emoji,
 }
 

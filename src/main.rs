@@ -156,7 +156,7 @@ name = "{name}"
 description = "A new Larkline plugin"
 version = "0.1.0"
 author = ""
-icon = "🔧"
+icon = "◆"
 icon_nerd = ""
 entry = "{entry}"
 timeout_seconds = 10
@@ -173,7 +173,7 @@ name = "{name}"
 description = "A new multi-command Larkline plugin"
 version = "0.1.0"
 author = ""
-icon = "🔧"
+icon = "◆"
 icon_nerd = ""
 category = "custom"
 
@@ -199,7 +199,7 @@ fn generate_lua_template(name: &str) -> String {
         return {{
             title = "{name}",
             items = {{
-                {{ label = "Hello from {name}!", detail = "Edit init.lua to customize", icon = "🔧" }},
+                {{ label = "Hello from {name}!", detail = "Edit init.lua to customize", icon = "◆" }},
             }},
         }}
     end,
@@ -214,7 +214,7 @@ fn generate_shell_template(name: &str) -> String {
 jq -n --arg name '{name}' '{{
   title: $name,
   items: [
-    {{label: ("Hello from " + $name + "!"), detail: "Edit run.sh to customize", icon: "🔧"}}
+    {{label: ("Hello from " + $name + "!"), detail: "Edit run.sh to customize", icon: "◆"}}
   ]
 }}'
 "#
