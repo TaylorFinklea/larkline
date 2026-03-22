@@ -249,6 +249,11 @@ impl KeybindingsConfig {
             key(KeyCode::Char('u'), KeyModifiers::CONTROL),
             BrowseAction::ScrollHalfPageUp,
         );
+        // Right arrow drills into a plugin (same as l / Enter).
+        m.insert(
+            key(KeyCode::Right, KeyModifiers::NONE),
+            BrowseAction::Select,
+        );
         // Config overrides for scroll bindings.
         if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {
             m.insert(ev, BrowseAction::ScrollHalfPageDown);
@@ -296,6 +301,11 @@ impl KeybindingsConfig {
         );
         m.insert(
             key(KeyCode::Backspace, KeyModifiers::NONE),
+            ViewOutputAction::Back,
+        );
+        // Left arrow goes back (same as h / Esc / Backspace).
+        m.insert(
+            key(KeyCode::Left, KeyModifiers::NONE),
             ViewOutputAction::Back,
         );
         if let Some(ev) = parse_key_opt(self.move_up.as_deref()) {

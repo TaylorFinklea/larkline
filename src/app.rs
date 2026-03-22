@@ -711,6 +711,8 @@ impl App {
                     self.state.mode = Mode::ViewOutput;
                 } else {
                     // Empty history: return to Unified.
+                    // Preserve search query (Raycast-style: Esc goes back with search
+                    // still active; a second Esc clears it via EnterNormalMode).
                     self.state.mode = Mode::Unified;
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
@@ -718,6 +720,9 @@ impl App {
                     self.state.output_mode = OutputMode::List;
                     self.state.viewing_plugin_index = None;
                     self.state.scroll_offset = 0;
+                    if !self.state.query.is_empty() {
+                        self.state.vim_mode = VimMode::Insert;
+                    }
                 }
             }
 
