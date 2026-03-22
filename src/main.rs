@@ -53,6 +53,7 @@ lark — a keyboard-driven terminal command palette
 
 Usage: lark [OPTIONS]
        lark init-plugin <NAME> [--shell|--multi]
+       lark invoke <NAME>
 
 Options:
   --help, -h              Show this help message
@@ -62,7 +63,8 @@ Options:
 Commands:
   init-plugin <NAME>      Scaffold a new plugin directory
     --shell               Generate a shell (bash) plugin instead of Lua
-    --multi               Generate a multi-command plugin with [[commands]]"
+    --multi               Generate a multi-command plugin with [[commands]]
+  invoke <NAME>           Execute a plugin by name and print JSON output"
     );
 }
 
@@ -106,6 +108,44 @@ fn init_plugin(name: &str, shell: bool, multi: bool) -> Result<()> {
         println!("  manifest.toml");
         println!("  {entry}");
     }
+    Ok(())
+}
+
+/// Execute a plugin by name and print its JSON output to stdout.
+async fn invoke_plugin(name: &str) -> Result<()> {
+    let (cfg, _) = config::load().unwrap_or_else(|e| {
+        eprintln!("larkline: config error ({e}), using defaults");
+        (config::Config::default(), Vec::new())
+    });
+
+    let mut discovered = plugin::registry::scan(&cfg.general.plugin_dirs)?;
+    if cfg.ui.icon_set == config::IconSet::Nerd {
+        for d in &mut discovered {
+            if let Some(ref nerd) = d.metadata.icon_nerd {
+                d.metadata.icon = nerd.clone();
+            }
+        }
+    }
+
+    let plugins: Vec<Arc<dyn plugin::Plugin>> =
+        discovered.into_iter().map(plugin::build_plugin).collect();
+
+    let target = plugins
+        .iter()
+        .find(|p| p.metadata().name == name)
+        .ok_or_else(|| anyhow::anyhow!("plugin not found: {name}"))?
+        .clone();
+
+    let all_plugins = Arc::new(plugins);
+
+    let output = plugin::engine::PLUGIN_LIST
+        .scope(
+            all_plugins,
+            plugin::engine::INVOKE_DEPTH.scope(0, async { target.execute().await }),
+        )
+        .await?;
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 
@@ -219,6 +259,12 @@ async fn main() -> Result<()> {
         let shell = args.iter().any(|a| a == "--shell");
         let multi = args.iter().any(|a| a == "--multi");
         return init_plugin(name, shell, multi);
+    }
+    if args.get(1).is_some_and(|a| a == "invoke") {
+        let name = args
+            .get(2)
+            .ok_or_else(|| anyhow::anyhow!("Usage: lark invoke <PLUGIN_NAME>"))?;
+        return invoke_plugin(name).await;
     }
 
     // Generate a commented default config on first run.
