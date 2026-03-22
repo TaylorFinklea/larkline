@@ -411,6 +411,54 @@ fn render_output_pane(
         return;
     }
 
+    // Action palette overlay.
+    if let Some(ref palette) = state.action_palette {
+        use crate::plugin::traits::ActionKind;
+
+        let items: Vec<ListItem> = palette
+            .filtered_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(vis_idx, &real_idx)| {
+                let action = palette.actions.get(real_idx)?;
+                let icon = match action.kind {
+                    ActionKind::Open => "↗",
+                    ActionKind::Clipboard => "⎘",
+                    ActionKind::Shell => "▶",
+                };
+                let style = if vis_idx == palette.selected {
+                    Style::default()
+                        .bg(theme.highlight_bg)
+                        .fg(theme.highlight_fg)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.text)
+                };
+                Some(ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {icon} "), style),
+                    Span::styled(action.label.as_str(), style),
+                ])))
+            })
+            .collect();
+
+        let mut title_parts = vec![Span::styled(
+            " Actions ",
+            Style::default().fg(theme.accent).bold(),
+        )];
+        if !palette.query.is_empty() {
+            title_parts.push(Span::styled(
+                format!("/{} ", palette.query),
+                Style::default().fg(theme.text_dimmed),
+            ));
+        }
+
+        let palette_block = block
+            .title(Line::from(title_parts));
+        let list = List::new(items).block(palette_block);
+        frame.render_widget(list, area);
+        return;
+    }
+
     // Form overlay (replaces items area when a form is active).
     if let Some(ref form) = state.form_state {
         render_form(frame, form, theme, block, area);

@@ -177,6 +177,8 @@ pub struct AppState {
     pub scroll_offset: usize,
     /// Whether to show plugin descriptions in the unified list.
     pub show_descriptions: bool,
+    /// Action palette overlay (searchable action list for the selected item).
+    pub action_palette: Option<ActionPaletteState>,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
 }
@@ -199,6 +201,41 @@ pub struct CopyMenuState {
     pub entries: Vec<(String, String)>,
     /// Index of the highlighted menu entry.
     pub selected: usize,
+}
+
+/// Overlay state for the action palette (searchable action list for an item).
+#[derive(Debug, Clone)]
+pub struct ActionPaletteState {
+    /// All actions available for the selected item (plugin-defined + built-in).
+    pub actions: Vec<crate::plugin::traits::ItemAction>,
+    /// Index of the highlighted action in the filtered list.
+    pub selected: usize,
+    /// Search query to filter actions by label.
+    pub query: String,
+    /// Indices into `actions` that match the current query.
+    pub filtered_indices: Vec<usize>,
+}
+
+impl ActionPaletteState {
+    /// Rebuild filtered indices based on the current query.
+    fn rebuild_filter(&mut self) {
+        if self.query.is_empty() {
+            self.filtered_indices = (0..self.actions.len()).collect();
+        } else {
+            let q = self.query.to_lowercase();
+            self.filtered_indices = self
+                .actions
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.label.to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect();
+        }
+        let max = self.filtered_indices.len().saturating_sub(1);
+        if self.selected > max {
+            self.selected = max;
+        }
+    }
 }
 
 /// Mutable state for an active form being filled by the user.
@@ -383,6 +420,7 @@ impl App {
                             self.state.copy_menu.is_some(),
                             self.state.output_searching,
                             self.state.form_state.is_some(),
+                            self.state.action_palette.is_some(),
                         ) {
                             self.handle_action(action);
                         }
@@ -676,12 +714,21 @@ impl App {
 
             Action::Select => {
                 if self.state.mode == Mode::ViewOutput {
-                    // In ViewOutput, Select = Execute.
+                    // In ViewOutput: 0 actions → URL fallback, 1 → run it,
+                    // 2+ → open the action palette.
                     if let Some(item) = self.selected_output_item().cloned() {
-                        if let Some(action) = item.actions.first() {
-                            self.execute_item_action(action);
-                        } else if let Some(ref url) = item.url {
-                            open_url(url);
+                        match item.actions.len() {
+                            0 => {
+                                if let Some(ref url) = item.url {
+                                    open_url(url);
+                                }
+                            }
+                            1 => {
+                                self.execute_item_action(&item.actions[0]);
+                            }
+                            _ => {
+                                self.handle_action(Action::PaletteOpen);
+                            }
                         }
                     }
                 } else {
@@ -701,6 +748,7 @@ impl App {
                 // Clear ephemeral overlays.
                 self.state.copy_menu = None;
                 self.state.form_state = None;
+                self.state.action_palette = None;
                 self.reset_output_search();
 
                 if let Some(entry) = self.state.navigation_history.pop() {
@@ -731,10 +779,18 @@ impl App {
 
             Action::Execute => {
                 if let Some(item) = self.selected_output_item().cloned() {
-                    if let Some(action) = item.actions.first() {
-                        self.execute_item_action(action);
-                    } else if let Some(ref url) = item.url {
-                        open_url(url);
+                    match item.actions.len() {
+                        0 => {
+                            if let Some(ref url) = item.url {
+                                open_url(url);
+                            }
+                        }
+                        1 => {
+                            self.execute_item_action(&item.actions[0]);
+                        }
+                        _ => {
+                            self.handle_action(Action::PaletteOpen);
+                        }
                     }
                 }
             }
@@ -838,6 +894,77 @@ impl App {
 
             Action::ToggleDescriptions => {
                 self.state.show_descriptions = !self.state.show_descriptions;
+            }
+
+            Action::PaletteOpen => {
+                if self.state.mode == Mode::ViewOutput {
+                    if let Some(item) = self.selected_output_item().cloned() {
+                        let mut actions = item.actions.clone();
+                        // Add built-in actions.
+                        actions.push(ItemAction {
+                            id: Some("_copy_label".to_string()),
+                            label: "Copy Label".to_string(),
+                            kind: ActionKind::Clipboard,
+                            args: vec![item
+                                .copy_text
+                                .as_ref()
+                                .unwrap_or(&item.label)
+                                .clone()],
+                            confirm: false,
+                        });
+                        actions.push(ItemAction {
+                            id: Some("_copy_json".to_string()),
+                            label: "Copy as JSON".to_string(),
+                            kind: ActionKind::Clipboard,
+                            args: vec![serde_json::to_string(&item).unwrap_or_default()],
+                            confirm: false,
+                        });
+                        if let Some(ref url) = item.url {
+                            actions.push(ItemAction {
+                                id: Some("_open_url".to_string()),
+                                label: "Open URL".to_string(),
+                                kind: ActionKind::Open,
+                                args: vec![url.clone()],
+                                confirm: false,
+                            });
+                        }
+                        let filtered_indices = (0..actions.len()).collect();
+                        self.state.action_palette = Some(ActionPaletteState {
+                            actions,
+                            selected: 0,
+                            query: String::new(),
+                            filtered_indices,
+                        });
+                    }
+                }
+            }
+
+            Action::PaletteSelect => {
+                if let Some(palette) = self.state.action_palette.take() {
+                    if let Some(&real_idx) = palette.filtered_indices.get(palette.selected) {
+                        if let Some(action) = palette.actions.get(real_idx) {
+                            self.execute_item_action(action);
+                        }
+                    }
+                }
+            }
+
+            Action::PaletteDismiss => {
+                self.state.action_palette = None;
+            }
+
+            Action::PaletteSearch(c) => {
+                if let Some(ref mut palette) = self.state.action_palette {
+                    palette.query.push(c);
+                    palette.rebuild_filter();
+                }
+            }
+
+            Action::PaletteBackspace => {
+                if let Some(ref mut palette) = self.state.action_palette {
+                    palette.query.pop();
+                    palette.rebuild_filter();
+                }
             }
 
             Action::Confirm => {

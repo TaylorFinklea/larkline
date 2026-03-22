@@ -68,6 +68,16 @@ pub enum Action {
     OpenUrl,
     /// Toggle plugin description visibility in the unified list.
     ToggleDescriptions,
+    /// Open the action palette for the selected item.
+    PaletteOpen,
+    /// Select the highlighted action in the palette.
+    PaletteSelect,
+    /// Dismiss the action palette.
+    PaletteDismiss,
+    /// Append a character to the action palette search query.
+    PaletteSearch(char),
+    /// Delete the last character from the action palette search query.
+    PaletteBackspace,
     /// Move focus to the next form field.
     FormNextField,
     /// Move focus to the previous form field.

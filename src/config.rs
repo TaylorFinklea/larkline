@@ -149,6 +149,8 @@ pub enum ViewOutputAction {
     Search,
     /// Open the selected item's URL in the system browser.
     OpenUrl,
+    /// Open the action palette for the selected item.
+    ActionPalette,
 }
 
 impl KeybindingsConfig {
@@ -357,6 +359,11 @@ impl KeybindingsConfig {
         m.insert(
             key(KeyCode::Char('o'), KeyModifiers::NONE),
             ViewOutputAction::OpenUrl,
+        );
+        // Action palette (: opens searchable action list).
+        m.insert(
+            key(KeyCode::Char(':'), KeyModifiers::NONE),
+            ViewOutputAction::ActionPalette,
         );
         // Config overrides for scroll bindings.
         if let Some(ev) = parse_key_opt(self.scroll_half_page_down.as_deref()) {

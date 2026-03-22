@@ -25,6 +25,7 @@ pub fn handle_key(
     has_copy_menu: bool,
     has_output_search: bool,
     has_form: bool,
+    has_action_palette: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -34,6 +35,11 @@ pub fn handle_key(
     // Copy menu intercepts keys when open.
     if has_copy_menu {
         return handle_copy_menu(event);
+    }
+
+    // Action palette intercepts keys when open.
+    if has_action_palette && *mode == Mode::ViewOutput {
+        return handle_action_palette(event);
     }
 
     // Form input intercepts all keys when a form is active.
@@ -159,6 +165,22 @@ fn handle_command(event: KeyEvent) -> Option<Action> {
     }
 }
 
+/// Action palette handler: j/k navigate, Enter selects, Esc dismisses, type to filter.
+fn handle_action_palette(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
+        KeyCode::Enter => Some(Action::PaletteSelect),
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::PaletteDismiss),
+        KeyCode::Backspace | KeyCode::Delete => Some(Action::PaletteBackspace),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::Quit)
+        }
+        KeyCode::Char(c) if !c.is_control() => Some(Action::PaletteSearch(c)),
+        _ => None,
+    }
+}
+
 /// Copy menu handler: j/k navigate, Enter selects, Esc dismisses.
 fn handle_copy_menu(event: KeyEvent) -> Option<Action> {
     match event.code {
@@ -187,6 +209,7 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
             ViewOutputAction::CopyMenu => Action::CopyMenu,
             ViewOutputAction::Search => Action::OutputEnterSearch,
             ViewOutputAction::OpenUrl => Action::OpenUrl,
+            ViewOutputAction::ActionPalette => Action::PaletteOpen,
         });
     }
 
