@@ -175,6 +175,8 @@ pub struct AppState {
     pub form_state: Option<FormState>,
     /// Scroll offset for Markdown and `RawText` output modes (line-based).
     pub scroll_offset: usize,
+    /// History stack for back-navigation through `ViewOutput` states.
+    pub navigation_history: Vec<NavigationEntry>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -224,6 +226,26 @@ pub struct FormFieldState {
     pub selected_option: usize,
     /// Whether the toggle is on (for Toggle fields).
     pub toggled: bool,
+}
+
+/// Maximum entries in the navigation history stack.
+const MAX_NAV_HISTORY: usize = 10;
+
+/// Snapshot of `ViewOutput` state saved when navigating to another plugin.
+#[derive(Debug, Clone)]
+pub struct NavigationEntry {
+    /// Plugin index that was being viewed.
+    pub plugin_index: usize,
+    /// The plugin's output at the time of navigation.
+    pub plugin_output: Option<PluginOutput>,
+    /// Error message, if any.
+    pub plugin_error: Option<String>,
+    /// Selected item index within the output.
+    pub output_selected: usize,
+    /// How the output was being displayed.
+    pub output_mode: OutputMode,
+    /// Scroll offset for Markdown/RawText modes.
+    pub scroll_offset: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -673,16 +695,30 @@ impl App {
             }
 
             Action::Back => {
-                self.state.mode = Mode::Unified;
-                self.state.plugin_output = None;
-                self.state.plugin_error = None;
-                self.state.output_selected = 0;
-                self.state.output_mode = OutputMode::List;
-                self.state.viewing_plugin_index = None;
+                // Clear ephemeral overlays.
                 self.state.copy_menu = None;
                 self.state.form_state = None;
-                self.state.scroll_offset = 0;
                 self.reset_output_search();
+
+                if let Some(entry) = self.state.navigation_history.pop() {
+                    // Restore previous ViewOutput state from history.
+                    self.state.viewing_plugin_index = Some(entry.plugin_index);
+                    self.state.plugin_output = entry.plugin_output;
+                    self.state.plugin_error = entry.plugin_error;
+                    self.state.output_selected = entry.output_selected;
+                    self.state.output_mode = entry.output_mode;
+                    self.state.scroll_offset = entry.scroll_offset;
+                    self.state.mode = Mode::ViewOutput;
+                } else {
+                    // Empty history: return to Unified.
+                    self.state.mode = Mode::Unified;
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
+                    self.state.output_selected = 0;
+                    self.state.output_mode = OutputMode::List;
+                    self.state.viewing_plugin_index = None;
+                    self.state.scroll_offset = 0;
+                }
             }
 
             Action::Execute => {
@@ -1140,6 +1176,7 @@ impl App {
                     self.state.loading_started = None;
                     self.state.result_cache.clear();
                     self.state.viewing_plugin_index = None;
+                    self.state.navigation_history.clear();
                     self.engine.execute_all();
                     self.rebuild_unified_list();
                 }
@@ -1191,6 +1228,24 @@ impl App {
 
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
+        // Push current ViewOutput state onto history if already viewing a plugin.
+        if self.state.mode == Mode::ViewOutput {
+            if let Some(current_idx) = self.state.viewing_plugin_index {
+                let entry = NavigationEntry {
+                    plugin_index: current_idx,
+                    plugin_output: self.state.plugin_output.clone(),
+                    plugin_error: self.state.plugin_error.clone(),
+                    output_selected: self.state.output_selected,
+                    output_mode: self.state.output_mode.clone(),
+                    scroll_offset: self.state.scroll_offset,
+                };
+                self.state.navigation_history.push(entry);
+                if self.state.navigation_history.len() > MAX_NAV_HISTORY {
+                    self.state.navigation_history.remove(0);
+                }
+            }
+        }
+
         self.reset_output_search();
         self.state.viewing_plugin_index = Some(plugin_index);
         let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
