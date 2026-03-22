@@ -282,6 +282,23 @@ impl Plugin for LuaPlugin {
     }
 
     async fn execute(&self) -> Result<PluginOutput, PluginError> {
+        self.execute_inner(None).await
+    }
+
+    async fn execute_with_form(
+        &self,
+        form_values: std::collections::HashMap<String, String>,
+    ) -> Result<PluginOutput, PluginError> {
+        self.execute_inner(Some(form_values)).await
+    }
+}
+
+impl LuaPlugin {
+    /// Shared execution logic for `execute()` and `execute_with_form()`.
+    async fn execute_inner(
+        &self,
+        form_values: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<PluginOutput, PluginError> {
         if !self.script_path.exists() {
             return Err(PluginError::ExecutionFailed(format!(
                 "Lua script not found: {}",
@@ -310,6 +327,26 @@ impl Plugin for LuaPlugin {
         tokio::time::timeout(timeout, async move {
             let lua = Self::create_vm()?;
             Self::register_api(&lua, plugin_name, store)?;
+
+            // Inject form values as lark.form_values table (if present).
+            if let Some(values) = form_values {
+                if !values.is_empty() {
+                    let lark: LuaTable = lua
+                        .globals()
+                        .get("lark")
+                        .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+                    let fv_table = lua
+                        .create_table()
+                        .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+                    for (key, value) in &values {
+                        fv_table
+                            .set(key.as_str(), value.as_str())
+                            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+                    }
+                    lark.set("form_values", fv_table)
+                        .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+                }
+            }
 
             // Load the plugin script (defines on_run via lark.register).
             lua.load(&script)

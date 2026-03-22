@@ -36,6 +36,23 @@ impl Plugin for ScriptPlugin {
     }
 
     async fn execute(&self) -> Result<PluginOutput, PluginError> {
+        self.execute_inner(None).await
+    }
+
+    async fn execute_with_form(
+        &self,
+        form_values: std::collections::HashMap<String, String>,
+    ) -> Result<PluginOutput, PluginError> {
+        self.execute_inner(Some(form_values)).await
+    }
+}
+
+impl ScriptPlugin {
+    /// Shared execution logic for `execute()` and `execute_with_form()`.
+    async fn execute_inner(
+        &self,
+        form_values: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<PluginOutput, PluginError> {
         if !self.entry_path.exists() {
             return Err(PluginError::ExecutionFailed(format!(
                 "entry script not found: {}",
@@ -48,16 +65,20 @@ impl Plugin for ScriptPlugin {
             self.metadata.plugin_group.as_deref(),
         );
 
-        let result = tokio::time::timeout(
-            self.metadata.timeout,
-            tokio::process::Command::new(&self.entry_path)
-                .current_dir(&self.plugin_dir)
-                .env("LARK_STORE_PATH", &store_path)
-                .output(),
-        )
-        .await
-        .map_err(|_| PluginError::Timeout(self.metadata.timeout))?
-        .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        let mut cmd = tokio::process::Command::new(&self.entry_path);
+        cmd.current_dir(&self.plugin_dir)
+            .env("LARK_STORE_PATH", &store_path);
+
+        if let Some(values) = form_values {
+            let form_json =
+                serde_json::to_string(&values).unwrap_or_else(|_| "{}".to_string());
+            cmd.env("LARK_FORM_JSON", &form_json);
+        }
+
+        let result = tokio::time::timeout(self.metadata.timeout, cmd.output())
+            .await
+            .map_err(|_| PluginError::Timeout(self.metadata.timeout))?
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
         if !result.status.success() {
             let stderr = String::from_utf8_lossy(&result.stderr);
