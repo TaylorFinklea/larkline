@@ -60,9 +60,16 @@ impl LuaPlugin {
             .create_table()
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
-        // lark.env(name) -> string? — read an environment variable.
+        // lark.env(name) -> string? — read from .env secrets first, then process env.
         let env_fn = lua
-            .create_function(|_, key: String| Ok(std::env::var(&key).ok()))
+            .create_function(|_, key: String| {
+                // Check .env secrets first (via task-local), then fall back to process env.
+                let from_secrets = crate::plugin::engine::SECRETS
+                    .try_with(|s| s.get(&key).cloned())
+                    .ok()
+                    .flatten();
+                Ok(from_secrets.or_else(|| std::env::var(&key).ok()))
+            })
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
         lark.set("env", env_fn)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;

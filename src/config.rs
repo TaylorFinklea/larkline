@@ -704,6 +704,65 @@ fn home_dir() -> PathBuf {
     std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from)
 }
 
+/// Returns the path to the secrets `.env` file.
+#[must_use]
+pub fn env_path() -> PathBuf {
+    config_path()
+        .parent()
+        .map_or_else(|| PathBuf::from(".env"), |p| p.join(".env"))
+}
+
+/// Load secrets from `~/.config/larkline/.env`.
+///
+/// Format: `KEY=VALUE` per line. Lines starting with `#` are comments.
+/// Missing file returns an empty map. Invalid lines are silently skipped.
+#[must_use]
+pub fn load_secrets() -> std::collections::HashMap<String, String> {
+    let path = env_path();
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return std::collections::HashMap::new();
+    };
+
+    let mut secrets = std::collections::HashMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() {
+                secrets.insert(key.to_string(), value.to_string());
+            }
+        }
+    }
+    secrets
+}
+
+/// Generate a default `.env` template if one doesn't exist yet.
+pub fn generate_env_if_missing() -> anyhow::Result<()> {
+    let path = env_path();
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(
+        &path,
+        "\
+# Larkline Secrets
+# Add API keys here. Plugins access them via lark.env(\"KEY_NAME\").
+# This file should never be committed to version control.
+#
+# GITHUB_TOKEN=ghp_your_token_here
+# OPENAI_API_KEY=sk-your_key_here
+",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -304,15 +304,22 @@ pub struct App {
     keybindings_config: KeybindingsConfig,
     /// Icon set preference for resolving Nerd Font vs emoji icons.
     icon_set: crate::config::IconSet,
+    /// Secrets loaded from `~/.config/larkline/.env`.
+    secrets: std::collections::HashMap<String, String>,
 }
 
 impl App {
     /// Create a new `App` with the given set of plugins and config.
-    pub fn new(plugins: Vec<Arc<dyn Plugin>>, config: &Config, warnings: Vec<String>) -> Self {
+    pub fn new(
+        plugins: Vec<Arc<dyn Plugin>>,
+        config: &Config,
+        warnings: Vec<String>,
+        secrets: std::collections::HashMap<String, String>,
+    ) -> Self {
         let plugin_count = plugins.len();
         let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
-        let engine = PluginEngine::new(plugins, tx);
+        let engine = PluginEngine::new(plugins, tx, secrets.clone());
         // Resolve theme; fall back to defaults on invalid colors.
         let theme = config.theme.resolve().unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid theme color, falling back to defaults");
@@ -342,6 +349,7 @@ impl App {
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
+            secrets,
         };
         app.rebuild_unified_list();
 
@@ -374,7 +382,12 @@ impl App {
     /// Create an `App` with stub plugins for testing.
     #[cfg(test)]
     pub fn with_stubs() -> Self {
-        Self::new(stub_plugins(), &Config::default(), Vec::new())
+        Self::new(
+            stub_plugins(),
+            &Config::default(),
+            Vec::new(),
+            std::collections::HashMap::new(),
+        )
     }
 
     /// Create an `App` with stub plugins and a favorites list for testing.
@@ -385,7 +398,12 @@ impl App {
             favorites: FavoritesConfig { pinned },
             ..Config::default()
         };
-        Self::new(stub_plugins(), &config, Vec::new())
+        Self::new(
+            stub_plugins(),
+            &config,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        )
     }
 
     /// Create an `App` with stub plugins and a `default_plugin` setting for testing.
@@ -393,7 +411,12 @@ impl App {
     pub fn with_stubs_and_default(default_plugin: &str) -> Self {
         let mut config = Config::default();
         config.general.default_plugin = Some(default_plugin.to_string());
-        Self::new(stub_plugins(), &config, Vec::new())
+        Self::new(
+            stub_plugins(),
+            &config,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        )
     }
 
     /// Run the main event loop until the user quits.
@@ -1303,7 +1326,9 @@ impl App {
                         plugins.iter().map(|p| p.metadata().clone()).collect();
                     let plugin_count = plugins.len();
                     let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
-                    self.engine = PluginEngine::new(plugins, tx);
+                    // Reload secrets on refresh.
+                    self.secrets = crate::config::load_secrets();
+                    self.engine = PluginEngine::new(plugins, tx, self.secrets.clone());
                     self.rx = rx;
                     self.keybindings = self.keybindings_config.resolve(&metadata);
                     self.state.plugins = metadata;
@@ -2171,7 +2196,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = Config::default();
         config.general.plugin_dirs = vec![dir.path().to_path_buf()];
-        let mut app = App::new(vec![], &config, vec![]);
+        let mut app = App::new(vec![], &config, vec![], std::collections::HashMap::new());
         assert_eq!(app.state.plugins.len(), 0);
 
         // Add a plugin manifest (entry existence not checked at scan time after Task 7).

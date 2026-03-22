@@ -12,6 +12,8 @@ tokio::task_local! {
     pub static INVOKE_DEPTH: u32;
     /// Full plugin list for inter-plugin invocation via `lark.invoke()`.
     pub static PLUGIN_LIST: Arc<Vec<Arc<dyn Plugin>>>;
+    /// Secrets loaded from `~/.config/larkline/.env`.
+    pub static SECRETS: Arc<std::collections::HashMap<String, String>>;
 }
 
 /// Indicates whether a plugin execution was triggered by the user or by prefetch.
@@ -59,13 +61,22 @@ pub enum EngineEvent {
 pub struct PluginEngine {
     plugins: Vec<Arc<dyn Plugin>>,
     tx: mpsc::Sender<EngineEvent>,
+    secrets: Arc<std::collections::HashMap<String, String>>,
 }
 
 impl PluginEngine {
-    /// Create a new `PluginEngine` with the given plugins and event sender.
+    /// Create a new `PluginEngine` with the given plugins, event sender, and secrets.
     #[must_use]
-    pub fn new(plugins: Vec<Arc<dyn Plugin>>, tx: mpsc::Sender<EngineEvent>) -> Self {
-        Self { plugins, tx }
+    pub fn new(
+        plugins: Vec<Arc<dyn Plugin>>,
+        tx: mpsc::Sender<EngineEvent>,
+        secrets: std::collections::HashMap<String, String>,
+    ) -> Self {
+        Self {
+            plugins,
+            tx,
+            secrets: Arc::new(secrets),
+        }
     }
 
     /// Returns the number of plugins in this engine.
@@ -123,6 +134,7 @@ impl PluginEngine {
     ) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
+        let secrets = self.secrets.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx
@@ -131,11 +143,14 @@ impl PluginEngine {
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
-            let handle = tokio::spawn(PLUGIN_LIST.scope(
-                all_plugins,
-                INVOKE_DEPTH.scope(0, async move {
-                    plugin.execute_with_form(form_values).await
-                }),
+            let handle = tokio::spawn(SECRETS.scope(
+                secrets,
+                PLUGIN_LIST.scope(
+                    all_plugins,
+                    INVOKE_DEPTH.scope(0, async move {
+                        plugin.execute_with_form(form_values).await
+                    }),
+                ),
             ));
             let result = match handle.await {
                 Ok(r) => r,
@@ -161,6 +176,7 @@ impl PluginEngine {
     fn execute_normal(&self, plugin_index: usize, source: ExecutionSource) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
+        let secrets = self.secrets.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx
@@ -169,9 +185,12 @@ impl PluginEngine {
                     source: source.clone(),
                 })
                 .await;
-            let handle = tokio::spawn(PLUGIN_LIST.scope(
-                all_plugins,
-                INVOKE_DEPTH.scope(0, async move { plugin.execute().await }),
+            let handle = tokio::spawn(SECRETS.scope(
+                secrets,
+                PLUGIN_LIST.scope(
+                    all_plugins,
+                    INVOKE_DEPTH.scope(0, async move { plugin.execute().await }),
+                ),
             ));
             let result = match handle.await {
                 Ok(r) => r,
@@ -374,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn sends_started_then_finished_events() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx);
+        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx, std::collections::HashMap::new());
         engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
@@ -400,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn propagates_plugin_error() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(FailPlugin(test_metadata()))], tx);
+        let engine = PluginEngine::new(vec![Arc::new(FailPlugin(test_metadata()))], tx, std::collections::HashMap::new());
         engine.execute(0);
 
         let _ = rx.recv().await; // PluginStarted
@@ -426,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn panic_in_plugin_sends_finished_with_error() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(PanicPlugin(test_metadata()))], tx);
+        let engine = PluginEngine::new(vec![Arc::new(PanicPlugin(test_metadata()))], tx, std::collections::HashMap::new());
         engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
@@ -452,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn execute_all_sends_prefetch_source() {
         let (tx, mut rx) = mpsc::channel(8);
-        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx);
+        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx, std::collections::HashMap::new());
         engine.execute_all();
 
         let event1 = rx.recv().await.unwrap();

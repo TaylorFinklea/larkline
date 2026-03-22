@@ -272,6 +272,9 @@ async fn main() -> Result<()> {
     if let Err(e) = config::generate_default_if_missing() {
         eprintln!("larkline: could not generate default config ({e})");
     }
+    if let Err(e) = config::generate_env_if_missing() {
+        eprintln!("larkline: could not generate default .env ({e})");
+    }
 
     // Load config first so we can use the configured log level.
     let (config, config_warnings) = config::load().unwrap_or_else(|e| {
@@ -305,8 +308,10 @@ async fn main() -> Result<()> {
     let plugins: Vec<Arc<dyn plugin::Plugin>> =
         discovered.into_iter().map(plugin::build_plugin).collect();
 
+    let secrets = config::load_secrets();
+
     let mut terminal = tui::init()?;
-    let result = app::App::new(plugins, &config, config_warnings)
+    let result = app::App::new(plugins, &config, config_warnings, secrets)
         .run(&mut terminal)
         .await;
     tui::restore()?;

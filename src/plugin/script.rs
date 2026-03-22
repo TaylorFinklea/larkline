@@ -69,6 +69,13 @@ impl ScriptPlugin {
         cmd.current_dir(&self.plugin_dir)
             .env("LARK_STORE_PATH", &store_path);
 
+        // Inject secrets from .env as environment variables.
+        if let Ok(secrets) = crate::plugin::engine::SECRETS.try_with(Clone::clone) {
+            for (key, value) in secrets.iter() {
+                cmd.env(key, value);
+            }
+        }
+
         if let Some(values) = form_values {
             let form_json =
                 serde_json::to_string(&values).unwrap_or_else(|_| "{}".to_string());
