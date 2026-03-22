@@ -451,12 +451,16 @@ fn render_output_pane(
                 }
             }
             OutputMode::RawText => {
+                #[allow(clippy::cast_possible_truncation)]
+                let scroll = state.scroll_offset as u16;
                 if let Some(ref raw) = output.raw_text {
                     let text = raw
                         .as_bytes()
                         .into_text()
                         .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
-                    let paragraph = Paragraph::new(text).block(block);
+                    let paragraph = Paragraph::new(text)
+                        .block(block)
+                        .scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 } else {
                     // Format items as plain text lines.
@@ -466,7 +470,9 @@ fn render_output_pane(
                         .map(|i| i.label.as_str())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let paragraph = Paragraph::new(text).block(block);
+                    let paragraph = Paragraph::new(text)
+                        .block(block)
+                        .scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 }
                 return;
@@ -478,10 +484,8 @@ fn render_output_pane(
                 }
             }
             OutputMode::Markdown => {
-                // Markdown rendering — uses raw_text as source.
-                // Full rendering wired in 15D; for now, fall back to raw text display.
                 if let Some(ref raw) = output.raw_text {
-                    let text = ratatui::text::Text::raw(raw.as_str());
+                    let text = crate::tui::markdown::markdown_to_text(raw, theme);
                     #[allow(clippy::cast_possible_truncation)]
                     let scroll = state.scroll_offset as u16;
                     let paragraph = Paragraph::new(text)

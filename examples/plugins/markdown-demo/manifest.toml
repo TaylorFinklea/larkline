@@ -1,0 +1,10 @@
+[plugin]
+name = "Markdown Demo"
+description = "Demonstrates markdown rendering with syntax highlighting"
+version = "0.1.0"
+author = "larkline"
+icon = "📄"
+icon_nerd = ""
+entry = "init.lua"
+timeout_seconds = 5
+prefetch = false

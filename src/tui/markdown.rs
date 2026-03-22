@@ -2,8 +2,6 @@
 //!
 //! Converts a markdown string into a `ratatui::text::Text` for rendering in the output pane.
 //! Uses `pulldown-cmark` for parsing and maps events to styled `Span`/`Line` sequences.
-// Wired into ui.rs in Phase 15D.
-#![allow(dead_code)]
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
