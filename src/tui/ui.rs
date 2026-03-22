@@ -44,10 +44,19 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             && chunks[1].width >= 80);
 
     if show_right_pane {
-        // Horizontal split: unified list (left) | right pane (right)
+        // Horizontal split: unified list (left) | right pane (right).
+        // Narrower sidebar when viewing plugin output (2/7 ≈ 28%).
+        let (left_pct, right_pct) = if state.mode == Mode::ViewOutput {
+            (28, 72)
+        } else {
+            (40, 60)
+        };
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .constraints([
+                Constraint::Percentage(left_pct),
+                Constraint::Percentage(right_pct),
+            ])
             .split(chunks[1]);
 
         render_unified_list(frame, state, theme, content_chunks[0]);
