@@ -169,6 +169,8 @@ pub struct AppState {
     /// Indices into `plugin_output.items` that match `output_query`.
     /// When empty and `output_query` is empty, all items are shown.
     pub output_filtered_indices: Vec<usize>,
+    /// Active form state (shown in the output pane when a plugin returns a form).
+    pub form_state: Option<FormState>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -189,6 +191,35 @@ pub struct CopyMenuState {
     pub entries: Vec<(String, String)>,
     /// Index of the highlighted menu entry.
     pub selected: usize,
+}
+
+/// Mutable state for an active form being filled by the user.
+#[derive(Debug, Clone)]
+pub struct FormState {
+    /// Per-field editing state, parallel to the `FormSpec::fields` vector.
+    pub fields: Vec<FormFieldState>,
+    /// Index of the currently focused field.
+    pub focused: usize,
+    /// Plugin index this form belongs to (for re-execution on submit).
+    pub plugin_index: usize,
+    /// Submit button label (used by the TUI renderer).
+    #[allow(dead_code)]
+    pub submit_label: String,
+}
+
+/// Editing state for a single form field.
+#[derive(Debug, Clone)]
+pub struct FormFieldState {
+    /// The field specification (id, label, type, etc.).
+    pub spec: crate::plugin::traits::FormField,
+    /// Current text value.
+    pub value: String,
+    /// Cursor position within the value string (for text fields).
+    pub cursor: usize,
+    /// Currently selected option index (for Select fields).
+    pub selected_option: usize,
+    /// Whether the toggle is on (for Toggle fields).
+    pub toggled: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +353,7 @@ impl App {
                             self.state.pending_confirmation.is_some(),
                             self.state.copy_menu.is_some(),
                             self.state.output_searching,
+                            self.state.form_state.is_some(),
                         ) {
                             self.handle_action(action);
                         }
@@ -482,12 +514,14 @@ impl App {
                                         OutputMode::List
                                     };
                                     self.rebuild_output_filter();
+                                    self.check_form_init(plugin_index);
                                 }
                             } else {
                                 // Fresh load: don't overwrite streaming output.
                                 if self.state.plugin_output.is_none() {
                                     self.state.plugin_output = Some(output);
                                     self.rebuild_output_filter();
+                                    self.check_form_init(plugin_index);
                                 }
                             }
                         }
@@ -633,6 +667,7 @@ impl App {
                 self.state.output_mode = OutputMode::List;
                 self.state.viewing_plugin_index = None;
                 self.state.copy_menu = None;
+                self.state.form_state = None;
                 self.reset_output_search();
             }
 
@@ -834,6 +869,164 @@ impl App {
                 }
             }
 
+            Action::FormNextField => {
+                if let Some(ref mut form) = self.state.form_state {
+                    form.focused = (form.focused + 1) % form.fields.len();
+                }
+            }
+
+            Action::FormPrevField => {
+                if let Some(ref mut form) = self.state.form_state {
+                    form.focused = if form.focused == 0 {
+                        form.fields.len().saturating_sub(1)
+                    } else {
+                        form.focused - 1
+                    };
+                }
+            }
+
+            Action::FormInput(c) => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if matches!(field.spec.field_type, crate::plugin::traits::FieldType::Text) {
+                            field.value.insert(field.cursor, c);
+                            field.cursor += c.len_utf8();
+                        }
+                    }
+                }
+            }
+
+            Action::FormBackspace => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if matches!(field.spec.field_type, crate::plugin::traits::FieldType::Text)
+                            && field.cursor > 0
+                        {
+                            // Find the previous char boundary.
+                            let prev = field.value[..field.cursor]
+                                .char_indices()
+                                .next_back()
+                                .map_or(0, |(i, _)| i);
+                            field.value.remove(prev);
+                            field.cursor = prev;
+                        }
+                    }
+                }
+            }
+
+            Action::FormCursorLeft => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if field.cursor > 0 {
+                            field.cursor = field.value[..field.cursor]
+                                .char_indices()
+                                .next_back()
+                                .map_or(0, |(i, _)| i);
+                        }
+                    }
+                }
+            }
+
+            Action::FormCursorRight => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if field.cursor < field.value.len() {
+                            field.cursor = field.value[field.cursor..]
+                                .char_indices()
+                                .nth(1)
+                                .map_or(field.value.len(), |(i, _)| field.cursor + i);
+                        }
+                    }
+                }
+            }
+
+            Action::FormSelectNext => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if let crate::plugin::traits::FieldType::Select { ref options } =
+                            field.spec.field_type
+                        {
+                            if !options.is_empty() {
+                                field.selected_option =
+                                    (field.selected_option + 1) % options.len();
+                                field.value = options[field.selected_option].clone();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Action::FormSelectPrev => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        if let crate::plugin::traits::FieldType::Select { ref options } =
+                            field.spec.field_type
+                        {
+                            if !options.is_empty() {
+                                field.selected_option = if field.selected_option == 0 {
+                                    options.len() - 1
+                                } else {
+                                    field.selected_option - 1
+                                };
+                                field.value = options[field.selected_option].clone();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Action::FormToggle => {
+                if let Some(ref mut form) = self.state.form_state {
+                    if let Some(field) = form.fields.get_mut(form.focused) {
+                        match field.spec.field_type {
+                            crate::plugin::traits::FieldType::Toggle => {
+                                field.toggled = !field.toggled;
+                                field.value =
+                                    if field.toggled { "true" } else { "false" }.to_string();
+                            }
+                            crate::plugin::traits::FieldType::Select { .. } => {
+                                // Space cycles forward in Select fields too.
+                                self.handle_action(Action::FormSelectNext);
+                            }
+                            crate::plugin::traits::FieldType::Text => {}
+                        }
+                    }
+                }
+            }
+
+            Action::FormSubmit => {
+                if let Some(form) = self.state.form_state.take() {
+                    // Validate required fields.
+                    let all_valid = form
+                        .fields
+                        .iter()
+                        .all(|f| !f.spec.required || !f.value.trim().is_empty());
+
+                    if all_valid {
+                        let mut values = std::collections::HashMap::new();
+                        for field in &form.fields {
+                            values.insert(field.spec.id.clone(), field.value.clone());
+                        }
+                        let plugin_index = form.plugin_index;
+                        self.state.is_loading = true;
+                        self.state.plugin_output = None;
+                        self.state.loading_started = Some(std::time::Instant::now());
+                        self.engine.execute_with_form(plugin_index, values);
+                    } else {
+                        self.state.status_message = Some((
+                            "Required fields cannot be empty".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                        self.state.form_state = Some(form);
+                    }
+                }
+            }
+
+            Action::FormCancel => {
+                self.state.form_state = None;
+                self.handle_action(Action::Back);
+            }
+
             Action::EnterInsertMode => {
                 self.state.vim_mode = VimMode::Insert;
             }
@@ -1015,6 +1208,7 @@ impl App {
             }
         }
         self.rebuild_output_filter();
+        self.check_form_init(plugin_index);
     }
 
     /// Number of visible output items (filtered count when searching, total otherwise).
@@ -1082,6 +1276,59 @@ impl App {
         self.state.output_query.clear();
         self.state.output_searching = false;
         self.state.output_filtered_indices.clear();
+    }
+
+    /// Check if the current plugin output has a form and initialize form state.
+    fn check_form_init(&mut self, plugin_index: usize) {
+        let form = self
+            .state
+            .plugin_output
+            .as_ref()
+            .and_then(|o| o.form.clone());
+        if let Some(form_spec) = form {
+            self.initialize_form(plugin_index, &form_spec);
+        }
+    }
+
+    /// Initialize form state from a `FormSpec` returned by a plugin.
+    fn initialize_form(
+        &mut self,
+        plugin_index: usize,
+        form_spec: &crate::plugin::traits::FormSpec,
+    ) {
+        use crate::plugin::traits::FieldType;
+
+        let fields: Vec<FormFieldState> = form_spec
+            .fields
+            .iter()
+            .map(|field| {
+                let default = field.default_value.clone().unwrap_or_default();
+                let selected_option = if let FieldType::Select { ref options } = field.field_type {
+                    options.iter().position(|o| o == &default).unwrap_or(0)
+                } else {
+                    0
+                };
+                let toggled = default == "true";
+                let cursor = default.len();
+                FormFieldState {
+                    spec: field.clone(),
+                    value: default,
+                    cursor,
+                    selected_option,
+                    toggled,
+                }
+            })
+            .collect();
+
+        self.state.form_state = Some(FormState {
+            fields,
+            focused: 0,
+            plugin_index,
+            submit_label: form_spec
+                .submit_label
+                .clone()
+                .unwrap_or_else(|| "Submit".to_string()),
+        });
     }
 
     /// Rebuild the unified launcher list from plugin metadata.

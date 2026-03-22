@@ -107,6 +107,40 @@ impl PluginEngine {
         }
     }
 
+    /// Execute a plugin with form values. The plugin's `execute_with_form()` receives
+    /// the collected values, which Lua/Script backends use to inject form context.
+    pub fn execute_with_form(
+        &self,
+        plugin_index: usize,
+        form_values: std::collections::HashMap<String, String>,
+    ) {
+        let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let _ = tx
+                .send(EngineEvent::PluginStarted {
+                    plugin_index,
+                    source: ExecutionSource::UserSelected,
+                })
+                .await;
+            let handle =
+                tokio::spawn(async move { plugin.execute_with_form(form_values).await });
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(join_err) => Err(PluginError::ExecutionFailed(format!(
+                    "plugin task failed: {join_err}"
+                ))),
+            };
+            let _ = tx
+                .send(EngineEvent::PluginFinished {
+                    plugin_index,
+                    result,
+                    source: ExecutionSource::UserSelected,
+                })
+                .await;
+        });
+    }
+
     /// Normal (non-streaming) execution — waits for plugin to complete, then sends result.
     ///
     /// Uses an outer/inner task pattern so panics in the plugin are caught by the

@@ -66,4 +66,26 @@ pub enum Action {
     OutputClearSearch,
     /// Open the selected item's URL in the system browser.
     OpenUrl,
+    /// Move focus to the next form field.
+    FormNextField,
+    /// Move focus to the previous form field.
+    FormPrevField,
+    /// Append a character to the focused text field.
+    FormInput(char),
+    /// Delete the character before the cursor in the focused text field.
+    FormBackspace,
+    /// Move cursor left in a text field.
+    FormCursorLeft,
+    /// Move cursor right in a text field.
+    FormCursorRight,
+    /// Cycle a Select field to the next option.
+    FormSelectNext,
+    /// Cycle a Select field to the previous option.
+    FormSelectPrev,
+    /// Toggle a Toggle field or cycle a Select field.
+    FormToggle,
+    /// Submit the form and re-execute the plugin with collected values.
+    FormSubmit,
+    /// Cancel the form and go back.
+    FormCancel,
 }

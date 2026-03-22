@@ -15,6 +15,7 @@ use crate::config::{BrowseAction, ResolvedKeybindings, ViewOutputAction};
 /// 4. `VimMode::Normal` + `ViewOutput` → output navigation handler
 ///
 /// Returns `None` for keys with no binding in the current mode combination.
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 pub fn handle_key(
     event: KeyEvent,
     mode: &Mode,
@@ -23,6 +24,7 @@ pub fn handle_key(
     has_pending_confirmation: bool,
     has_copy_menu: bool,
     has_output_search: bool,
+    has_form: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -32,6 +34,11 @@ pub fn handle_key(
     // Copy menu intercepts keys when open.
     if has_copy_menu {
         return handle_copy_menu(event);
+    }
+
+    // Form input intercepts all keys when a form is active.
+    if has_form && *mode == Mode::ViewOutput {
+        return handle_form_input(event);
     }
 
     // Output search mode intercepts keys in ViewOutput.
@@ -182,6 +189,32 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
     // Hardcoded fallback: Ctrl+C.
     match event.code {
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        _ => None,
+    }
+}
+
+/// Form input handler: Tab cycles fields, chars go to text, Enter submits, Esc cancels.
+fn handle_form_input(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Tab => {
+            if event.modifiers.contains(KeyModifiers::SHIFT) {
+                Some(Action::FormPrevField)
+            } else {
+                Some(Action::FormNextField)
+            }
+        }
+        KeyCode::Enter => Some(Action::FormSubmit),
+        KeyCode::Esc => Some(Action::FormCancel),
+        KeyCode::Backspace | KeyCode::Delete => Some(Action::FormBackspace),
+        KeyCode::Left => Some(Action::FormCursorLeft),
+        KeyCode::Right => Some(Action::FormCursorRight),
+        KeyCode::Up => Some(Action::FormSelectPrev),
+        KeyCode::Down => Some(Action::FormSelectNext),
+        KeyCode::Char(' ') => Some(Action::FormToggle),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::Quit)
+        }
+        KeyCode::Char(c) if !c.is_control() => Some(Action::FormInput(c)),
         _ => None,
     }
 }
