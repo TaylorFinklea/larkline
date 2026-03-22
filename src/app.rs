@@ -1878,6 +1878,7 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 plugin_group: None,
                 quickkey: None,
                 cache: true,
+                secrets: vec![],
             })) as Arc<dyn Plugin>
         }};
     }

@@ -360,6 +360,7 @@ mod tests {
             plugin_group: None,
             quickkey: None,
             cache: true,
+            secrets: vec![],
         }
     }
 

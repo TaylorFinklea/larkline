@@ -52,6 +52,8 @@ pub struct PluginMetadata {
     /// Whether to use stale-while-revalidate caching. Default `true`.
     /// Set `cache = false` in the manifest to always execute fresh.
     pub cache: bool,
+    /// Advisory list of secret env var names this plugin needs (e.g., `["GITHUB_TOKEN"]`).
+    pub secrets: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +422,7 @@ mod tests {
             plugin_group: None,
             quickkey: None,
             cache: true,
+            secrets: vec![],
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }

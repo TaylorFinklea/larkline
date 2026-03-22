@@ -71,6 +71,9 @@ struct ManifestPlugin {
     icon_nerd: Option<String>,
     prefetch: Option<bool>,
     cache: Option<bool>,
+    /// Advisory list of secret env var names this plugin needs.
+    #[serde(default)]
+    secrets: Vec<String>,
 }
 
 /// A single command within a multi-command plugin manifest.
@@ -167,6 +170,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                 plugin_group: None,
                 quickkey: None,
                 cache: p.cache.unwrap_or(true),
+                secrets: p.secrets,
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -210,6 +214,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                         plugin_group: Some(plugin_group.clone()),
                         quickkey: cmd.quickkey,
                         cache: cmd.cache.unwrap_or(plugin_default_cache),
+                        secrets: p.secrets.clone(),
                     },
                     plugin_dir: plugin_dir_buf.clone(),
                     entry: cmd.entry,
