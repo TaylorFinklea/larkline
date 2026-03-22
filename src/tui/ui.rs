@@ -477,6 +477,20 @@ fn render_output_pane(
                     return;
                 }
             }
+            OutputMode::Markdown => {
+                // Markdown rendering — uses raw_text as source.
+                // Full rendering wired in 15D; for now, fall back to raw text display.
+                if let Some(ref raw) = output.raw_text {
+                    let text = ratatui::text::Text::raw(raw.as_str());
+                    #[allow(clippy::cast_possible_truncation)]
+                    let scroll = state.scroll_offset as u16;
+                    let paragraph = Paragraph::new(text)
+                        .block(block)
+                        .scroll((scroll, 0));
+                    frame.render_widget(paragraph, area);
+                    return;
+                }
+            }
         }
     }
 

@@ -69,8 +69,9 @@ pub struct PluginOutput {
     /// Navigable list of result items. Empty if the plugin returned raw text.
     #[serde(default)]
     pub items: Vec<OutputItem>,
-    /// Raw text fallback — populated when stdout is not valid JSON.
-    #[serde(skip)]
+    /// Raw text content. For script plugins, populated when stdout is not valid JSON.
+    /// Plugins can also set this explicitly to provide markdown or plain text content.
+    #[serde(default)]
     pub raw_text: Option<String>,
     /// Column definitions for table rendering. Empty = use list mode.
     #[serde(default)]
@@ -79,6 +80,10 @@ pub struct PluginOutput {
     /// form instead of items. On submission, the plugin re-executes with values.
     #[serde(default)]
     pub form: Option<FormSpec>,
+    /// Output format hint: `"markdown"`, `"plain"`, or `None` (auto-detect).
+    /// When `"markdown"`, `raw_text` is rendered as markdown with syntax highlighting.
+    #[serde(default)]
+    pub output_format: Option<String>,
 }
 
 /// A single item in a plugin's output list.

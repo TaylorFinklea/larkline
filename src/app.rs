@@ -33,6 +33,8 @@ pub enum OutputMode {
     RawText,
     /// Render items as a table with column headers (when `columns` is non-empty).
     Table,
+    /// Render `raw_text` as markdown with syntax highlighting.
+    Markdown,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +173,8 @@ pub struct AppState {
     pub output_filtered_indices: Vec<usize>,
     /// Active form state (shown in the output pane when a plugin returns a form).
     pub form_state: Option<FormState>,
+    /// Scroll offset for Markdown and `RawText` output modes (line-based).
+    pub scroll_offset: usize,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -506,13 +510,8 @@ impl App {
                             if was_revalidating {
                                 // Seamlessly update the pane if the user is still viewing it.
                                 if self.state.viewing_plugin_index == Some(plugin_index) {
-                                    let has_columns = !output.columns.is_empty();
+                                    self.state.output_mode = Self::output_mode_for(&output);
                                     self.state.plugin_output = Some(output);
-                                    self.state.output_mode = if has_columns {
-                                        OutputMode::Table
-                                    } else {
-                                        OutputMode::List
-                                    };
                                     self.rebuild_output_filter();
                                     self.check_form_init(plugin_index);
                                 }
@@ -574,6 +573,13 @@ impl App {
             Action::MoveUp => {
                 if let Some(ref mut menu) = self.state.copy_menu {
                     menu.selected = menu.selected.saturating_sub(1);
+                } else if self.state.mode == Mode::ViewOutput
+                    && matches!(
+                        self.state.output_mode,
+                        OutputMode::Markdown | OutputMode::RawText
+                    )
+                {
+                    self.state.scroll_offset = self.state.scroll_offset.saturating_sub(1);
                 } else if self.state.mode == Mode::ViewOutput {
                     if self.state.output_selected > 0 {
                         self.state.output_selected -= 1;
@@ -600,6 +606,13 @@ impl App {
                     if menu.selected < max {
                         menu.selected += 1;
                     }
+                } else if self.state.mode == Mode::ViewOutput
+                    && matches!(
+                        self.state.output_mode,
+                        OutputMode::Markdown | OutputMode::RawText
+                    )
+                {
+                    self.state.scroll_offset += 1;
                 } else if self.state.mode == Mode::ViewOutput {
                     let max = self.visible_output_count().saturating_sub(1);
                     if self.state.output_selected < max {
@@ -668,6 +681,7 @@ impl App {
                 self.state.viewing_plugin_index = None;
                 self.state.copy_menu = None;
                 self.state.form_state = None;
+                self.state.scroll_offset = 0;
                 self.reset_output_search();
             }
 
@@ -690,7 +704,14 @@ impl App {
             }
 
             Action::ScrollHalfPageDown => {
-                if self.state.mode == Mode::ViewOutput {
+                if self.state.mode == Mode::ViewOutput
+                    && matches!(
+                        self.state.output_mode,
+                        OutputMode::Markdown | OutputMode::RawText
+                    )
+                {
+                    self.state.scroll_offset += 10;
+                } else if self.state.mode == Mode::ViewOutput {
                     let max = self.visible_output_count().saturating_sub(1);
                     self.state.output_selected = (self.state.output_selected + 10).min(max);
                 } else {
@@ -715,7 +736,14 @@ impl App {
             }
 
             Action::ScrollHalfPageUp => {
-                if self.state.mode == Mode::ViewOutput {
+                if self.state.mode == Mode::ViewOutput
+                    && matches!(
+                        self.state.output_mode,
+                        OutputMode::Markdown | OutputMode::RawText
+                    )
+                {
+                    self.state.scroll_offset = self.state.scroll_offset.saturating_sub(10);
+                } else if self.state.mode == Mode::ViewOutput {
                     self.state.output_selected = self.state.output_selected.saturating_sub(10);
                 } else {
                     // Move unified_selected back by up to 10 selectable rows.
@@ -744,11 +772,24 @@ impl App {
                     .plugin_output
                     .as_ref()
                     .is_some_and(|o| !o.columns.is_empty());
+                let has_markdown = self
+                    .state
+                    .plugin_output
+                    .as_ref()
+                    .is_some_and(|o| {
+                        o.output_format.as_deref() == Some("markdown") && o.raw_text.is_some()
+                    });
                 self.state.output_mode = match self.state.output_mode {
                     OutputMode::List => OutputMode::RawText,
                     OutputMode::RawText if has_columns => OutputMode::Table,
-                    OutputMode::RawText | OutputMode::Table => OutputMode::List,
+                    OutputMode::RawText | OutputMode::Table if has_markdown => {
+                        OutputMode::Markdown
+                    }
+                    OutputMode::RawText | OutputMode::Table | OutputMode::Markdown => {
+                        OutputMode::List
+                    }
                 };
+                self.state.scroll_offset = 0;
             }
 
             Action::Confirm => {
@@ -1156,16 +1197,12 @@ impl App {
         match self.state.result_cache.get(&plugin_index).cloned() {
             Some(CachedResult::Ready(output)) if cache_enabled => {
                 // Stale-while-revalidate: show cached output immediately, refresh in background.
-                let has_columns = !output.columns.is_empty();
+                self.state.output_mode = Self::output_mode_for(&output);
                 self.state.plugin_output = Some(output.clone());
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
                 self.state.output_selected = 0;
-                self.state.output_mode = if has_columns {
-                    OutputMode::Table
-                } else {
-                    OutputMode::List
-                };
+                self.state.scroll_offset = 0;
                 self.state.mode = Mode::ViewOutput;
                 self.state
                     .result_cache
@@ -1174,16 +1211,12 @@ impl App {
             }
             Some(CachedResult::Revalidating(output)) => {
                 // Already revalidating — show stale data, don't trigger another execution.
-                let has_columns = !output.columns.is_empty();
+                self.state.output_mode = Self::output_mode_for(&output);
                 self.state.plugin_output = Some(output);
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
                 self.state.output_selected = 0;
-                self.state.output_mode = if has_columns {
-                    OutputMode::Table
-                } else {
-                    OutputMode::List
-                };
+                self.state.scroll_offset = 0;
                 self.state.mode = Mode::ViewOutput;
             }
             Some(CachedResult::Loading(_)) => {
@@ -1276,6 +1309,17 @@ impl App {
         self.state.output_query.clear();
         self.state.output_searching = false;
         self.state.output_filtered_indices.clear();
+    }
+
+    /// Determine the best output mode for the given output.
+    fn output_mode_for(output: &PluginOutput) -> OutputMode {
+        if output.output_format.as_deref() == Some("markdown") && output.raw_text.is_some() {
+            OutputMode::Markdown
+        } else if !output.columns.is_empty() {
+            OutputMode::Table
+        } else {
+            OutputMode::List
+        }
     }
 
     /// Check if the current plugin output has a form and initialize form state.
