@@ -256,6 +256,44 @@ impl LuaPlugin {
         lark.set("store", store_table)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.invoke(name) -> table — invoke another plugin by name.
+        let invoke_fn = lua
+            .create_async_function(|lua, name: String| async move {
+                use crate::plugin::engine::{INVOKE_DEPTH, PLUGIN_LIST};
+
+                let depth = INVOKE_DEPTH.try_with(|d| *d).unwrap_or(0);
+                if depth >= 5 {
+                    return Err(LuaError::external(
+                        "lark.invoke: max recursion depth (5) exceeded",
+                    ));
+                }
+
+                let plugins = PLUGIN_LIST.try_with(Clone::clone).map_err(|_| {
+                    LuaError::external("lark.invoke: plugin list not available in this context")
+                })?;
+
+                let plugin = plugins
+                    .iter()
+                    .find(|p| p.metadata().name == name)
+                    .ok_or_else(|| {
+                        LuaError::external(format!("lark.invoke: plugin '{name}' not found"))
+                    })?
+                    .clone();
+
+                let output = PLUGIN_LIST
+                    .scope(
+                        plugins,
+                        INVOKE_DEPTH.scope(depth + 1, async move { plugin.execute().await }),
+                    )
+                    .await
+                    .map_err(LuaError::external)?;
+
+                lua.to_value(&output).map_err(LuaError::external)
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        lark.set("invoke", invoke_fn)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // lark.register(config) — store the plugin config in a named registry slot.
         let register_fn = lua
             .create_function(|lua, config: LuaTable| {

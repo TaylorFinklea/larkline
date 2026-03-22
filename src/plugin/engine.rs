@@ -7,6 +7,13 @@ use tokio::sync::mpsc;
 
 use crate::plugin::traits::{OutputItem, Plugin, PluginError, PluginOutput};
 
+tokio::task_local! {
+    /// Current invocation depth for recursion guarding in `lark.invoke()`.
+    pub static INVOKE_DEPTH: u32;
+    /// Full plugin list for inter-plugin invocation via `lark.invoke()`.
+    pub static PLUGIN_LIST: Arc<Vec<Arc<dyn Plugin>>>;
+}
+
 /// Indicates whether a plugin execution was triggered by the user or by prefetch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionSource {
@@ -115,6 +122,7 @@ impl PluginEngine {
         form_values: std::collections::HashMap<String, String>,
     ) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let all_plugins = Arc::new(self.plugins.clone());
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx
@@ -123,8 +131,12 @@ impl PluginEngine {
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
-            let handle =
-                tokio::spawn(async move { plugin.execute_with_form(form_values).await });
+            let handle = tokio::spawn(PLUGIN_LIST.scope(
+                all_plugins,
+                INVOKE_DEPTH.scope(0, async move {
+                    plugin.execute_with_form(form_values).await
+                }),
+            ));
             let result = match handle.await {
                 Ok(r) => r,
                 Err(join_err) => Err(PluginError::ExecutionFailed(format!(
@@ -148,6 +160,7 @@ impl PluginEngine {
     /// always sent even when the plugin task panics.
     fn execute_normal(&self, plugin_index: usize, source: ExecutionSource) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let all_plugins = Arc::new(self.plugins.clone());
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let _ = tx
@@ -156,7 +169,10 @@ impl PluginEngine {
                     source: source.clone(),
                 })
                 .await;
-            let handle = tokio::spawn(async move { plugin.execute().await });
+            let handle = tokio::spawn(PLUGIN_LIST.scope(
+                all_plugins,
+                INVOKE_DEPTH.scope(0, async move { plugin.execute().await }),
+            ));
             let result = match handle.await {
                 Ok(r) => r,
                 Err(join_err) => Err(PluginError::ExecutionFailed(format!(
