@@ -175,6 +175,8 @@ pub struct AppState {
     pub form_state: Option<FormState>,
     /// Scroll offset for Markdown and `RawText` output modes (line-based).
     pub scroll_offset: usize,
+    /// Whether to show plugin descriptions in the unified list.
+    pub show_descriptions: bool,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
 }
@@ -286,6 +288,7 @@ impl App {
             state: AppState {
                 plugins: metadata,
                 show_icons: config.ui.show_icons,
+                show_descriptions: config.ui.show_descriptions,
                 favorites: config.favorites.pinned.clone(),
                 warnings,
                 max_items_per_section: config.ui.max_items_per_section,
@@ -831,6 +834,10 @@ impl App {
                     }
                 };
                 self.state.scroll_offset = 0;
+            }
+
+            Action::ToggleDescriptions => {
+                self.state.show_descriptions = !self.state.show_descriptions;
             }
 
             Action::Confirm => {

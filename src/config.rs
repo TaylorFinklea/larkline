@@ -61,6 +61,8 @@ pub struct UiConfig {
     pub icon_set: IconSet,
     /// Maximum items shown per section in the unified list (0 = unlimited).
     pub max_items_per_section: usize,
+    /// Show plugin descriptions in the unified list.
+    pub show_descriptions: bool,
 }
 
 /// Logging settings.
@@ -483,6 +485,7 @@ impl Default for UiConfig {
             visible_items: 15,
             icon_set: IconSet::default(),
             max_items_per_section: 5,
+            show_descriptions: true,
         }
     }
 }

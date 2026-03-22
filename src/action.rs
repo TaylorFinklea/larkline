@@ -66,6 +66,8 @@ pub enum Action {
     OutputClearSearch,
     /// Open the selected item's URL in the system browser.
     OpenUrl,
+    /// Toggle plugin description visibility in the unified list.
+    ToggleDescriptions,
     /// Move focus to the next form field.
     FormNextField,
     /// Move focus to the previous form field.

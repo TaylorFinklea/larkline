@@ -166,8 +166,8 @@ fn render_unified_list(
                         spans.push(Span::styled(ch.to_string(), style));
                     }
                 }
-                // Description.
-                if !description.is_empty() {
+                // Description (toggled via 'd' key).
+                if state.show_descriptions && !description.is_empty() {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
                         description.as_str(),

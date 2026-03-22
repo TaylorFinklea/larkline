@@ -92,6 +92,10 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char(':') if event.modifiers == KeyModifiers::NONE => {
             Some(Action::EnterCommandMode)
         }
+        // Toggle description visibility.
+        KeyCode::Char('d') if event.modifiers == KeyModifiers::NONE => {
+            Some(Action::ToggleDescriptions)
+        }
         _ => None,
     }
 }
