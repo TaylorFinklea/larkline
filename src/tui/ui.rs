@@ -314,11 +314,21 @@ fn render_output_pane(
     theme: &Theme,
     area: ratatui::layout::Rect,
 ) {
-    // Determine output title from the selected plugin.
-    let base_title = if let Some(ref output) = state.plugin_output {
-        output.title.clone()
-    } else {
-        "output".to_string()
+    // Build breadcrumb trail from navigation history + current plugin title.
+    let breadcrumb = {
+        let mut parts: Vec<String> = vec!["lark".to_string()];
+        for entry in &state.navigation_history {
+            if let Some(meta) = state.plugins.get(entry.plugin_index) {
+                parts.push(meta.name.clone());
+            }
+        }
+        let current = if let Some(ref output) = state.plugin_output {
+            output.title.clone()
+        } else {
+            "output".to_string()
+        };
+        parts.push(current);
+        parts.join(" \u{203A} ") // › separator
     };
 
     let title_text = if state.output_searching || !state.output_query.is_empty() {
@@ -327,9 +337,9 @@ fn render_output_pane(
             .as_ref()
             .map_or(0, |o| o.items.len());
         let filtered = state.output_filtered_indices.len();
-        format!(" {base_title} /{} ({filtered}/{total}) ", state.output_query)
+        format!(" {breadcrumb} /{} ({filtered}/{total}) ", state.output_query)
     } else {
-        format!(" {base_title} ")
+        format!(" {breadcrumb} ")
     };
 
     let block = Block::default()
@@ -404,7 +414,11 @@ fn render_output_pane(
         let elapsed = state
             .loading_started
             .map_or(0.0, |t| t.elapsed().as_secs_f32());
-        let loading_text = format!("{spinner} Running {base_title}… ({elapsed:.1}s)");
+        let loading_title = state
+            .plugin_output
+            .as_ref()
+            .map_or("plugin", |o| o.title.as_str());
+        let loading_text = format!("{spinner} Running {loading_title}… ({elapsed:.1}s)");
         let paragraph = Paragraph::new(Line::from(Span::styled(
             loading_text,
             Style::default().fg(theme.accent),
