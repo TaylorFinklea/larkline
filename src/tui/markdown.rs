@@ -23,6 +23,7 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
     let mut style_stack: Vec<Style> = vec![Style::default().fg(theme.text)];
     let mut in_code_block = false;
     let mut code_block_buf = String::new();
+    let mut code_block_lang = String::new();
     let mut list_depth: usize = 0;
     let mut in_blockquote = false;
 
@@ -55,9 +56,18 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                     let base = current_style(&style_stack);
                     style_stack.push(base.add_modifier(Modifier::CROSSED_OUT));
                 }
-                Tag::CodeBlock(_) => {
+                Tag::CodeBlock(kind) => {
                     in_code_block = true;
                     code_block_buf.clear();
+                    code_block_lang = match kind {
+                        pulldown_cmark::CodeBlockKind::Fenced(lang) => {
+                            lang.split_whitespace()
+                                .next()
+                                .unwrap_or("")
+                                .to_string()
+                        }
+                        pulldown_cmark::CodeBlockKind::Indented => String::new(),
+                    };
                 }
                 Tag::Link { dest_url, .. } => {
                     let style = Style::default()
@@ -99,12 +109,22 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                 }
                 TagEnd::CodeBlock => {
                     in_code_block = false;
-                    // Render code block lines with dimmed style.
-                    for code_line in code_block_buf.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("  {code_line}"),
-                            Style::default().fg(theme.text_dimmed),
-                        )));
+                    if code_block_lang.is_empty() {
+                        // No language — plain dimmed text.
+                        for code_line in code_block_buf.lines() {
+                            lines.push(Line::from(Span::styled(
+                                format!("  {code_line}"),
+                                Style::default().fg(theme.text_dimmed),
+                            )));
+                        }
+                    } else {
+                        // Syntax-highlighted code.
+                        let highlighted =
+                            crate::tui::highlight::highlight_code(
+                                &code_block_buf,
+                                &code_block_lang,
+                            );
+                        lines.extend(highlighted);
                     }
                     lines.push(Line::raw("")); // spacing after code block
                     code_block_buf.clear();

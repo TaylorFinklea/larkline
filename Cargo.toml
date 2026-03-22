@@ -35,6 +35,7 @@ mlua = { version = "0.11", features = ["lua54", "vendored", "async", "send", "se
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 ansi-to-tui = "7"
 pulldown-cmark = "0.12"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
