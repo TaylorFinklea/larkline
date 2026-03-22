@@ -75,6 +75,10 @@ pub struct PluginOutput {
     /// Column definitions for table rendering. Empty = use list mode.
     #[serde(default)]
     pub columns: Vec<ColumnDef>,
+    /// Optional form specification. When present, the TUI renders an interactive
+    /// form instead of items. On submission, the plugin re-executes with values.
+    #[serde(default)]
+    pub form: Option<FormSpec>,
 }
 
 /// A single item in a plugin's output list.
@@ -166,6 +170,59 @@ pub enum ColumnAlign {
 }
 
 // ---------------------------------------------------------------------------
+// Form types
+// ---------------------------------------------------------------------------
+
+/// Specification for an interactive form that plugins can return.
+///
+/// When present in [`PluginOutput`], the TUI renders a form instead of items.
+/// On submission, the plugin is re-executed with the collected values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormSpec {
+    /// The fields in this form, rendered in order.
+    pub fields: Vec<FormField>,
+    /// Custom label for the submit button. Defaults to "Submit".
+    #[serde(default)]
+    pub submit_label: Option<String>,
+}
+
+/// A single field in a plugin form.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormField {
+    /// Unique identifier used as the key in the form values map.
+    pub id: String,
+    /// Human-readable label displayed beside the input.
+    pub label: String,
+    /// The type of input control.
+    #[serde(rename = "type")]
+    pub field_type: FieldType,
+    /// Whether this field must have a non-empty value to submit.
+    #[serde(default)]
+    pub required: bool,
+    /// Pre-filled default value.
+    #[serde(default)]
+    pub default_value: Option<String>,
+    /// Placeholder text shown when the field is empty.
+    #[serde(default)]
+    pub placeholder: Option<String>,
+}
+
+/// The type of form input control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum FieldType {
+    /// Single-line text input.
+    Text,
+    /// Selection from a list of options.
+    Select {
+        /// Available options for selection.
+        options: Vec<String>,
+    },
+    /// Boolean toggle (true/false).
+    Toggle,
+}
+
+// ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
 
@@ -203,6 +260,17 @@ pub trait Plugin: Send + Sync {
 
     /// Execute the plugin's main action and return structured output.
     async fn execute(&self) -> Result<PluginOutput, PluginError>;
+
+    /// Execute the plugin with form values from a previously submitted form.
+    ///
+    /// The default implementation ignores form values and delegates to [`execute()`].
+    /// Backends that support forms override this to inject values into their context.
+    async fn execute_with_form(
+        &self,
+        _form_values: std::collections::HashMap<String, String>,
+    ) -> Result<PluginOutput, PluginError> {
+        self.execute().await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +326,37 @@ mod tests {
         let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(item.label, "Chrome");
         assert_eq!(item.copy_text.as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn form_spec_deserializes_all_field_types() {
+        let json = r#"{
+            "title": "Create Note",
+            "form": {
+                "fields": [
+                    {"id": "title", "label": "Title", "type": {"kind": "text"}, "required": true, "placeholder": "Enter title"},
+                    {"id": "category", "label": "Category", "type": {"kind": "select", "options": ["work", "personal"]}, "default_value": "work"},
+                    {"id": "urgent", "label": "Urgent", "type": {"kind": "toggle"}}
+                ],
+                "submit_label": "Create"
+            }
+        }"#;
+        let output: PluginOutput = serde_json::from_str(json).expect("parse failed");
+        let form = output.form.expect("form should be present");
+        assert_eq!(form.fields.len(), 3);
+        assert_eq!(form.submit_label.as_deref(), Some("Create"));
+        assert!(form.fields[0].required);
+        assert!(matches!(form.fields[0].field_type, FieldType::Text));
+        assert!(matches!(form.fields[1].field_type, FieldType::Select { .. }));
+        assert!(matches!(form.fields[2].field_type, FieldType::Toggle));
+    }
+
+    #[test]
+    fn plugin_output_without_form_is_backward_compatible() {
+        let json = r#"{"title": "No Form", "items": [{"label": "item"}]}"#;
+        let output: PluginOutput = serde_json::from_str(json).expect("parse failed");
+        assert!(output.form.is_none());
+        assert_eq!(output.items.len(), 1);
     }
 
     #[test]
