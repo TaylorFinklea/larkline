@@ -1,0 +1,22 @@
+[plugin]
+name = "GitHub"
+description = "Your open pull requests and review requests"
+version = "0.1.0"
+author = "larkline"
+icon = "🐙"
+icon_nerd = ""
+category = "dev"
+secrets = ["GITHUB_TOKEN"]
+
+[[commands]]
+name = "My PRs"
+description = "Open pull requests you authored"
+entry = "my-prs.lua"
+quickkey = "gp"
+timeout_seconds = 15
+
+[[commands]]
+name = "Review Requests"
+description = "PRs requesting your review"
+entry = "reviews.lua"
+timeout_seconds = 15

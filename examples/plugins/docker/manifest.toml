@@ -1,0 +1,20 @@
+[plugin]
+name = "Docker"
+description = "Manage containers and images"
+version = "0.1.0"
+author = "larkline"
+icon = "🐳"
+icon_nerd = ""
+category = "dev"
+
+[[commands]]
+name = "Containers"
+description = "List running and stopped containers"
+entry = "containers.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Images"
+description = "List local Docker images"
+entry = "images.lua"
+timeout_seconds = 10

@@ -1,0 +1,23 @@
+[plugin]
+name = "Tesela"
+description = "Keyboard-first notes — search, create, daily notes"
+version = "0.1.0"
+author = "taylor"
+icon = "📓"
+icon_nerd = "󱓧"
+category = "apps"
+
+[[commands]]
+name = "Search Notes"
+description = "Search your Tesela knowledge base"
+entry = "search.lua"
+
+[[commands]]
+name = "Daily Note"
+description = "Open or create today's daily note"
+entry = "daily.lua"
+
+[[commands]]
+name = "New Note"
+description = "Create a new note"
+entry = "new.lua"

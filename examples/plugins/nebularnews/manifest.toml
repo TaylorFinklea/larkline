@@ -1,0 +1,48 @@
+[plugin]
+name = "Nebular News"
+description = "Your personal RSS intelligence feed"
+version = "0.2.0"
+author = "taylor"
+icon = "📡"
+icon_nerd = "󰑫"
+category = "apps"
+secrets = ["NEBULARNEWS_URL", "NEBULARNEWS_TOKEN"]
+
+[[commands]]
+name = "Feed"
+description = "Latest articles sorted by score"
+entry = "feed.lua"
+quickkey = "nf"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
+name = "Search"
+description = "Search articles by keyword"
+entry = "search.lua"
+timeout_seconds = 15
+
+[[commands]]
+name = "Saved"
+description = "Your saved articles"
+entry = "saved.lua"
+timeout_seconds = 15
+
+[[commands]]
+name = "Dashboard"
+description = "Reading stats and scoring overview"
+entry = "dashboard.lua"
+timeout_seconds = 10
+prefetch = true
+
+[[commands]]
+name = "Status"
+description = "Service health check"
+entry = "status.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Trigger Pull"
+description = "Start a manual feed pull"
+entry = "pull.lua"
+timeout_seconds = 15

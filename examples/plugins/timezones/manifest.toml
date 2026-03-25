@@ -1,0 +1,11 @@
+[plugin]
+name = "Timezones"
+description = "Current time across major timezones"
+version = "0.1.0"
+author = "larkline"
+icon = "🌍"
+icon_nerd = "󰥔"
+entry = "init.lua"
+timeout_seconds = 5
+prefetch = true
+category = "tools"

@@ -1,0 +1,11 @@
+[plugin]
+name = "Caffeinate"
+description = "Keep your Mac awake — Spotlight Caffeinate control"
+version = "0.1.0"
+author = "taylor"
+icon = "☕"
+icon_nerd = "󰛊"
+entry = "init.lua"
+timeout_seconds = 5
+prefetch = true
+category = "system"

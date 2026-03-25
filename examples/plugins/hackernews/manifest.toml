@@ -1,0 +1,12 @@
+[plugin]
+name = "Hacker News"
+description = "Top stories from Hacker News"
+version = "0.1.0"
+author = "larkline"
+icon = "📰"
+icon_nerd = "󰎕"
+entry = "init.lua"
+timeout_seconds = 15
+prefetch = true
+cache = true
+category = "info"

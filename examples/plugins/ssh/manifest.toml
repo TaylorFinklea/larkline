@@ -1,0 +1,10 @@
+[plugin]
+name = "SSH"
+description = "Quick-connect to SSH hosts from ~/.ssh/config"
+version = "0.1.0"
+author = "larkline"
+icon = "🔑"
+icon_nerd = "󰣀"
+entry = "init.lua"
+timeout_seconds = 5
+category = "dev"
