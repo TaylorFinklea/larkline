@@ -5,7 +5,7 @@ local function time_ago(iso_str)
     local ts = lark.exec("date", { "-jf", "%Y-%m-%dT%H:%M:%SZ", iso_str, "+%s" })
     if not ts or ts == "" then return "" end
     local now = tonumber(lark.exec("date", { "+%s" })) or 0
-    local diff = now - (tonumber(ts:gsub("%s+$", "")) or 0)
+    local diff = now - (tonumber((ts:gsub("%s+$", ""))) or 0)
     if diff < 60 then return "just now" end
     if diff < 3600 then return math.floor(diff / 60) .. "m ago" end
     if diff < 86400 then return math.floor(diff / 3600) .. "h ago" end
