@@ -712,6 +712,17 @@ pub fn env_path() -> PathBuf {
         .map_or_else(|| PathBuf::from(".env"), |p| p.join(".env"))
 }
 
+/// Strip matching surrounding single or double quotes from a `.env` value.
+fn strip_quotes(value: &str) -> &str {
+    if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
 /// Load secrets from `~/.config/larkline/.env`.
 ///
 /// Format: `KEY=VALUE` per line. Lines starting with `#` are comments.
@@ -731,7 +742,7 @@ pub fn load_secrets() -> std::collections::HashMap<String, String> {
         }
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim();
-            let value = value.trim();
+            let value = strip_quotes(value.trim());
             if !key.is_empty() {
                 secrets.insert(key.to_string(), value.to_string());
             }

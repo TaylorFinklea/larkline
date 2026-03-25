@@ -138,7 +138,10 @@ impl LuaPlugin {
 
         let http_get = lua
             .create_async_function(|lua, (url, opts): (String, Option<LuaTable>)| async move {
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .user_agent(concat!("larkline/", env!("CARGO_PKG_VERSION")))
+                    .build()
+                    .map_err(LuaError::external)?;
                 let mut req = client.get(&url);
 
                 if let Some(ref opts) = opts {
@@ -170,7 +173,10 @@ impl LuaPlugin {
         let http_post = lua
             .create_async_function(
                 |lua, (url, body, opts): (String, String, Option<LuaTable>)| async move {
-                    let client = reqwest::Client::new();
+                    let client = reqwest::Client::builder()
+                        .user_agent(concat!("larkline/", env!("CARGO_PKG_VERSION")))
+                        .build()
+                        .map_err(LuaError::external)?;
                     let mut req = client.post(&url).body(body);
 
                     if let Some(ref opts) = opts {
