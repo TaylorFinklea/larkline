@@ -124,7 +124,7 @@ pub struct ItemAction {
     /// Human-readable label shown in the action list.
     pub label: String,
     /// The kind of command to execute.
-    #[serde(rename = "command")]
+    #[serde(rename = "command", alias = "kind")]
     pub kind: ActionKind,
     /// Arguments for the command.
     #[serde(default)]
