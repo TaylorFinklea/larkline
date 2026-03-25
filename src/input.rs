@@ -3,7 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::action::Action;
-use crate::app::{Mode, VimMode};
+use crate::app::{Mode, PowerMenuCategory, VimMode};
 use crate::config::{BrowseAction, ResolvedKeybindings, ViewOutputAction};
 
 /// Maps a raw crossterm key event to a semantic [`Action`].
@@ -26,6 +26,8 @@ pub fn handle_key(
     has_output_search: bool,
     has_form: bool,
     has_action_palette: bool,
+    power_menu: Option<&[PowerMenuCategory]>,
+    pending_g: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -42,6 +44,11 @@ pub fn handle_key(
         return handle_action_palette(event);
     }
 
+    // Power menu intercepts keys when open.
+    if let Some(categories) = power_menu {
+        return handle_power_menu(event, categories);
+    }
+
     // Form input intercepts all keys when a form is active.
     if has_form && *mode == Mode::ViewOutput {
         return handle_form_input(event);
@@ -50,6 +57,16 @@ pub fn handle_key(
     // Output search mode intercepts keys in ViewOutput.
     if has_output_search && *mode == Mode::ViewOutput {
         return handle_output_search(event);
+    }
+
+    // Pending `g` — if the user pressed `g` in Normal mode, the next `g` triggers GoToFirst.
+    // Any other key cancels the pending state and falls through to normal handling.
+    if pending_g
+        && *vim_mode == VimMode::Normal
+        && event.code == KeyCode::Char('g')
+        && event.modifiers == KeyModifiers::NONE
+    {
+        return Some(Action::GoToFirst);
     }
 
     match vim_mode {
@@ -102,6 +119,14 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('d') if event.modifiers == KeyModifiers::NONE => {
             Some(Action::ToggleDescriptions)
         }
+        // Power menu (which-key style overlay).
+        KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => {
+            Some(Action::PowerMenuOpen)
+        }
+        // G → jump to last item.
+        KeyCode::Char('G') => Some(Action::GoToLast),
+        // g → start pending-g sequence (gg = jump to first).
+        KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
         _ => None,
     }
 }
@@ -181,6 +206,27 @@ fn handle_action_palette(event: KeyEvent) -> Option<Action> {
     }
 }
 
+/// Power menu handler: single-key dispatch — press a shortcut key to execute immediately.
+fn handle_power_menu(event: KeyEvent, categories: &[PowerMenuCategory]) -> Option<Action> {
+    match event.code {
+        KeyCode::Esc | KeyCode::Char(' ') => Some(Action::PowerMenuDismiss),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        KeyCode::Char(c) => {
+            // Find matching item across all categories.
+            for cat in categories {
+                for item in &cat.items {
+                    if item.key == c {
+                        return Some(item.action.clone());
+                    }
+                }
+            }
+            None
+        }
+        KeyCode::Enter => Some(Action::Execute),
+        _ => None,
+    }
+}
+
 /// Copy menu handler: j/k navigate, Enter selects, Esc dismisses.
 fn handle_copy_menu(event: KeyEvent) -> Option<Action> {
     match event.code {
@@ -213,9 +259,13 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
         });
     }
 
-    // Hardcoded fallback: Ctrl+C.
+    // Hardcoded fallbacks.
     match event.code {
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => Some(Action::PowerMenuOpen),
+        KeyCode::Char('G') => Some(Action::GoToLast),
+        KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
+        KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
         _ => None,
     }
 }

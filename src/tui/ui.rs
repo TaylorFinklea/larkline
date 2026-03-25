@@ -5,18 +5,18 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
         TableState,
     },
 };
 
 use ansi_to_tui::IntoText;
 
-use crate::app::{AppState, Mode, OutputMode, UnifiedRow, VimMode};
+use crate::app::{AppState, Mode, OutputMode, PowerMenuState, UnifiedRow, VimMode};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -43,19 +43,16 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             && state.preview_plugin_index.is_some()
             && chunks[1].width >= 80);
 
-    if show_right_pane {
-        // Horizontal split: unified list (left) | right pane (right).
-        // Narrower sidebar when viewing plugin output (2/7 ≈ 28%).
-        let (left_pct, right_pct) = if state.mode == Mode::ViewOutput {
-            (28, 72)
-        } else {
-            (40, 60)
-        };
+    // In ViewOutput with sidebar hidden, give full width to the output pane.
+    if state.mode == Mode::ViewOutput && state.sidebar_hidden {
+        render_output_pane(frame, state, theme, chunks[1]);
+    } else if show_right_pane {
+        // Horizontal split: unified list (left, 28%) | right pane (right, 72%).
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(left_pct),
-                Constraint::Percentage(right_pct),
+                Constraint::Percentage(28),
+                Constraint::Percentage(72),
             ])
             .split(chunks[1]);
 
@@ -67,6 +64,11 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
         }
     } else {
         render_unified_list(frame, state, theme, chunks[1]);
+    }
+
+    // Power menu overlay — rendered last (on top of everything).
+    if let Some(ref menu) = state.power_menu {
+        render_power_menu(frame, menu, theme, frame.area());
     }
 }
 
@@ -555,16 +557,21 @@ fn render_output_pane(
                 }
             }
             OutputMode::Markdown => {
-                if let Some(ref raw) = output.raw_text {
-                    let text = crate::tui::markdown::markdown_to_text(raw, theme);
-                    #[allow(clippy::cast_possible_truncation)]
-                    let scroll = state.scroll_offset as u16;
-                    let paragraph = Paragraph::new(text)
-                        .block(block)
-                        .scroll((scroll, 0));
-                    frame.render_widget(paragraph, area);
-                    return;
-                }
+                // Use cached rendered text if available, fall back to on-the-fly rendering.
+                let text = if let Some(ref cached) = state.markdown_cache {
+                    cached.clone()
+                } else if let Some(ref raw) = output.raw_text {
+                    crate::tui::markdown::markdown_to_text(raw, theme)
+                } else {
+                    ratatui::text::Text::raw("")
+                };
+                #[allow(clippy::cast_possible_truncation)]
+                let scroll = state.scroll_offset as u16;
+                let paragraph = Paragraph::new(text)
+                    .block(block)
+                    .scroll((scroll, 0));
+                frame.render_widget(paragraph, area);
+                return;
             }
         }
     }
@@ -852,20 +859,47 @@ fn render_form(
     frame.render_widget(paragraph, area);
 }
 
+/// Styled key hint: accent-colored key + dimmed label.
+fn key_hint<'a>(key: &str, label: &str, theme: &Theme) -> Vec<Span<'a>> {
+    vec![
+        Span::styled(
+            format!(" {key}"),
+            Style::default().fg(theme.accent).bold(),
+        ),
+        Span::styled(
+            format!(" {label}"),
+            Style::default().fg(theme.text_dimmed),
+        ),
+    ]
+}
+
+#[allow(clippy::too_many_lines)]
 fn render_status_bar(
     frame: &mut Frame,
     state: &AppState,
     theme: &Theme,
     area: ratatui::layout::Rect,
 ) {
-    // Config warnings take priority over the normal hint.
+    let badge_style = Style::default()
+        .fg(theme.status_bar_bg)
+        .bg(theme.accent)
+        .add_modifier(Modifier::BOLD);
+    let sep = Span::styled(" │ ", Style::default().fg(theme.text_dimmed));
+
+    // Config warnings take priority.
     if let Some(warning) = state.warnings.first() {
-        let bar = Paragraph::new(format!(" ⚠ {warning} ")).style(
-            Style::default()
-                .fg(theme.accent)
-                .bg(theme.status_bar_bg)
-                .add_modifier(Modifier::BOLD),
-        );
+        let mut spans = vec![
+            Span::styled(" ⚠ WARNING ", badge_style),
+            sep,
+            Span::styled(
+                format!("{warning} "),
+                Style::default().fg(theme.error).bold(),
+            ),
+        ];
+        // Pad the rest of the bar.
+        spans.push(Span::raw(""));
+        let bar = Paragraph::new(Line::from(spans))
+            .style(Style::default().bg(theme.status_bar_bg));
         frame.render_widget(bar, area);
         return;
     }
@@ -873,66 +907,208 @@ fn render_status_bar(
     // Flash message (expires after 2 seconds).
     if let Some((ref msg, ref started)) = state.status_message {
         if started.elapsed().as_secs_f32() < 2.0 {
-            let bar = Paragraph::new(format!(" ✓ {msg} ")).style(
-                Style::default()
-                    .fg(theme.accent)
-                    .bg(theme.status_bar_bg)
-                    .add_modifier(Modifier::BOLD),
-            );
+            let mode_text = match state.vim_mode {
+                VimMode::Normal => " NORMAL ",
+                VimMode::Insert => " INSERT ",
+                VimMode::Command => " COMMAND ",
+            };
+            let spans = vec![
+                Span::styled(mode_text, badge_style),
+                sep,
+                Span::styled(
+                    format!("✓ {msg} "),
+                    Style::default().fg(theme.accent).bold(),
+                ),
+            ];
+            let bar = Paragraph::new(Line::from(spans))
+                .style(Style::default().bg(theme.status_bar_bg));
             frame.render_widget(bar, area);
             return;
         }
     }
 
-    let plugin_name_for_status = || -> String {
-        if let Some(ref output) = state.plugin_output {
-            output.title.clone()
-        } else {
-            "output".to_string()
-        }
-    };
+    // Build the main status bar line.
+    let mut spans: Vec<Span> = Vec::new();
 
-    let hint: String = if state.pending_confirmation.is_some() {
-        " Confirm action: [Y]es  [N]o ".to_string()
+    if state.pending_confirmation.is_some() {
+        spans.push(Span::styled(" CONFIRM ", badge_style));
+        spans.push(sep);
+        spans.extend(key_hint("Y", "yes", theme));
+        spans.extend(key_hint("N", "no", theme));
     } else {
         match state.vim_mode {
             VimMode::Command => {
-                format!(" [C]  :{}\u{2588} ", state.command_input)
+                spans.push(Span::styled(" COMMAND ", badge_style));
+                spans.push(sep.clone());
+                spans.push(Span::styled(
+                    format!(" :{}\u{2588}", state.command_input),
+                    Style::default().fg(theme.text).bold(),
+                ));
             }
-            VimMode::Insert => " [I]  type to search or use quickkeys  Esc: normal ".to_string(),
-            VimMode::Normal => match state.mode {
-                Mode::Unified => {
-                    " [N]  j/k: nav  Enter: run  i: insert  :: cmd  q: quit ".to_string()
-                }
-                Mode::ViewOutput => {
-                    if state.is_loading {
-                        let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
-                        let elapsed = state
-                            .loading_started
-                            .map_or(0.0, |t| t.elapsed().as_secs_f32());
-                        let name = plugin_name_for_status();
-                        format!(" [N]  {spinner} Loading {name}… ({elapsed:.1}s) ")
-                    } else if state
-                        .plugin_output
-                        .as_ref()
-                        .is_some_and(|o| !o.items.is_empty())
-                    {
-                        let name = plugin_name_for_status();
-                        let n = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
-                        format!(" [N]  {name} — {n} items  j/k: nav  Enter: run action  Esc: back ")
-                    } else {
-                        let name = plugin_name_for_status();
-                        format!(" [N]  {name}  Esc: back ")
+            VimMode::Insert => {
+                spans.push(Span::styled(" INSERT ", badge_style));
+                spans.push(sep.clone());
+                spans.push(Span::styled(
+                    " type to search or use quickkeys",
+                    Style::default().fg(theme.text_dimmed),
+                ));
+                spans.extend(key_hint("Esc", "normal", theme));
+            }
+            VimMode::Normal => {
+                spans.push(Span::styled(" NORMAL ", badge_style));
+                spans.push(sep.clone());
+
+                match state.mode {
+                    Mode::Unified => {
+                        spans.extend(key_hint("j/k", "nav", theme));
+                        spans.extend(key_hint("⏎", "run", theme));
+                        spans.extend(key_hint("/", "search", theme));
+                        spans.extend(key_hint(":", "cmd", theme));
+                        spans.extend(key_hint("SPC", "menu", theme));
+                        spans.extend(key_hint("q", "quit", theme));
+                    }
+                    Mode::ViewOutput => {
+                        if state.is_loading {
+                            let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
+                            let elapsed = state
+                                .loading_started
+                                .map_or(0.0, |t| t.elapsed().as_secs_f32());
+                            let name = state
+                                .plugin_output
+                                .as_ref()
+                                .map_or("plugin", |o| o.title.as_str());
+                            spans.push(Span::styled(
+                                format!(" {spinner} {name}… ({elapsed:.1}s)"),
+                                Style::default().fg(theme.text),
+                            ));
+                        } else {
+                            let name = state
+                                .plugin_output
+                                .as_ref()
+                                .map_or("output", |o| o.title.as_str());
+                            let n = state
+                                .plugin_output
+                                .as_ref()
+                                .map_or(0, |o| o.items.len());
+                            if n > 0 {
+                                spans.push(Span::styled(
+                                    format!(" {name} — {n} items"),
+                                    Style::default().fg(theme.text),
+                                ));
+                            } else {
+                                spans.push(Span::styled(
+                                    format!(" {name}"),
+                                    Style::default().fg(theme.text),
+                                ));
+                            }
+                            spans.extend(key_hint("j/k", "nav", theme));
+                            spans.extend(key_hint("⏎", "action", theme));
+                            spans.extend(key_hint("SPC", "menu", theme));
+                            spans.extend(key_hint("Esc", "back", theme));
+                        }
                     }
                 }
-            },
+            }
         }
-    };
+    }
 
-    let bar = Paragraph::new(hint).style(
-        Style::default()
-            .fg(theme.text_dimmed)
-            .bg(theme.status_bar_bg),
-    );
+    let bar =
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
     frame.render_widget(bar, area);
+}
+
+/// Render a centered popup with categorized actions and key hints.
+fn render_power_menu(
+    frame: &mut Frame,
+    menu: &PowerMenuState,
+    theme: &Theme,
+    area: Rect,
+) {
+    const COLS: usize = 3;
+    const COL_WIDTH: u16 = 18;
+
+    // Calculate content height: 1 line per category header + ceil(items/COLS) rows per category
+    // + 1 blank line between categories.
+    #[allow(clippy::cast_possible_truncation)]
+    let cols_u16 = COLS as u16;
+    let content_height: u16 = menu
+        .categories
+        .iter()
+        .enumerate()
+        .map(|(i, cat)| {
+            #[allow(clippy::cast_possible_truncation)]
+            let item_count = cat.items.len() as u16;
+            let item_rows = item_count.div_ceil(cols_u16);
+            let gap = u16::from(i + 1 < menu.categories.len());
+            1 + item_rows + gap
+        })
+        .sum();
+
+    let popup_width = (cols_u16 * COL_WIDTH + 4).min(area.width.saturating_sub(4));
+    let popup_height = (content_height + 2).min(area.height.saturating_sub(2)); // +2 for border
+
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    // Clear the area behind the popup.
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Power Menu ",
+            Style::default().fg(theme.accent).bold(),
+        ));
+
+    let inner = block.inner(popup_area);
+
+    // Build lines for the popup content.
+    let mut lines: Vec<Line> = Vec::new();
+    for (cat_idx, category) in menu.categories.iter().enumerate() {
+        // Category header.
+        lines.push(Line::from(Span::styled(
+            format!("  {}", category.name),
+            Style::default()
+                .fg(theme.text_dimmed)
+                .add_modifier(Modifier::BOLD),
+        )));
+
+        // Items in rows of COLS columns.
+        for chunk in category.items.chunks(COLS) {
+            let mut spans = Vec::new();
+            spans.push(Span::raw("  "));
+            for (i, item) in chunk.iter().enumerate() {
+                spans.push(Span::styled(
+                    format!(" {} ", item.key_hint),
+                    Style::default()
+                        .fg(theme.accent)
+                        .bg(theme.highlight_bg)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    format!(" {}", item.label),
+                    Style::default().fg(theme.text),
+                ));
+                // Pad to column width (except last in row).
+                if i + 1 < chunk.len() {
+                    let used = item.key_hint.len() + item.label.len() + 3; // " X " + " label"
+                    let pad = (COL_WIDTH as usize).saturating_sub(used);
+                    spans.push(Span::raw(" ".repeat(pad)));
+                }
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Blank line between categories (except after the last one).
+        if cat_idx + 1 < menu.categories.len() {
+            lines.push(Line::from(""));
+        }
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(paragraph, inner);
 }

@@ -100,4 +100,16 @@ pub enum Action {
     FormSubmit,
     /// Cancel the form and go back.
     FormCancel,
+    /// Jump to the first item (gg in vim).
+    GoToFirst,
+    /// Jump to the last item (G in vim).
+    GoToLast,
+    /// Set pending-g state (first `g` pressed, waiting for second `g`).
+    PendingG,
+    /// Toggle sidebar visibility in `ViewOutput` mode.
+    ToggleSidebar,
+    /// Open the power menu overlay (Space key, which-key style).
+    PowerMenuOpen,
+    /// Dismiss the power menu overlay.
+    PowerMenuDismiss,
 }

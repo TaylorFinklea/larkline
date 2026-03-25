@@ -179,6 +179,14 @@ pub struct AppState {
     pub show_descriptions: bool,
     /// Action palette overlay (searchable action list for the selected item).
     pub action_palette: Option<ActionPaletteState>,
+    /// Power menu overlay (which-key style, Space key).
+    pub power_menu: Option<PowerMenuState>,
+    /// Cached rendered markdown `Text` — avoids re-parsing every frame.
+    pub markdown_cache: Option<ratatui::text::Text<'static>>,
+    /// Pending `g` key — waiting for second `g` to trigger `GoToFirst`.
+    pub pending_g: bool,
+    /// Whether the sidebar is hidden in `ViewOutput` mode.
+    pub sidebar_hidden: bool,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
 }
@@ -236,6 +244,35 @@ impl ActionPaletteState {
             self.selected = max;
         }
     }
+}
+
+/// A single entry in the power menu.
+#[derive(Debug, Clone)]
+pub struct PowerMenuItem {
+    /// Shortcut key to execute this action (e.g., 'y', 'q', '/').
+    pub key: char,
+    /// Display string for the key hint (e.g., "⏎" for Enter, "SPC" for Space).
+    pub key_hint: String,
+    /// Human-readable label shown next to the key.
+    pub label: String,
+    /// The action to dispatch when this item is selected.
+    pub action: Action,
+}
+
+/// A category group in the power menu.
+#[derive(Debug, Clone)]
+pub struct PowerMenuCategory {
+    /// Category heading (e.g., "Actions", "Display", "App").
+    pub name: String,
+    /// Items in this category.
+    pub items: Vec<PowerMenuItem>,
+}
+
+/// Overlay state for the power menu (which-key style).
+#[derive(Debug, Clone)]
+pub struct PowerMenuState {
+    /// Categorized action groups.
+    pub categories: Vec<PowerMenuCategory>,
 }
 
 /// Mutable state for an active form being filled by the user.
@@ -428,6 +465,7 @@ impl App {
         self.engine.execute_all();
 
         while !self.state.should_quit {
+            self.refresh_markdown_cache();
             terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
 
             if event::poll(std::time::Duration::from_millis(16))? {
@@ -444,8 +482,17 @@ impl App {
                             self.state.output_searching,
                             self.state.form_state.is_some(),
                             self.state.action_palette.is_some(),
+                            self.state.power_menu.as_ref().map(|m| m.categories.as_slice()),
+                            self.state.pending_g,
                         ) {
+                            // Clear pending_g for any action except PendingG itself.
+                            if !matches!(action, Action::PendingG) {
+                                self.state.pending_g = false;
+                            }
                             self.handle_action(action);
+                        } else {
+                            // No action produced — clear pending_g.
+                            self.state.pending_g = false;
                         }
                     }
                 }
@@ -477,6 +524,8 @@ impl App {
     /// Extracted from the run loop so it can be called from tests.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn handle_engine_event(&mut self, event: EngineEvent) {
+        // Any engine event may deliver new output — invalidate markdown cache.
+        self.state.markdown_cache = None;
         match event {
             EngineEvent::PluginStarted {
                 plugin_index,
@@ -653,6 +702,16 @@ impl App {
         // Dismiss any config warnings on the first keypress.
         self.state.warnings.clear();
 
+        // Auto-dismiss power menu when any other action fires from it.
+        if self.state.power_menu.is_some()
+            && !matches!(
+                action,
+                Action::PowerMenuOpen | Action::PowerMenuDismiss
+            )
+        {
+            self.state.power_menu = None;
+        }
+
         match action {
             Action::Quit => self.state.should_quit = true,
 
@@ -794,6 +853,7 @@ impl App {
                     self.state.output_mode = OutputMode::List;
                     self.state.viewing_plugin_index = None;
                     self.state.scroll_offset = 0;
+                    self.state.sidebar_hidden = false;
                     if !self.state.query.is_empty() {
                         self.state.vim_mode = VimMode::Insert;
                     }
@@ -913,6 +973,7 @@ impl App {
                     }
                 };
                 self.state.scroll_offset = 0;
+                self.state.markdown_cache = None;
             }
 
             Action::ToggleDescriptions => {
@@ -1308,6 +1369,82 @@ impl App {
                 }
             }
 
+            Action::PendingG => {
+                self.state.pending_g = true;
+            }
+
+            Action::GoToFirst => {
+                match self.state.mode {
+                    Mode::Unified => {
+                        if let Some(first) = self
+                            .state
+                            .unified_rows
+                            .iter()
+                            .position(UnifiedRow::is_selectable)
+                        {
+                            self.state.unified_selected = first;
+                            self.sync_preview_index();
+                        }
+                    }
+                    Mode::ViewOutput => {
+                        if matches!(
+                            self.state.output_mode,
+                            OutputMode::Markdown | OutputMode::RawText
+                        ) {
+                            self.state.scroll_offset = 0;
+                        } else {
+                            self.state.output_selected = 0;
+                        }
+                    }
+                }
+            }
+
+            Action::GoToLast => {
+                match self.state.mode {
+                    Mode::Unified => {
+                        if let Some(last) = self
+                            .state
+                            .unified_rows
+                            .iter()
+                            .enumerate()
+                            .rev()
+                            .find(|(_, r)| r.is_selectable())
+                            .map(|(i, _)| i)
+                        {
+                            self.state.unified_selected = last;
+                            self.sync_preview_index();
+                        }
+                    }
+                    Mode::ViewOutput => {
+                        if matches!(
+                            self.state.output_mode,
+                            OutputMode::Markdown | OutputMode::RawText
+                        ) {
+                            // Set a large scroll offset; Paragraph rendering clamps naturally.
+                            self.state.scroll_offset = usize::MAX / 2;
+                        } else {
+                            let max = self.visible_output_count().saturating_sub(1);
+                            self.state.output_selected = max;
+                        }
+                    }
+                }
+            }
+
+            Action::ToggleSidebar => {
+                if self.state.mode == Mode::ViewOutput {
+                    self.state.sidebar_hidden = !self.state.sidebar_hidden;
+                }
+            }
+
+            Action::PowerMenuOpen => {
+                let categories = self.build_power_menu_categories();
+                self.state.power_menu = Some(PowerMenuState { categories });
+            }
+
+            Action::PowerMenuDismiss => {
+                self.state.power_menu = None;
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1351,6 +1488,135 @@ impl App {
         }
     }
 
+    /// Build context-aware power menu categories based on the current mode.
+    #[allow(clippy::too_many_lines)]
+    fn build_power_menu_categories(&self) -> Vec<PowerMenuCategory> {
+        match self.state.mode {
+            Mode::Unified => vec![
+                PowerMenuCategory {
+                    name: "Navigation".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: '/',
+                            key_hint: "/".to_string(),
+                            label: "Search".to_string(),
+                            action: Action::EnterInsertMode,
+                        },
+                        PowerMenuItem {
+                            key: ':',
+                            key_hint: ":".to_string(),
+                            label: "Command".to_string(),
+                            action: Action::EnterCommandMode,
+                        },
+                    ],
+                },
+                PowerMenuCategory {
+                    name: "Display".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: 'd',
+                            key_hint: "d".to_string(),
+                            label: "Descriptions".to_string(),
+                            action: Action::ToggleDescriptions,
+                        },
+                        PowerMenuItem {
+                            key: 'R',
+                            key_hint: "R".to_string(),
+                            label: "Refresh".to_string(),
+                            action: Action::RefreshPlugins,
+                        },
+                    ],
+                },
+                PowerMenuCategory {
+                    name: "App".to_string(),
+                    items: vec![PowerMenuItem {
+                        key: 'q',
+                        key_hint: "q".to_string(),
+                        label: "Quit".to_string(),
+                        action: Action::Quit,
+                    }],
+                },
+            ],
+            Mode::ViewOutput => vec![
+                PowerMenuCategory {
+                    name: "Actions".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: ':',
+                            key_hint: ":".to_string(),
+                            label: "Palette".to_string(),
+                            action: Action::PaletteOpen,
+                        },
+                        PowerMenuItem {
+                            key: 'o',
+                            key_hint: "o".to_string(),
+                            label: "Open URL".to_string(),
+                            action: Action::OpenUrl,
+                        },
+                        PowerMenuItem {
+                            key: 'y',
+                            key_hint: "y".to_string(),
+                            label: "Copy".to_string(),
+                            action: Action::CopyLabel,
+                        },
+                        PowerMenuItem {
+                            key: 'Y',
+                            key_hint: "Y".to_string(),
+                            label: "Copy Menu".to_string(),
+                            action: Action::CopyMenu,
+                        },
+                    ],
+                },
+                PowerMenuCategory {
+                    name: "Display".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: 't',
+                            key_hint: "t".to_string(),
+                            label: "Toggle View".to_string(),
+                            action: Action::ToggleOutputMode,
+                        },
+                        PowerMenuItem {
+                            key: '/',
+                            key_hint: "/".to_string(),
+                            label: "Search".to_string(),
+                            action: Action::OutputEnterSearch,
+                        },
+                        PowerMenuItem {
+                            key: 's',
+                            key_hint: "s".to_string(),
+                            label: "Sidebar".to_string(),
+                            action: Action::ToggleSidebar,
+                        },
+                    ],
+                },
+                PowerMenuCategory {
+                    name: "App".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: 'R',
+                            key_hint: "R".to_string(),
+                            label: "Refresh".to_string(),
+                            action: Action::RefreshPlugins,
+                        },
+                        PowerMenuItem {
+                            key: 'd',
+                            key_hint: "d".to_string(),
+                            label: "Descriptions".to_string(),
+                            action: Action::ToggleDescriptions,
+                        },
+                        PowerMenuItem {
+                            key: 'q',
+                            key_hint: "q".to_string(),
+                            label: "Quit".to_string(),
+                            action: Action::Quit,
+                        },
+                    ],
+                },
+            ],
+        }
+    }
+
     fn execute_item_action(&mut self, action: &ItemAction) {
         match action.kind {
             ActionKind::Open => {
@@ -1391,7 +1657,26 @@ impl App {
     }
 
     /// Open a plugin's cached output in `ViewOutput` mode, or execute it if not cached.
+    /// Populate the markdown cache if we're viewing markdown and it's not already cached.
+    fn refresh_markdown_cache(&mut self) {
+        if self.state.mode == Mode::ViewOutput
+            && self.state.output_mode == OutputMode::Markdown
+            && self.state.markdown_cache.is_none()
+        {
+            if let Some(ref raw) = self
+                .state
+                .plugin_output
+                .as_ref()
+                .and_then(|o| o.raw_text.clone())
+            {
+                self.state.markdown_cache =
+                    Some(crate::tui::markdown::markdown_to_text(raw, &self.theme));
+            }
+        }
+    }
+
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
+        self.state.markdown_cache = None;
         // Push current ViewOutput state onto history if already viewing a plugin.
         if self.state.mode == Mode::ViewOutput {
             if let Some(current_idx) = self.state.viewing_plugin_index {

@@ -3,6 +3,8 @@
 //! Uses `syntect` to highlight fenced code blocks in markdown output.
 //! Unknown languages fall back to plain monospace text.
 
+use std::sync::LazyLock;
+
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
@@ -10,14 +12,19 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
+/// Lazily-loaded syntax definitions — loaded once, shared across all calls.
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+/// Lazily-loaded color themes — loaded once, shared across all calls.
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
 /// Highlight a code block and return styled ratatui `Line` objects.
 ///
 /// Each line is indented with two spaces. If the language is not recognized,
 /// the code is returned as plain dimmed text.
 #[must_use]
 pub fn highlight_code<'a>(code: &str, language: &str) -> Vec<Line<'a>> {
-    let ss = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
+    let ss = &*SYNTAX_SET;
+    let ts = &*THEME_SET;
 
     let syntax = ss
         .find_syntax_by_token(language)
@@ -29,7 +36,7 @@ pub fn highlight_code<'a>(code: &str, language: &str) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
 
     for line in LinesWithEndings::from(code) {
-        let Ok(regions) = highlighter.highlight_line(line, &ss) else {
+        let Ok(regions) = highlighter.highlight_line(line, ss) else {
             // Fallback: plain text.
             lines.push(Line::from(Span::styled(
                 format!("  {}", line.trim_end()),
