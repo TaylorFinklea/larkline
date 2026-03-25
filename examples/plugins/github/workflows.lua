@@ -80,8 +80,8 @@ lark.register({
         local items = {}
         for i = 1, math.min(30, #runs) do
             local run = runs[i]
-            local conclusion = run.conclusion
-            local status = run.status or "unknown"
+            local conclusion = type(run.conclusion) == "string" and run.conclusion or nil
+            local status = type(run.status) == "string" and run.status or "unknown"
 
             local icon = "⏳"
             if status == "completed" then
@@ -93,13 +93,13 @@ lark.register({
             end
 
             local display_status = conclusion or status
-            local ago = time_ago(run.created_at)
+            local ago = time_ago(type(run.created_at) == "string" and run.created_at or nil)
             local repo_short = run._repo and run._repo:match("([^/]+)$") or ""
-            local branch = run.head_branch or ""
-            local run_url = run.html_url or ""
+            local branch = type(run.head_branch) == "string" and run.head_branch or ""
+            local run_url = type(run.html_url) == "string" and run.html_url or ""
 
             items[#items + 1] = {
-                label = (run.name or "workflow") .. " — " .. display_status,
+                label = (type(run.name) == "string" and run.name or "workflow") .. " — " .. display_status,
                 detail = repo_short .. "  " .. branch .. "  " .. ago,
                 icon = icon,
                 url = run_url,
