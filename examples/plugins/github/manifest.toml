@@ -1,7 +1,7 @@
 [plugin]
 name = "GitHub"
-description = "Your open pull requests and review requests"
-version = "0.1.0"
+description = "PRs, reviews, and CI/CD workflow runs"
+version = "0.2.0"
 author = "larkline"
 icon = "🐙"
 icon_nerd = ""
@@ -20,3 +20,10 @@ name = "Review Requests"
 description = "PRs requesting your review"
 entry = "reviews.lua"
 timeout_seconds = 15
+
+[[commands]]
+name = "Workflow Runs"
+description = "Recent GitHub Actions runs across your repos"
+entry = "workflows.lua"
+quickkey = "gw"
+timeout_seconds = 30
