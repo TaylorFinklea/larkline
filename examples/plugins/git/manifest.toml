@@ -1,20 +1,34 @@
 [plugin]
 name = "Git"
-description = "Git operations for the current directory"
-version = "0.1.0"
+description = "Git dashboard across your repos"
+version = "0.2.0"
 author = "taylor"
 icon = "🌿"
 icon_nerd = ""
 category = "dev"
 
 [[commands]]
-name = "Recent Branches"
-description = "Recent local git branches with last-commit info"
-entry = "branches.lua"
-quickkey = "gb"
-
-[[commands]]
 name = "Status"
-description = "Working tree changes (git status)"
+description = "Working tree status across all tracked repos"
 entry = "status.lua"
 quickkey = "gs"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
+name = "Branches"
+description = "Current branch and last commit across repos"
+entry = "branches.lua"
+quickkey = "gb"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
+name = "Manage Repos"
+description = "Add or remove tracked repositories"
+entry = "manage.lua"
+
+[[commands]]
+name = "Scan Directory"
+description = "Auto-discover git repos in a directory"
+entry = "scan.lua"

@@ -43,9 +43,11 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             && state.preview_plugin_index.is_some()
             && chunks[1].width >= 80);
 
-    // In ViewOutput with sidebar hidden, give full width to the output pane.
-    if state.mode == Mode::ViewOutput && state.sidebar_hidden {
+    // Sidebar hidden: ViewOutput gets full width, Unified hides preview.
+    if state.sidebar_hidden && state.mode == Mode::ViewOutput {
         render_output_pane(frame, state, theme, chunks[1]);
+    } else if state.sidebar_hidden && state.mode == Mode::Unified {
+        render_unified_list(frame, state, theme, chunks[1]);
     } else if show_right_pane {
         // Horizontal split: unified list (left, 28%) | right pane (right, 72%).
         let content_chunks = Layout::default()

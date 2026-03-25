@@ -127,6 +127,8 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('G') => Some(Action::GoToLast),
         // g → start pending-g sequence (gg = jump to first).
         KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
+        // Toggle sidebar/preview pane visibility.
+        KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
         _ => None,
     }
 }

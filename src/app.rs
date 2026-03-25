@@ -853,7 +853,6 @@ impl App {
                     self.state.output_mode = OutputMode::List;
                     self.state.viewing_plugin_index = None;
                     self.state.scroll_offset = 0;
-                    self.state.sidebar_hidden = false;
                     if !self.state.query.is_empty() {
                         self.state.vim_mode = VimMode::Insert;
                     }
@@ -1431,9 +1430,7 @@ impl App {
             }
 
             Action::ToggleSidebar => {
-                if self.state.mode == Mode::ViewOutput {
-                    self.state.sidebar_hidden = !self.state.sidebar_hidden;
-                }
+                self.state.sidebar_hidden = !self.state.sidebar_hidden;
             }
 
             Action::PowerMenuOpen => {
@@ -1524,6 +1521,12 @@ impl App {
                             key_hint: "R".to_string(),
                             label: "Refresh".to_string(),
                             action: Action::RefreshPlugins,
+                        },
+                        PowerMenuItem {
+                            key: 's',
+                            key_hint: "s".to_string(),
+                            label: "Sidebar".to_string(),
+                            action: Action::ToggleSidebar,
                         },
                     ],
                 },
