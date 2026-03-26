@@ -968,6 +968,12 @@ fn render_status_bar(
                         spans.extend(key_hint(":", "cmd", theme));
                         spans.extend(key_hint("SPC", "menu", theme));
                         spans.extend(key_hint("q", "quit", theme));
+                        if state.sort_mode != crate::app::SortMode::Alpha {
+                            spans.push(Span::styled(
+                                format!("  ↓ {}", state.sort_mode.label()),
+                                Style::default().fg(theme.accent).bold(),
+                            ));
+                        }
                     }
                     Mode::ViewOutput => {
                         if state.is_loading {

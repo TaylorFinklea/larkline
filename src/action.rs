@@ -114,4 +114,6 @@ pub enum Action {
     PowerMenuDismiss,
     /// Re-execute the currently viewed plugin command (clears cache first).
     RerunCommand,
+    /// Cycle the unified list sort mode (Alpha → Recent → …).
+    CycleSort,
 }

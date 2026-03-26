@@ -92,6 +92,34 @@ pub enum CachedResult {
     Revalidating(PluginOutput),
 }
 
+/// Sort order for the unified launcher list.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum SortMode {
+    /// Alphabetical order (default).
+    #[default]
+    Alpha,
+    /// Most recently used first; never-used commands sort to the end alphabetically.
+    Recent,
+}
+
+impl SortMode {
+    /// Returns the display label shown in the status bar / power menu.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Alpha => "Alpha",
+            Self::Recent => "Recent",
+        }
+    }
+
+    /// Cycles to the next mode.
+    fn next(&self) -> Self {
+        match self {
+            Self::Alpha => Self::Recent,
+            Self::Recent => Self::Alpha,
+        }
+    }
+}
+
 /// Vim-style input mode — describes *how keys are interpreted*.
 ///
 /// Orthogonal to [`Mode`]: Normal + Browse = navigation; Insert + Browse = quickkeys/search.
@@ -189,8 +217,8 @@ pub struct AppState {
     pub sidebar_hidden: bool,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
-    /// Recently used commands loaded from history file (newest-first).
-    pub recent_commands: Vec<crate::history::HistoryEntry>,
+    /// Current sort order for the unified launcher list.
+    pub sort_mode: SortMode,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -379,7 +407,6 @@ impl App {
                 unified_rows: Vec::new(),
                 unified_selected: 0,
                 status_message: None,
-                recent_commands: crate::history::recent(5),
                 ..Default::default()
             },
             theme,
@@ -644,8 +671,6 @@ impl App {
                                     .as_deref()
                                     .unwrap_or(&meta.name);
                                 crate::history::record(plugin_name, &meta.name);
-                                self.state.recent_commands = crate::history::recent(5);
-                                self.rebuild_unified_list();
                             }
 
                             if cache_enabled {
@@ -1469,6 +1494,11 @@ impl App {
                 }
             }
 
+            Action::CycleSort => {
+                self.state.sort_mode = self.state.sort_mode.next();
+                self.rebuild_unified_list();
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1542,6 +1572,15 @@ impl App {
                             key_hint: "d".to_string(),
                             label: "Descriptions".to_string(),
                             action: Action::ToggleDescriptions,
+                        },
+                        PowerMenuItem {
+                            key: 'O',
+                            key_hint: "O".to_string(),
+                            label: format!(
+                                "Sort: {}",
+                                self.state.sort_mode.next().label()
+                            ),
+                            action: Action::CycleSort,
                         },
                         PowerMenuItem {
                             key: 'R',
@@ -1948,7 +1987,20 @@ impl App {
             }
         }
         let mut rest: Vec<usize> = (0..n).filter(|i| !fav_set.contains(i)).collect();
-        rest.sort_unstable_by(|&a, &b| group_keys[a].cmp(&group_keys[b]));
+        match self.state.sort_mode {
+            SortMode::Alpha => {
+                rest.sort_unstable_by(|&a, &b| group_keys[a].cmp(&group_keys[b]));
+            }
+            SortMode::Recent => {
+                let ts_map = crate::history::timestamps_by_group();
+                rest.sort_unstable_by(|&a, &b| {
+                    let ta = ts_map.get(&group_keys[a]).copied().unwrap_or(0);
+                    let tb = ts_map.get(&group_keys[b]).copied().unwrap_or(0);
+                    // Most recent first; ties broken alphabetically.
+                    tb.cmp(&ta).then_with(|| group_keys[a].cmp(&group_keys[b]))
+                });
+            }
+        }
         ordered.extend(rest);
 
         let rows = if query.is_empty() {
@@ -1956,33 +2008,6 @@ impl App {
             // Walk `ordered`, collecting consecutive plugins with the same group key
             // into display groups. Emit a GroupHeader only for groups with >1 command.
             let mut result: Vec<UnifiedRow> = Vec::new();
-
-            // Prepend "Recent" section if there is any history.
-            let recent = self.state.recent_commands.clone();
-            if !recent.is_empty() {
-                result.push(UnifiedRow::GroupHeader {
-                    name: "Recent".to_string(),
-                    icon: "🕐".to_string(),
-                });
-                for entry in &recent {
-                    // Resolve to a plugin_index by matching group + command name.
-                    if let Some(pidx) = self.state.plugins.iter().position(|p| {
-                        p.name == entry.command
-                            && p.plugin_group.as_deref().unwrap_or(&p.name) == entry.plugin
-                    }) {
-                        let meta = &self.state.plugins[pidx];
-                        result.push(UnifiedRow::Command {
-                            plugin_index: pidx,
-                            name: meta.name.clone(),
-                            description: meta.description.clone(),
-                            icon: meta.icon.clone(),
-                            quickkey: meta.quickkey.clone(),
-                            group_name: meta.plugin_group.clone(),
-                            match_positions: vec![],
-                        });
-                    }
-                }
-            }
             let mut i = 0;
             while i < ordered.len() {
                 let this_key = group_keys[ordered[i]].clone();

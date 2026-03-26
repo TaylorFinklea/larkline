@@ -71,7 +71,16 @@ pub fn record(plugin: &str, command: &str) {
     save(&entries);
 }
 
-/// Return up to `n` most recently used unique commands.
-pub fn recent(n: usize) -> Vec<HistoryEntry> {
-    load().into_iter().take(n).collect()
+/// Return the most recent execution timestamp per plugin group key.
+///
+/// Used by the "Recently Used" sort mode to order groups in the unified list.
+pub fn timestamps_by_group() -> std::collections::HashMap<String, u64> {
+    let mut map = std::collections::HashMap::new();
+    for entry in load() {
+        let ts = map.entry(entry.plugin).or_insert(0u64);
+        if entry.ts > *ts {
+            *ts = entry.ts;
+        }
+    }
+    map
 }
