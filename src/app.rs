@@ -2057,11 +2057,28 @@ impl App {
                 .collect()
         };
 
-        // Preserve selection on the same selectable row if possible.
-        let old_selected = self.state.unified_selected;
+        // Preserve selection by plugin_index — row positions shift when the Recent
+        // section is added/removed, so index-based tracking loses the cursor.
+        let old_plugin_index = self
+            .state
+            .unified_rows
+            .get(self.state.unified_selected)
+            .and_then(|r| match r {
+                UnifiedRow::Command { plugin_index, .. } => Some(*plugin_index),
+                UnifiedRow::GroupHeader { .. } => None,
+            });
+
+        // How many selectable rows were before the old selection (position fallback).
+        let old_selectable_pos = self
+            .state
+            .unified_rows
+            .iter()
+            .take(self.state.unified_selected)
+            .filter(|r| r.is_selectable())
+            .count();
+
         self.state.unified_rows = rows;
 
-        // Clamp selection to a valid selectable row.
         let selectable_count = self
             .state
             .unified_rows
@@ -2073,8 +2090,28 @@ impl App {
             return;
         }
 
-        // Find the nth selectable row where n = min(old_selected, selectable_count - 1).
-        let target = old_selected.min(selectable_count.saturating_sub(1));
+        // Restore by plugin_index: prefer the occurrence outside the Recent section
+        // (i.e., the last match), so the cursor stays in the plugin's natural position.
+        if let Some(pidx) = old_plugin_index {
+            let match_pos = self
+                .state
+                .unified_rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| match r {
+                    UnifiedRow::Command { plugin_index, .. } if *plugin_index == pidx => Some(i),
+                    _ => None,
+                })
+                .next_back(); // last occurrence = canonical position (not Recent duplicate)
+            if let Some(pos) = match_pos {
+                self.state.unified_selected = pos;
+                self.sync_preview_index();
+                return;
+            }
+        }
+
+        // Fallback: preserve relative selectable position.
+        let target = old_selectable_pos.min(selectable_count.saturating_sub(1));
         self.state.unified_selected = self
             .state
             .unified_rows
