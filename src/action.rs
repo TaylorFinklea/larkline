@@ -116,4 +116,6 @@ pub enum Action {
     RerunCommand,
     /// Cycle the unified list sort mode (Alpha → Recent → …).
     CycleSort,
+    /// Open the settings form for the currently viewed plugin.
+    OpenSettings,
 }

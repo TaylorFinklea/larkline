@@ -361,6 +361,7 @@ mod tests {
             quickkey: None,
             cache: true,
             secrets: vec![],
+            settings_spec: vec![],
         }
     }
 

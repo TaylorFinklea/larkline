@@ -8,6 +8,19 @@ icon_nerd = ""
 category = "dev"
 secrets = ["GITHUB_TOKEN"]
 
+[[settings]]
+id = "max_runs"
+label = "Max Workflow Runs"
+type = "select"
+options = ["10", "25", "50"]
+default = "25"
+
+[[settings]]
+id = "show_drafts"
+label = "Show Draft PRs"
+type = "toggle"
+default = "false"
+
 [[commands]]
 name = "My PRs"
 description = "Open pull requests you authored"

@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::plugin::PluginMetadata;
+use crate::plugin::traits::{FieldType, FormField, PluginMetadata};
 
 /// Errors that can occur when loading a plugin manifest.
 #[derive(Debug, Error)]
@@ -52,6 +52,25 @@ struct ManifestFile {
     plugin: ManifestPlugin,
     #[serde(default)]
     commands: Vec<ManifestCommand>,
+    #[serde(default)]
+    settings: Vec<ManifestSetting>,
+}
+
+/// A settings field declared in `[[settings]]` of the manifest.
+#[derive(Deserialize)]
+struct ManifestSetting {
+    id: String,
+    label: String,
+    /// Field type: `"text"`, `"select"`, or `"toggle"`.
+    #[serde(rename = "type", default)]
+    field_type: String,
+    #[serde(default)]
+    default: Option<String>,
+    #[serde(default)]
+    placeholder: Option<String>,
+    /// Options for `"select"` fields.
+    #[serde(default)]
+    options: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -115,6 +134,22 @@ pub struct DiscoveredPlugin {
     pub kind: PluginKind,
 }
 
+fn setting_to_form_field(s: &ManifestSetting) -> FormField {
+    let field_type = match s.field_type.as_str() {
+        "select" => FieldType::Select { options: s.options.clone() },
+        "toggle" => FieldType::Toggle,
+        _ => FieldType::Text,
+    };
+    FormField {
+        id: s.id.clone(),
+        label: s.label.clone(),
+        field_type,
+        required: false,
+        default_value: s.default.clone(),
+        placeholder: s.placeholder.clone(),
+    }
+}
+
 fn kind_for_entry(entry: &str) -> PluginKind {
     if std::path::Path::new(entry)
         .extension()
@@ -171,6 +206,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                 quickkey: None,
                 cache: p.cache.unwrap_or(true),
                 secrets: p.secrets,
+                settings_spec: manifest.settings.iter().map(setting_to_form_field).collect(),
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -189,6 +225,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
         let plugin_default_streaming = p.streaming.unwrap_or(false);
         let plugin_default_prefetch = p.prefetch.unwrap_or(false); // commands default lazy
         let plugin_default_cache = p.cache.unwrap_or(true);
+        let settings_spec: Vec<_> = manifest.settings.iter().map(setting_to_form_field).collect();
 
         let discovered = manifest
             .commands
@@ -215,6 +252,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                         quickkey: cmd.quickkey,
                         cache: cmd.cache.unwrap_or(plugin_default_cache),
                         secrets: p.secrets.clone(),
+                        settings_spec: settings_spec.clone(),
                     },
                     plugin_dir: plugin_dir_buf.clone(),
                     entry: cmd.entry,

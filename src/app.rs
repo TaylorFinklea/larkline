@@ -317,6 +317,9 @@ pub struct FormState {
     /// Submit button label (used by the TUI renderer).
     #[allow(dead_code)]
     pub submit_label: String,
+    /// When `true`, this form is a settings form — on submit, values are saved to
+    /// the plugin's store instead of being passed back for re-execution.
+    pub is_settings: bool,
 }
 
 /// Editing state for a single form field.
@@ -1340,7 +1343,55 @@ impl App {
                         .iter()
                         .all(|f| !f.spec.required || !f.value.trim().is_empty());
 
-                    if all_valid {
+                    if !all_valid {
+                        self.state.status_message = Some((
+                            "Required fields cannot be empty".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                        self.state.form_state = Some(form);
+                    } else if form.is_settings {
+                        // Settings form: persist values to plugin store, then rerun.
+                        let plugin_index = form.plugin_index;
+                        if let Some(meta) = self.state.plugins.get(plugin_index) {
+                            let store_path = crate::plugin::store::store_path_for(
+                                &meta.name,
+                                meta.plugin_group.as_deref(),
+                            );
+                            let mut store =
+                                crate::plugin::store::PluginStore::load(store_path);
+                            for field in &form.fields {
+                                let value = match field.spec.field_type {
+                                    crate::plugin::traits::FieldType::Toggle => {
+                                        if field.toggled { "true" } else { "false" }.to_string()
+                                    }
+                                    crate::plugin::traits::FieldType::Select {
+                                        ref options,
+                                    } => options
+                                        .get(field.selected_option)
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                    crate::plugin::traits::FieldType::Text => {
+                                        field.value.clone()
+                                    }
+                                };
+                                let _ = store.set(
+                                    field.spec.id.clone(),
+                                    serde_json::Value::String(value),
+                                );
+                            }
+                            if let Err(e) = store.save() {
+                                tracing::warn!(error = %e, "failed to save plugin settings");
+                            }
+                        }
+                        // Rerun the plugin with fresh execution.
+                        self.state.result_cache.remove(&plugin_index);
+                        self.state.plugin_output = None;
+                        self.state.plugin_error = None;
+                        self.state.is_loading = true;
+                        self.state.loading_started = Some(std::time::Instant::now());
+                        self.state.scroll_offset = 0;
+                        self.engine.execute(plugin_index);
+                    } else {
                         let mut values = std::collections::HashMap::new();
                         for field in &form.fields {
                             values.insert(field.spec.id.clone(), field.value.clone());
@@ -1350,12 +1401,6 @@ impl App {
                         self.state.plugin_output = None;
                         self.state.loading_started = Some(std::time::Instant::now());
                         self.engine.execute_with_form(plugin_index, values);
-                    } else {
-                        self.state.status_message = Some((
-                            "Required fields cannot be empty".to_string(),
-                            std::time::Instant::now(),
-                        ));
-                        self.state.form_state = Some(form);
                     }
                 }
             }
@@ -1499,6 +1544,62 @@ impl App {
                 self.rebuild_unified_list();
             }
 
+            Action::OpenSettings => {
+                if let Some(plugin_index) = self.state.viewing_plugin_index {
+                    if let Some(meta) = self.state.plugins.get(plugin_index) {
+                        if meta.settings_spec.is_empty() {
+                            return;
+                        }
+                        // Load current store values to pre-fill the form.
+                        let store_path = crate::plugin::store::store_path_for(
+                            &meta.name,
+                            meta.plugin_group.as_deref(),
+                        );
+                        let store = crate::plugin::store::PluginStore::load(store_path);
+
+                        let fields: Vec<FormFieldState> = meta
+                            .settings_spec
+                            .iter()
+                            .map(|spec| {
+                                // Prefer saved store value, then default_value.
+                                let stored = store
+                                    .get(&spec.id)
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string);
+                                let default = stored
+                                    .or_else(|| spec.default_value.clone())
+                                    .unwrap_or_default();
+                                let selected_option = if let crate::plugin::traits::FieldType::Select { ref options } =
+                                    spec.field_type
+                                {
+                                    options.iter().position(|o| o == &default).unwrap_or(0)
+                                } else {
+                                    0
+                                };
+                                let toggled = default == "true";
+                                let cursor = default.len();
+                                FormFieldState {
+                                    spec: spec.clone(),
+                                    value: default,
+                                    cursor,
+                                    selected_option,
+                                    toggled,
+                                }
+                            })
+                            .collect();
+
+                        self.state.form_state = Some(FormState {
+                            fields,
+                            focused: 0,
+                            plugin_index,
+                            submit_label: "Save Settings".to_string(),
+                            is_settings: true,
+                        });
+                        self.state.power_menu = None;
+                    }
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1607,9 +1708,14 @@ impl App {
                 },
             ],
             Mode::ViewOutput => vec![
-                PowerMenuCategory {
-                    name: "Actions".to_string(),
-                    items: vec![
+                {
+                    let has_settings = self
+                        .state
+                        .viewing_plugin_index
+                        .and_then(|i| self.state.plugins.get(i))
+                        .is_some_and(|p| !p.settings_spec.is_empty());
+
+                    let mut action_items = vec![
                         PowerMenuItem {
                             key: ':',
                             key_hint: ":".to_string(),
@@ -1634,7 +1740,19 @@ impl App {
                             label: "Copy Menu".to_string(),
                             action: Action::CopyMenu,
                         },
-                    ],
+                    ];
+                    if has_settings {
+                        action_items.push(PowerMenuItem {
+                            key: 'S',
+                            key_hint: "S".to_string(),
+                            label: "Settings".to_string(),
+                            action: Action::OpenSettings,
+                        });
+                    }
+                    PowerMenuCategory {
+                        name: "Actions".to_string(),
+                        items: action_items,
+                    }
                 },
                 PowerMenuCategory {
                     name: "Display".to_string(),
@@ -1945,6 +2063,7 @@ impl App {
                 .submit_label
                 .clone()
                 .unwrap_or_else(|| "Submit".to_string()),
+            is_settings: false,
         });
     }
 
@@ -2283,6 +2402,7 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 quickkey: None,
                 cache: true,
                 secrets: vec![],
+                settings_spec: vec![],
             })) as Arc<dyn Plugin>
         }};
     }

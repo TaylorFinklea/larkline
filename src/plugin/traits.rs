@@ -54,6 +54,9 @@ pub struct PluginMetadata {
     pub cache: bool,
     /// Advisory list of secret env var names this plugin needs (e.g., `["GITHUB_TOKEN"]`).
     pub secrets: Vec<String>,
+    /// Settings declared in the manifest. Larkline renders these as a persistent form
+    /// accessible from the power menu; submitted values are written to the plugin's store.
+    pub settings_spec: Vec<FormField>,
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +426,7 @@ mod tests {
             quickkey: None,
             cache: true,
             secrets: vec![],
+            settings_spec: vec![],
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }
