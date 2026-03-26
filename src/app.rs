@@ -189,6 +189,8 @@ pub struct AppState {
     pub sidebar_hidden: bool,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
+    /// Recently used commands loaded from history file (newest-first).
+    pub recent_commands: Vec<crate::history::HistoryEntry>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -377,6 +379,7 @@ impl App {
                 unified_rows: Vec::new(),
                 unified_selected: 0,
                 status_message: None,
+                recent_commands: crate::history::recent(5),
                 ..Default::default()
             },
             theme,
@@ -634,6 +637,17 @@ impl App {
 
                     match result {
                         Ok(output) => {
+                            // Record to command history on successful execution.
+                            if let Some(meta) = self.state.plugins.get(plugin_index) {
+                                let plugin_name = meta
+                                    .plugin_group
+                                    .as_deref()
+                                    .unwrap_or(&meta.name);
+                                crate::history::record(plugin_name, &meta.name);
+                                self.state.recent_commands = crate::history::recent(5);
+                                self.rebuild_unified_list();
+                            }
+
                             if cache_enabled {
                                 self.state
                                     .result_cache
@@ -1929,6 +1943,33 @@ impl App {
             // Walk `ordered`, collecting consecutive plugins with the same group key
             // into display groups. Emit a GroupHeader only for groups with >1 command.
             let mut result: Vec<UnifiedRow> = Vec::new();
+
+            // Prepend "Recent" section if there is any history.
+            let recent = self.state.recent_commands.clone();
+            if !recent.is_empty() {
+                result.push(UnifiedRow::GroupHeader {
+                    name: "Recent".to_string(),
+                    icon: "🕐".to_string(),
+                });
+                for entry in &recent {
+                    // Resolve to a plugin_index by matching group + command name.
+                    if let Some(pidx) = self.state.plugins.iter().position(|p| {
+                        p.name == entry.command
+                            && p.plugin_group.as_deref().unwrap_or(&p.name) == entry.plugin
+                    }) {
+                        let meta = &self.state.plugins[pidx];
+                        result.push(UnifiedRow::Command {
+                            plugin_index: pidx,
+                            name: meta.name.clone(),
+                            description: meta.description.clone(),
+                            icon: meta.icon.clone(),
+                            quickkey: meta.quickkey.clone(),
+                            group_name: meta.plugin_group.clone(),
+                            match_positions: vec![],
+                        });
+                    }
+                }
+            }
             let mut i = 0;
             while i < ordered.len() {
                 let this_key = group_keys[ordered[i]].clone();

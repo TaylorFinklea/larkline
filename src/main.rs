@@ -11,6 +11,7 @@ use tracing::info;
 mod action;
 mod app;
 mod config;
+mod history;
 mod input;
 mod plugin;
 mod tui;
