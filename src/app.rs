@@ -1456,6 +1456,19 @@ impl App {
                 self.state.power_menu = None;
             }
 
+            Action::RerunCommand => {
+                if let Some(plugin_index) = self.state.viewing_plugin_index {
+                    // Clear cache so execution always runs fresh.
+                    self.state.result_cache.remove(&plugin_index);
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
+                    self.state.is_loading = true;
+                    self.state.loading_started = Some(std::time::Instant::now());
+                    self.state.scroll_offset = 0;
+                    self.engine.execute(plugin_index);
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1611,10 +1624,10 @@ impl App {
                     name: "App".to_string(),
                     items: vec![
                         PowerMenuItem {
-                            key: 'R',
-                            key_hint: "R".to_string(),
-                            label: "Refresh".to_string(),
-                            action: Action::RefreshPlugins,
+                            key: 'r',
+                            key_hint: "r".to_string(),
+                            label: "Rerun".to_string(),
+                            action: Action::RerunCommand,
                         },
                         PowerMenuItem {
                             key: 'd',

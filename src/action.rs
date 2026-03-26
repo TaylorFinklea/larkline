@@ -112,4 +112,6 @@ pub enum Action {
     PowerMenuOpen,
     /// Dismiss the power menu overlay.
     PowerMenuDismiss,
+    /// Re-execute the currently viewed plugin command (clears cache first).
+    RerunCommand,
 }

@@ -268,6 +268,7 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
         KeyCode::Char('G') => Some(Action::GoToLast),
         KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
         KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
+        KeyCode::Char('r') if event.modifiers == KeyModifiers::NONE => Some(Action::RerunCommand),
         _ => None,
     }
 }
