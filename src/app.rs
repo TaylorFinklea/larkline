@@ -219,6 +219,8 @@ pub struct AppState {
     pub navigation_history: Vec<NavigationEntry>,
     /// Current sort order for the unified launcher list.
     pub sort_mode: SortMode,
+    /// Theme preset picker overlay (None = closed).
+    pub theme_picker: Option<ThemePickerState>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -305,6 +307,17 @@ pub struct PowerMenuState {
     pub categories: Vec<PowerMenuCategory>,
 }
 
+/// Overlay state for the theme preset picker.
+#[derive(Debug, Clone)]
+pub struct ThemePickerState {
+    /// Index into [`crate::config::PRESET_NAMES`] for the highlighted preset.
+    pub selected: usize,
+    /// Theme snapshot to restore if the user presses Esc.
+    pub original_theme: Theme,
+    /// Preset name that was active when the picker opened (for display and revert).
+    pub original_preset: Option<String>,
+}
+
 /// Mutable state for an active form being filled by the user.
 #[derive(Debug, Clone)]
 pub struct FormState {
@@ -376,6 +389,8 @@ pub struct App {
     icon_set: crate::config::IconSet,
     /// Secrets loaded from `~/.config/larkline/.env`.
     secrets: std::collections::HashMap<String, String>,
+    /// Currently active theme preset name (e.g. `"nord"`). `None` = default.
+    current_preset: Option<String>,
 }
 
 impl App {
@@ -420,6 +435,7 @@ impl App {
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
             secrets,
+            current_preset: config.theme.preset.clone(),
         };
         app.rebuild_unified_list();
 
@@ -515,6 +531,7 @@ impl App {
                             self.state.output_searching,
                             self.state.form_state.is_some(),
                             self.state.action_palette.is_some(),
+                            self.state.theme_picker.is_some(),
                             self.state.power_menu.as_ref().map(|m| m.categories.as_slice()),
                             self.state.pending_g,
                         ) {
@@ -758,7 +775,18 @@ impl App {
             Action::Quit => self.state.should_quit = true,
 
             Action::MoveUp => {
-                if let Some(ref mut menu) = self.state.copy_menu {
+                let picker_idx = if let Some(ref mut p) = self.state.theme_picker {
+                    if p.selected > 0 {
+                        p.selected -= 1;
+                    }
+                    Some(p.selected)
+                } else {
+                    None
+                };
+                if let Some(idx) = picker_idx {
+                    let (id, _) = crate::config::PRESET_NAMES[idx];
+                    self.theme = crate::config::ThemeConfig::resolve_preset(id);
+                } else if let Some(ref mut menu) = self.state.copy_menu {
                     menu.selected = menu.selected.saturating_sub(1);
                 } else if self.state.mode == Mode::ViewOutput
                     && matches!(
@@ -788,7 +816,19 @@ impl App {
             }
 
             Action::MoveDown => {
-                if let Some(ref mut menu) = self.state.copy_menu {
+                let picker_idx = if let Some(ref mut p) = self.state.theme_picker {
+                    let max = crate::config::PRESET_NAMES.len() - 1;
+                    if p.selected < max {
+                        p.selected += 1;
+                    }
+                    Some(p.selected)
+                } else {
+                    None
+                };
+                if let Some(idx) = picker_idx {
+                    let (id, _) = crate::config::PRESET_NAMES[idx];
+                    self.theme = crate::config::ThemeConfig::resolve_preset(id);
+                } else if let Some(ref mut menu) = self.state.copy_menu {
                     let max = menu.entries.len().saturating_sub(1);
                     if menu.selected < max {
                         menu.selected += 1;
@@ -1600,6 +1640,36 @@ impl App {
                 }
             }
 
+            Action::ThemePickerOpen => {
+                let presets = crate::config::PRESET_NAMES;
+                let current = self.current_preset.as_deref().unwrap_or("default");
+                let selected = presets
+                    .iter()
+                    .position(|(id, _)| *id == current)
+                    .unwrap_or(0);
+                self.state.theme_picker = Some(ThemePickerState {
+                    selected,
+                    original_theme: self.theme.clone(),
+                    original_preset: self.current_preset.clone(),
+                });
+                self.state.power_menu = None;
+            }
+
+            Action::ThemePickerClose { confirmed } => {
+                if let Some(picker) = self.state.theme_picker.take() {
+                    if confirmed {
+                        let (id, _) = crate::config::PRESET_NAMES[picker.selected];
+                        self.current_preset = Some(id.to_string());
+                        if let Err(e) = crate::config::save_theme_preset(id) {
+                            tracing::warn!(error = %e, "failed to save theme preset");
+                        }
+                    } else {
+                        self.theme = picker.original_theme;
+                        self.current_preset = picker.original_preset;
+                    }
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1695,6 +1765,12 @@ impl App {
                             label: "Sidebar".to_string(),
                             action: Action::ToggleSidebar,
                         },
+                        PowerMenuItem {
+                            key: 'T',
+                            key_hint: "T".to_string(),
+                            label: "Theme".to_string(),
+                            action: Action::ThemePickerOpen,
+                        },
                     ],
                 },
                 PowerMenuCategory {
@@ -1774,6 +1850,12 @@ impl App {
                             key_hint: "s".to_string(),
                             label: "Sidebar".to_string(),
                             action: Action::ToggleSidebar,
+                        },
+                        PowerMenuItem {
+                            key: 'T',
+                            key_hint: "T".to_string(),
+                            label: "Theme".to_string(),
+                            action: Action::ThemePickerOpen,
                         },
                     ],
                 },

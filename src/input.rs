@@ -26,6 +26,7 @@ pub fn handle_key(
     has_output_search: bool,
     has_form: bool,
     has_action_palette: bool,
+    has_theme_picker: bool,
     power_menu: Option<&[PowerMenuCategory]>,
     pending_g: bool,
 ) -> Option<Action> {
@@ -37,6 +38,11 @@ pub fn handle_key(
     // Copy menu intercepts keys when open.
     if has_copy_menu {
         return handle_copy_menu(event);
+    }
+
+    // Theme picker intercepts keys when open.
+    if has_theme_picker {
+        return handle_theme_picker(event);
     }
 
     // Action palette intercepts keys when open.
@@ -311,6 +317,20 @@ fn handle_output_search(event: KeyEvent) -> Option<Action> {
         KeyCode::Up => Some(Action::MoveUp),
         KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char(c) if !c.is_control() => Some(Action::OutputSearch(c)),
+        _ => None,
+    }
+}
+
+/// Theme picker handler: j/k or arrows navigate, Enter confirms, Esc/q cancels.
+fn handle_theme_picker(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
+        KeyCode::Enter => Some(Action::ThemePickerClose { confirmed: true }),
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::ThemePickerClose { confirmed: false }),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::Quit)
+        }
         _ => None,
     }
 }

@@ -445,23 +445,26 @@ pub struct FavoritesConfig {
 /// Color theme configuration.
 ///
 /// Colors can be ratatui named colors (e.g. `"cyan"`) or hex strings (e.g. `"#89b4fa"`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Set `preset` to use a built-in theme; individual fields override preset values.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ThemeConfig {
+    /// Built-in preset name (e.g. `"nord"`, `"catppuccin-mocha"`). Optional.
+    pub preset: Option<String>,
     /// Accent color — active borders, titles, cursor.
-    pub accent: String,
+    pub accent: Option<String>,
     /// Primary text color.
-    pub text: String,
+    pub text: Option<String>,
     /// Dimmed text — descriptions, inactive borders.
-    pub text_dimmed: String,
+    pub text_dimmed: Option<String>,
     /// Background color for the highlighted list row.
-    pub highlight_bg: String,
+    pub highlight_bg: Option<String>,
     /// Foreground color for the highlighted list row.
-    pub highlight_fg: String,
+    pub highlight_fg: Option<String>,
     /// Error message color.
-    pub error: String,
+    pub error: Option<String>,
     /// Status bar background.
-    pub status_bar_bg: String,
+    pub status_bar_bg: Option<String>,
 }
 
 /// Resolved color theme with ratatui `Color` values ready to use in rendering.
@@ -505,34 +508,127 @@ impl Default for LoggingConfig {
     }
 }
 
-impl Default for ThemeConfig {
-    fn default() -> Self {
-        Self {
-            accent: "cyan".to_string(),
-            text: "white".to_string(),
-            text_dimmed: "darkgray".to_string(),
-            highlight_bg: "darkgray".to_string(),
-            highlight_fg: "white".to_string(),
-            error: "red".to_string(),
-            status_bar_bg: "black".to_string(),
-        }
+/// Preset color definitions — all strings, not resolved `Color` values.
+struct PresetColors {
+    accent: &'static str,
+    text: &'static str,
+    text_dimmed: &'static str,
+    highlight_bg: &'static str,
+    highlight_fg: &'static str,
+    error: &'static str,
+    status_bar_bg: &'static str,
+}
+
+/// Ordered list of built-in preset names and display labels.
+pub const PRESET_NAMES: &[(&str, &str)] = &[
+    ("default", "Default"),
+    ("catppuccin-mocha", "Catppuccin Mocha"),
+    ("nord", "Nord"),
+    ("tokyo-night", "Tokyo Night"),
+    ("dracula", "Dracula"),
+    ("gruvbox-dark", "Gruvbox Dark"),
+];
+
+fn preset_colors(name: &str) -> &'static PresetColors {
+    static DEFAULT: PresetColors = PresetColors {
+        accent: "cyan",
+        text: "white",
+        text_dimmed: "darkgray",
+        highlight_bg: "darkgray",
+        highlight_fg: "white",
+        error: "red",
+        status_bar_bg: "black",
+    };
+    static CATPPUCCIN_MOCHA: PresetColors = PresetColors {
+        accent: "#cba6f7",
+        text: "#cdd6f4",
+        text_dimmed: "#6c7086",
+        highlight_bg: "#313244",
+        highlight_fg: "#cdd6f4",
+        error: "#f38ba8",
+        status_bar_bg: "#1e1e2e",
+    };
+    static NORD: PresetColors = PresetColors {
+        accent: "#88c0d0",
+        text: "#eceff4",
+        text_dimmed: "#4c566a",
+        highlight_bg: "#3b4252",
+        highlight_fg: "#eceff4",
+        error: "#bf616a",
+        status_bar_bg: "#2e3440",
+    };
+    static TOKYO_NIGHT: PresetColors = PresetColors {
+        accent: "#7aa2f7",
+        text: "#c0caf5",
+        text_dimmed: "#565f89",
+        highlight_bg: "#292e42",
+        highlight_fg: "#c0caf5",
+        error: "#f7768e",
+        status_bar_bg: "#1a1b26",
+    };
+    static DRACULA: PresetColors = PresetColors {
+        accent: "#bd93f9",
+        text: "#f8f8f2",
+        text_dimmed: "#6272a4",
+        highlight_bg: "#44475a",
+        highlight_fg: "#f8f8f2",
+        error: "#ff5555",
+        status_bar_bg: "#282a36",
+    };
+    static GRUVBOX_DARK: PresetColors = PresetColors {
+        accent: "#d79921",
+        text: "#ebdbb2",
+        text_dimmed: "#928374",
+        highlight_bg: "#3c3836",
+        highlight_fg: "#ebdbb2",
+        error: "#cc241d",
+        status_bar_bg: "#282828",
+    };
+
+    match name {
+        "catppuccin-mocha" => &CATPPUCCIN_MOCHA,
+        "nord" => &NORD,
+        "tokyo-night" => &TOKYO_NIGHT,
+        "dracula" => &DRACULA,
+        "gruvbox-dark" => &GRUVBOX_DARK,
+        _ => &DEFAULT,
     }
 }
 
 impl ThemeConfig {
-    /// Resolve color strings into ratatui `Color` values.
+    /// Resolve into a `Theme` by applying the preset as base, then user overrides.
     ///
-    /// Returns an error if any color string cannot be parsed.
+    /// Resolution order (highest priority wins):
+    /// 1. Individual color fields in this config (`Some` values override the preset)
+    /// 2. Built-in preset (named by `preset`, defaults to `"default"`)
     pub fn resolve(&self) -> anyhow::Result<Theme> {
+        let base = preset_colors(self.preset.as_deref().unwrap_or("default"));
         Ok(Theme {
-            accent: parse_color(&self.accent)?,
-            text: parse_color(&self.text)?,
-            text_dimmed: parse_color(&self.text_dimmed)?,
-            highlight_bg: parse_color(&self.highlight_bg)?,
-            highlight_fg: parse_color(&self.highlight_fg)?,
-            error: parse_color(&self.error)?,
-            status_bar_bg: parse_color(&self.status_bar_bg)?,
+            accent: parse_color(self.accent.as_deref().unwrap_or(base.accent))?,
+            text: parse_color(self.text.as_deref().unwrap_or(base.text))?,
+            text_dimmed: parse_color(self.text_dimmed.as_deref().unwrap_or(base.text_dimmed))?,
+            highlight_bg: parse_color(self.highlight_bg.as_deref().unwrap_or(base.highlight_bg))?,
+            highlight_fg: parse_color(self.highlight_fg.as_deref().unwrap_or(base.highlight_fg))?,
+            error: parse_color(self.error.as_deref().unwrap_or(base.error))?,
+            status_bar_bg: parse_color(
+                self.status_bar_bg.as_deref().unwrap_or(base.status_bar_bg),
+            )?,
         })
+    }
+
+    /// Resolve a named preset directly into a `Theme` (ignoring per-field overrides).
+    pub fn resolve_preset(name: &str) -> Theme {
+        let base = preset_colors(name);
+        Theme {
+            accent: parse_color(base.accent).expect("preset colors are always valid"),
+            text: parse_color(base.text).expect("preset colors are always valid"),
+            text_dimmed: parse_color(base.text_dimmed).expect("preset colors are always valid"),
+            highlight_bg: parse_color(base.highlight_bg).expect("preset colors are always valid"),
+            highlight_fg: parse_color(base.highlight_fg).expect("preset colors are always valid"),
+            error: parse_color(base.error).expect("preset colors are always valid"),
+            status_bar_bg: parse_color(base.status_bar_bg)
+                .expect("preset colors are always valid"),
+        }
     }
 }
 
@@ -543,6 +639,31 @@ impl Theme {
             .resolve()
             .expect("default theme colors are always valid")
     }
+}
+
+/// Persist the selected theme preset name to the user's config file.
+///
+/// Uses `toml_edit` to update (or create) the `[theme] preset` key while
+/// preserving all other config content and comments.
+pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
+    let path = config_path();
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap_or_default();
+    if doc.get("theme").is_none() {
+        doc["theme"] = toml_edit::table();
+    }
+    doc["theme"]["preset"] = toml_edit::value(preset);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, doc.to_string())?;
+    Ok(())
 }
 
 /// Parse a color string into a ratatui `Color`.
@@ -604,8 +725,11 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 # level = "warn"
 
 [theme]
-# Colors accept named values (black, red, green, yellow, blue, magenta, cyan,
-# gray, darkgray, white) or hex strings (#rrggbb).
+# Built-in preset: "default", "catppuccin-mocha", "nord", "tokyo-night", "dracula", "gruvbox-dark"
+# Switch themes with Space → T in the app, or set preset here.
+# preset = "default"
+#
+# Individual colors override the preset. Named values or #rrggbb hex.
 # accent        = "cyan"
 # text          = "white"
 # text_dimmed   = "darkgray"
@@ -972,7 +1096,7 @@ mod tests {
     #[test]
     fn invalid_theme_color_falls_back_with_default_theme() {
         let theme_cfg = ThemeConfig {
-            accent: "not_a_color".to_string(),
+            accent: Some("not_a_color".to_string()),
             ..ThemeConfig::default()
         };
         // resolve() returns Err — caller falls back to default theme.

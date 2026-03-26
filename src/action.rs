@@ -118,4 +118,11 @@ pub enum Action {
     CycleSort,
     /// Open the settings form for the currently viewed plugin.
     OpenSettings,
+    /// Open the theme preset picker overlay.
+    ThemePickerOpen,
+    /// Close the theme picker. `confirmed` = persist selection; `false` = revert.
+    ThemePickerClose {
+        /// Whether to persist the selection or revert.
+        confirmed: bool,
+    },
 }
