@@ -1,0 +1,14 @@
+[plugin]
+name = "Running Apps"
+description = "Switch between open applications"
+version = "0.1.0"
+author = "larkline"
+icon = "⬡"
+icon_nerd = "󰣆"
+category = "tools"
+
+[[commands]]
+name = "Apps"
+description = "All foreground apps currently running"
+entry = "apps.lua"
+timeout_seconds = 5

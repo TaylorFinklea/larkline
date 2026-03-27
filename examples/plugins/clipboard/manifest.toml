@@ -1,0 +1,15 @@
+[plugin]
+name = "Clipboard"
+description = "History of copied text"
+version = "0.1.0"
+author = "larkline"
+icon = "📋"
+icon_nerd = "󰅍"
+category = "tools"
+
+[[commands]]
+name = "History"
+description = "Recently copied items"
+entry = "history.lua"
+quickkey = "cb"
+timeout_seconds = 5
