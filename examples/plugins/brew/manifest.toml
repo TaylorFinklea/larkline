@@ -1,11 +1,21 @@
 [plugin]
 name = "Brew"
-description = "Installed Homebrew packages"
-version = "0.1.0"
+description = "Manage Homebrew packages"
+version = "0.2.0"
 author = "larkline"
 icon = "🍺"
 icon_nerd = ""
+category = "dev"
+
+[[commands]]
+name = "Packages"
+description = "Installed Homebrew formulae"
 entry = "init.lua"
 timeout_seconds = 15
 prefetch = true
-category = "dev"
+
+[[commands]]
+name = "Update"
+description = "Check for outdated packages"
+entry = "update.lua"
+timeout_seconds = 30
