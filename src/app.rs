@@ -54,8 +54,6 @@ pub enum Mode {
 /// A row in the unified launcher list.
 #[derive(Debug, Clone)]
 pub enum UnifiedRow {
-    /// Non-selectable group header for multi-command plugins.
-    GroupHeader { name: String, icon: String },
     /// A selectable command row.
     Command {
         /// Index into `AppState::plugins`.
@@ -65,7 +63,8 @@ pub enum UnifiedRow {
         icon: String,
         /// Quick-launch key badge (e.g., `"gb"`).
         quickkey: Option<String>,
-        /// Parent group name shown as a dimmed badge during search (non-empty query).
+        /// Parent plugin/group name shown inline in dimmed text.
+        /// `Some` for multi-command plugins, `None` for single-command (name == group).
         group_name: Option<String>,
         /// Nucleo match positions into `name` for character highlighting.
         match_positions: Vec<usize>,
@@ -73,9 +72,10 @@ pub enum UnifiedRow {
 }
 
 impl UnifiedRow {
-    /// Returns true if this row can be selected by the user.
+    /// All rows are selectable commands; kept for call-site compatibility.
+    #[allow(clippy::unused_self)]
     pub fn is_selectable(&self) -> bool {
-        matches!(self, Self::Command { .. })
+        true
     }
 }
 
@@ -2151,10 +2151,10 @@ impl App {
 
     /// Rebuild the unified launcher list from plugin metadata.
     ///
-    /// - **Empty query:** commands grouped by `plugin_group`, with favorites first.
-    ///   Groups with >1 commands show a `GroupHeader` row before their `Command` rows.
+    /// - **Empty query:** flat `Command` rows ordered by favorites then alphabetically.
+    ///   Multi-command plugins set `group_name` so the plugin name appears inline (dimmed).
     /// - **Non-empty query:** globally-ranked flat `Command` list scored by nucleo on
-    ///   `name + description`. Each `Command` carries a `group_name` badge and
+    ///   `name + group + description`. Each `Command` carries a `group_name` badge and
     ///   `match_positions` for character-level highlighting.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn rebuild_unified_list(&mut self) {
@@ -2205,42 +2205,25 @@ impl App {
         ordered.extend(rest);
 
         let rows = if query.is_empty() {
-            // ── Grouped display (empty query) ─────────────────────────────────────
-            // Walk `ordered`, collecting consecutive plugins with the same group key
-            // into display groups. Emit a GroupHeader only for groups with >1 command.
-            let mut result: Vec<UnifiedRow> = Vec::new();
-            let mut i = 0;
-            while i < ordered.len() {
-                let this_key = group_keys[ordered[i]].clone();
-                // Find the end of this group (first index with a different key).
-                let group_end = ordered[i..]
-                    .iter()
-                    .position(|&j| group_keys[j] != this_key)
-                    .map_or(ordered.len(), |pos| i + pos);
-                let group_indices = ordered[i..group_end].to_vec();
-
-                if group_indices.len() > 1 {
-                    let icon = self.state.plugins[group_indices[0]].icon.clone();
-                    result.push(UnifiedRow::GroupHeader {
-                        name: this_key,
-                        icon,
-                    });
-                }
-                for pidx in group_indices {
+            // ── Flat display (empty query) ─────────────────────────────────────────
+            // Emit every command as a flat row carrying its group name inline.
+            // Multi-command plugins show group_name in dimmed text; single-command
+            // plugins (where name == group) omit the badge to avoid redundancy.
+            ordered
+                .iter()
+                .map(|&pidx| {
                     let meta = &self.state.plugins[pidx];
-                    result.push(UnifiedRow::Command {
+                    UnifiedRow::Command {
                         plugin_index: pidx,
                         name: meta.name.clone(),
                         description: meta.description.clone(),
                         icon: meta.icon.clone(),
                         quickkey: meta.quickkey.clone(),
-                        group_name: None,
+                        group_name: meta.plugin_group.clone(),
                         match_positions: vec![],
-                    });
-                }
-                i = group_end;
-            }
-            result
+                    }
+                })
+                .collect()
         } else {
             // ── Global search (non-empty query) ───────────────────────────────────
             // Score each command's "name description" haystack; sort descending; emit flat.
@@ -2256,7 +2239,8 @@ impl App {
 
             for &pidx in &ordered {
                 let meta = &self.state.plugins[pidx];
-                let search_text = format!("{} {}", meta.name, meta.description);
+                let group = meta.plugin_group.as_deref().unwrap_or(&meta.name);
+                let search_text = format!("{} {} {}", meta.name, group, meta.description);
                 let mut chars: Vec<char> = search_text.chars().collect();
                 let haystack = Utf32Str::new(&search_text, &mut chars);
                 indices_buf.clear();
@@ -2302,9 +2286,8 @@ impl App {
             .state
             .unified_rows
             .get(self.state.unified_selected)
-            .and_then(|r| match r {
-                UnifiedRow::Command { plugin_index, .. } => Some(*plugin_index),
-                UnifiedRow::GroupHeader { .. } => None,
+            .map(|r| match r {
+                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
             });
 
         // How many selectable rows were before the old selection (position fallback).
@@ -2339,7 +2322,7 @@ impl App {
                 .enumerate()
                 .filter_map(|(i, r)| match r {
                     UnifiedRow::Command { plugin_index, .. } if *plugin_index == pidx => Some(i),
-                    _ => None,
+                    UnifiedRow::Command { .. } => None,
                 })
                 .next_back(); // last occurrence = canonical position (not Recent duplicate)
             if let Some(pos) = match_pos {
@@ -2368,9 +2351,8 @@ impl App {
             .state
             .unified_rows
             .get(self.state.unified_selected)
-            .and_then(|r| match r {
-                UnifiedRow::Command { plugin_index, .. } => Some(*plugin_index),
-                UnifiedRow::GroupHeader { .. } => None,
+            .map(|r| match r {
+                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
             });
     }
 }
@@ -2545,26 +2527,16 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 UnifiedRow::Command { name, .. } => Some(name.as_str()),
-                UnifiedRow::GroupHeader { .. } => None,
             })
             .collect()
-    }
-
-    /// Returns true if any `GroupHeader` rows exist in `unified_rows`.
-    fn has_group_headers(app: &App) -> bool {
-        app.state
-            .unified_rows
-            .iter()
-            .any(|r| matches!(r, UnifiedRow::GroupHeader { .. }))
     }
 
     #[test]
     fn empty_query_shows_all_commands() {
         let app = App::with_stubs();
-        // All stubs are standalone (no plugin_group) → one Command row each, no GroupHeaders.
+        // All stubs are standalone (no plugin_group) → one Command row each.
         let names = command_names(&app);
         assert_eq!(names.len(), app.state.plugins.len());
-        assert!(!has_group_headers(&app));
     }
 
     #[test]
@@ -2659,15 +2631,11 @@ mod tests {
 
     #[test]
     fn search_ranks_commands_across_plugins() {
-        // "git" should match "GitHub PRs"; no group headers during search.
+        // "git" should match "GitHub PRs"; all rows are flat Commands.
         let mut app = App::with_stubs();
         app.handle_action(Action::Search('g'));
         app.handle_action(Action::Search('i'));
         app.handle_action(Action::Search('t'));
-        assert!(
-            !has_group_headers(&app),
-            "no group headers should appear during search"
-        );
         let names = command_names(&app);
         assert!(
             !names.is_empty(),

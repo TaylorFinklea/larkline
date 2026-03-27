@@ -131,21 +131,6 @@ fn render_unified_list(
         .unified_rows
         .iter()
         .map(|row| match row {
-            UnifiedRow::GroupHeader { name, icon } => {
-                // Non-selectable group separator: ─── icon Name ───
-                let sep = "─".repeat(2);
-                let line = Line::from(vec![
-                    Span::styled(format!(" {sep} "), Style::default().fg(theme.text_dimmed)),
-                    if state.show_icons {
-                        Span::styled(format!("{icon} "), Style::default().bold())
-                    } else {
-                        Span::raw("")
-                    },
-                    Span::styled(name.as_str(), Style::default().fg(theme.text).bold()),
-                    Span::styled(format!(" {sep}"), Style::default().fg(theme.text_dimmed)),
-                ]);
-                ListItem::new(line)
-            }
             UnifiedRow::Command {
                 name,
                 description,
@@ -186,7 +171,7 @@ fn render_unified_list(
                 // Group badge shown during search.
                 if let Some(group) = group_name {
                     spans.push(Span::styled(
-                        format!("  — {group}"),
+                        format!("  {group}"),
                         Style::default().fg(theme.text_dimmed),
                     ));
                 }
