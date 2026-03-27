@@ -1,4 +1,4 @@
--- Caffeinate — Spotlight Caffeinate status and control.
+-- Caffeinate: Status — current caffeinate state with stop action.
 -- Requires spotlight-caffeinate-cli in PATH.
 
 lark.register({
@@ -8,14 +8,16 @@ lark.register({
         if not raw or raw == "" then
             return {
                 title = "Caffeinate",
-                items = { { label = "spotlight-caffeinate-cli not found", detail = "Install Spotlight Caffeinate", icon = "!" } },
+                items = { {
+                    label  = "spotlight-caffeinate-cli not found",
+                    detail = "Install Spotlight Caffeinate",
+                    icon   = "⚠",
+                } },
             }
         end
 
-        -- Try to parse JSON output.
         local ok, status = pcall(lark.json.decode, raw)
         if not ok then
-            -- Fallback: show raw output.
             return {
                 title = "Caffeinate",
                 items = { { label = raw:gsub("%s+$", ""), icon = "☕" } },
@@ -28,33 +30,22 @@ lark.register({
         if is_active then
             local remaining = status.remaining_minutes or status.remaining or "?"
             items[#items + 1] = {
-                label = "Active — " .. tostring(remaining) .. " min remaining",
+                label  = "Active — " .. tostring(remaining) .. " min remaining",
                 detail = "Mac is staying awake",
-                icon = "☕",
+                icon   = "☕",
             }
             items[#items + 1] = {
-                label = "Stop",
-                icon = "⏹",
+                label   = "Stop",
+                icon    = "⏹",
                 actions = {
                     { label = "Stop caffeinate", kind = "shell", args = { "spotlight-caffeinate-cli", "stop" }, confirm = true },
                 },
             }
         else
             items[#items + 1] = {
-                label = "Inactive",
-                detail = "Mac will sleep normally",
-                icon = "💤",
-            }
-        end
-
-        -- Start options.
-        for _, mins in ipairs({ 30, 60, 120 }) do
-            items[#items + 1] = {
-                label = "Start " .. mins .. " min",
-                icon = "▶",
-                actions = {
-                    { label = "Start " .. mins .. " min", kind = "shell", args = { "spotlight-caffeinate-cli", "start", tostring(mins) } },
-                },
+                label  = "Inactive",
+                detail = "Mac will sleep normally — use Start to activate",
+                icon   = "💤",
             }
         end
 

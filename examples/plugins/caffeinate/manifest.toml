@@ -1,11 +1,27 @@
 [plugin]
 name = "Caffeinate"
 description = "Keep your Mac awake — Spotlight Caffeinate control"
-version = "0.1.0"
+version = "0.2.0"
 author = "taylor"
 icon = "☕"
 icon_nerd = "󰛊"
-entry = "init.lua"
+category = "system"
+
+[[commands]]
+name = "Status"
+description = "Current caffeinate status"
+entry = "status.lua"
 timeout_seconds = 5
 prefetch = true
-category = "system"
+
+[[commands]]
+name = "Start"
+description = "Start caffeinate for N minutes"
+entry = "start.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Extend"
+description = "Extend current caffeinate session by N minutes"
+entry = "extend.lua"
+timeout_seconds = 10
