@@ -2013,6 +2013,7 @@ impl App {
         }
         self.rebuild_output_filter();
         self.check_form_init(plugin_index);
+        self.state.vim_mode = VimMode::Normal;
     }
 
     /// Number of visible output items (filtered count when searching, total otherwise).
