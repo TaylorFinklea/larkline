@@ -925,19 +925,17 @@ impl App {
                     self.state.scroll_offset = entry.scroll_offset;
                     self.state.mode = Mode::ViewOutput;
                 } else {
-                    // Empty history: return to Unified.
-                    // Preserve search query (Raycast-style: Esc goes back with search
-                    // still active; a second Esc clears it via EnterNormalMode).
+                    // Empty history: return to Unified in Normal mode.
+                    // Query is preserved so the filtered list stays visible,
+                    // but j/k navigate rather than type until the user re-enters Insert.
                     self.state.mode = Mode::Unified;
+                    self.state.vim_mode = VimMode::Normal;
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
                     self.state.output_selected = 0;
                     self.state.output_mode = OutputMode::List;
                     self.state.viewing_plugin_index = None;
                     self.state.scroll_offset = 0;
-                    if !self.state.query.is_empty() {
-                        self.state.vim_mode = VimMode::Insert;
-                    }
                 }
             }
 
