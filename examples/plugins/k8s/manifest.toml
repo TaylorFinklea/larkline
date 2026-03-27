@@ -1,0 +1,30 @@
+[plugin]
+name = "Kubernetes"
+description = "Pods, services, and contexts"
+version = "0.1.0"
+author = "larkline"
+icon = "☸"
+icon_nerd = "󱃾"
+category = "dev"
+
+[[commands]]
+name = "Pods"
+description = "All pods across namespaces"
+entry = "pods.lua"
+quickkey = "kp"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
+name = "Services"
+description = "Services across namespaces"
+entry = "services.lua"
+quickkey = "ks"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
+name = "Contexts"
+description = "Switch kubectl context"
+entry = "contexts.lua"
+timeout_seconds = 10

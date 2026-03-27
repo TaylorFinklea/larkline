@@ -1,0 +1,15 @@
+[plugin]
+name = "Ports"
+description = "TCP ports listening on this machine"
+version = "0.1.0"
+author = "larkline"
+icon = "🔌"
+icon_nerd = ""
+category = "dev"
+
+[[commands]]
+name = "Listening"
+description = "Ports currently accepting connections"
+entry = "ports.lua"
+timeout_seconds = 10
+prefetch = true
