@@ -2239,6 +2239,15 @@ impl App {
 
             for &pidx in &ordered {
                 let meta = &self.state.plugins[pidx];
+                // Exact quickkey match → pin to top regardless of fuzzy score.
+                if meta
+                    .quickkey
+                    .as_deref()
+                    .is_some_and(|qk| qk.eq_ignore_ascii_case(&query))
+                {
+                    scored.push((pidx, u32::MAX, vec![]));
+                    continue;
+                }
                 let group = meta.plugin_group.as_deref().unwrap_or(&meta.name);
                 let search_text = format!("{} {} {}", meta.name, group, meta.description);
                 let mut chars: Vec<char> = search_text.chars().collect();

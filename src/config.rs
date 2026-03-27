@@ -495,7 +495,7 @@ impl Default for UiConfig {
             visible_items: 15,
             icon_set: IconSet::default(),
             max_items_per_section: 5,
-            show_descriptions: true,
+            show_descriptions: false,
         }
     }
 }
