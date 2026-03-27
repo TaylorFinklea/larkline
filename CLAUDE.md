@@ -8,6 +8,24 @@ Larkline is a Rust-based terminal command palette. Binary: `lark`. Crate: `larkl
 
 **Roles:** Taylor is Product Owner/PM. Claude Code writes and maintains the codebase. Taylor makes product decisions. Be technical with Taylor — he's a strong DevOps/SRE architect with Python and TypeScript expertise.
 
+## AI Handoff Workflow
+
+### Session Start
+
+Read these before doing any work:
+1. `docs/ai/roadmap.md` — durable goals, milestones, constraints
+2. `docs/ai/current-state.md` — active branch, recent progress, blockers, open questions
+3. `docs/ai/next-steps.md` — exact next actions as a checklist
+
+### Session End
+
+Before ending a work session, update:
+1. `docs/ai/current-state.md` — branch, progress, changed files, blockers, validation status
+2. `docs/ai/next-steps.md` — checked-off completed items, added new next actions
+3. `docs/ai/decisions.md` — append a new ADR entry if any architectural decisions were made
+
+Use `docs/ai/handoff-template.md` as a guide for what to include.
+
 ## Build & Development
 
 ```bash

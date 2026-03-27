@@ -6,6 +6,24 @@ All agents working on this codebase should leverage:
 - **`rust-best-practices`** — Idiomatic Rust patterns (ownership, error handling, borrowing, testing)
 - **`rust-async-patterns`** — Async Rust with Tokio (channels, async traits, concurrent execution)
 
+## AI Handoff Workflow
+
+### Session Start
+
+Read these before doing any work:
+1. `docs/ai/roadmap.md` — durable goals, milestones, constraints
+2. `docs/ai/current-state.md` — active branch, recent progress, blockers, open questions
+3. `docs/ai/next-steps.md` — exact next actions as a checklist
+
+### Session End
+
+Before ending a work session, update:
+1. `docs/ai/current-state.md` — branch, progress, changed files, blockers, validation status
+2. `docs/ai/next-steps.md` — checked-off completed items, added new next actions
+3. `docs/ai/decisions.md` — append a new ADR entry if any architectural decisions were made
+
+Use `docs/ai/handoff-template.md` as a guide for what to include.
+
 ## Research Before Implementing
 
 Before writing code for any phase:
@@ -41,11 +59,7 @@ When modifying any contract, verify all producers and consumers still work. Run 
 
 ## Current Status
 
-Phases 0–9 complete (including 4.5, 6, 7, 8). Standard plugin library shipped.
-
-- Phase 9 added: global item ranking, match highlighting, RunPlugin rows, Ctrl+D/U scroll in unified mode, vestigial state cleanup
-- Phase 8 added: prefetch cache, unified launcher mode, nucleo item-level fuzzy filter, flash messages, `max_items_per_section`
-- Phase 6/7 added: `--help`, scaffolder, ANSI rendering, shell confirmation, table output, streaming, Nerd Font icons
+See `docs/ai/current-state.md` for live status. See `docs/ai/roadmap.md` for completed milestones and priorities.
 
 ## Release Artifacts
 
