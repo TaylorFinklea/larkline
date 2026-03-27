@@ -2321,6 +2321,13 @@ impl App {
             return;
         }
 
+        // During search, always start at the top result — no cursor preservation.
+        if !query.is_empty() {
+            self.state.unified_selected = 0;
+            self.sync_preview_index();
+            return;
+        }
+
         // Restore by plugin_index: prefer the occurrence outside the Recent section
         // (i.e., the last match), so the cursor stays in the plugin's natural position.
         if let Some(pidx) = old_plugin_index {
