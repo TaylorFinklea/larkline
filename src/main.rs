@@ -65,7 +65,10 @@ Commands:
   init-plugin <NAME>      Scaffold a new plugin directory
     --shell               Generate a shell (bash) plugin instead of Lua
     --multi               Generate a multi-command plugin with [[commands]]
-  invoke <NAME>           Execute a plugin by name and print JSON output"
+  invoke <NAME>           Execute a plugin by name and print JSON output
+  secret set <KEY>        Save a secret to macOS Keychain (prompts for value)
+  secret list             List secrets stored in Keychain for larkline plugins
+  secret delete <KEY>     Remove a secret from macOS Keychain"
     );
 }
 
@@ -150,6 +153,102 @@ async fn invoke_plugin(name: &str) -> Result<()> {
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+/// Handle `lark secret set|list|delete` subcommands.
+fn handle_secret_command(args: &[String]) -> Result<()> {
+    if !cfg!(target_os = "macos") {
+        anyhow::bail!("Secret management requires macOS Keychain. Use ~/.config/larkline/.env instead.");
+    }
+
+    let sub = args.first().map(String::as_str);
+    match sub {
+        Some("set") => {
+            let key = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("Usage: lark secret set <KEY>"))?;
+            eprint!("Enter value for {key}: ");
+            let value = rpassword::read_password()?;
+            if value.is_empty() {
+                anyhow::bail!("Empty value, nothing saved.");
+            }
+            let status = std::process::Command::new("security")
+                .args([
+                    "add-generic-password",
+                    "-U",
+                    "-a",
+                    &std::env::var("USER").unwrap_or_default(),
+                    "-s",
+                    key,
+                    "-w",
+                    &value,
+                ])
+                .status()?;
+            if status.success() {
+                println!("Saved {key} to macOS Keychain.");
+            } else {
+                anyhow::bail!("Failed to save to Keychain (exit {status}).");
+            }
+        }
+        Some("list") => {
+            let (cfg, _) = config::load().unwrap_or_default();
+            let discovered = plugin::registry::scan(&cfg.general.plugin_dirs)?;
+            let mut declared: Vec<&str> = discovered
+                .iter()
+                .flat_map(|d| d.metadata.secrets.iter().map(String::as_str))
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            declared.sort_unstable();
+
+            if declared.is_empty() {
+                println!("No plugins declare secrets.");
+                return Ok(());
+            }
+
+            let env_secrets = config::load_secrets();
+            for key in &declared {
+                let source = if env_secrets.contains_key(*key) {
+                    ".env"
+                } else if std::env::var(key).is_ok() {
+                    "env var"
+                } else if keychain_has(key) {
+                    "keychain"
+                } else {
+                    "NOT SET"
+                };
+                println!("  {key:<30} {source}");
+            }
+        }
+        Some("delete") => {
+            let key = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("Usage: lark secret delete <KEY>"))?;
+            let status = std::process::Command::new("security")
+                .args(["delete-generic-password", "-s", key])
+                .stderr(std::process::Stdio::null())
+                .status()?;
+            if status.success() {
+                println!("Deleted {key} from macOS Keychain.");
+            } else {
+                println!("{key} not found in Keychain.");
+            }
+        }
+        _ => {
+            anyhow::bail!("Usage: lark secret <set|list|delete> [KEY]");
+        }
+    }
+    Ok(())
+}
+
+/// Check if a key exists in macOS Keychain.
+fn keychain_has(key: &str) -> bool {
+    std::process::Command::new("security")
+        .args(["find-generic-password", "-s", key, "-w"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 fn generate_manifest(name: &str, entry: &str) -> String {
@@ -268,6 +367,9 @@ async fn main() -> Result<()> {
             .get(2)
             .ok_or_else(|| anyhow::anyhow!("Usage: lark invoke <PLUGIN_NAME>"))?;
         return invoke_plugin(name).await;
+    }
+    if args.get(1).is_some_and(|a| a == "secret") {
+        return handle_secret_command(&args[2..]);
     }
 
     // Generate a commented default config on first run.
