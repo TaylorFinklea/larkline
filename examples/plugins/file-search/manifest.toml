@@ -1,0 +1,22 @@
+[plugin]
+name = "File Search"
+description = "Find files by name"
+version = "0.1.0"
+author = "larkline"
+icon = "🔍"
+icon_nerd = "󰱼"
+category = "tools"
+
+[[commands]]
+name = "Search"
+description = "Find files by name pattern"
+entry = "search.lua"
+timeout_seconds = 10
+quickkey = "ff"
+
+[[commands]]
+name = "Recent"
+description = "Recently modified files"
+entry = "recent.lua"
+timeout_seconds = 10
+prefetch = true

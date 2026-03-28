@@ -1,0 +1,33 @@
+[plugin]
+name = "Encode/Decode"
+description = "Base64, URL encode/decode, JWT decode"
+version = "0.1.0"
+author = "larkline"
+icon = "🔐"
+icon_nerd = "󰯄"
+category = "tools"
+
+[[commands]]
+name = "Base64 Encode"
+description = "Encode text to Base64"
+entry = "b64encode.lua"
+
+[[commands]]
+name = "Base64 Decode"
+description = "Decode Base64 to text"
+entry = "b64decode.lua"
+
+[[commands]]
+name = "URL Encode"
+description = "Percent-encode text for URLs"
+entry = "urlencode.lua"
+
+[[commands]]
+name = "URL Decode"
+description = "Decode percent-encoded text"
+entry = "urldecode.lua"
+
+[[commands]]
+name = "JWT Decode"
+description = "Decode a JWT token (header + payload)"
+entry = "jwt.lua"

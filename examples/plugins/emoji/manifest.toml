@@ -1,0 +1,12 @@
+[plugin]
+name = "Emoji"
+description = "Search and copy emoji by name"
+version = "0.1.0"
+author = "larkline"
+icon = "😀"
+icon_nerd = "󰞅"
+entry = "init.lua"
+timeout_seconds = 5
+prefetch = true
+category = "tools"
+quickkey = "em"

@@ -1,0 +1,22 @@
+[plugin]
+name = "Quicklinks"
+description = "Personal bookmarks — URLs and file paths"
+version = "0.1.0"
+author = "larkline"
+icon = "🔗"
+icon_nerd = "󰌹"
+category = "tools"
+
+[[commands]]
+name = "Links"
+description = "Your saved bookmarks"
+entry = "links.lua"
+timeout_seconds = 5
+prefetch = true
+quickkey = "ql"
+
+[[commands]]
+name = "Add Link"
+description = "Save a new bookmark"
+entry = "add.lua"
+timeout_seconds = 5
