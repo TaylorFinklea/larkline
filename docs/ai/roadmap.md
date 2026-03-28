@@ -19,25 +19,60 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 | 23-24 | Multi-repo Git, command history, recent section |
 | 25-26 | Plugin settings UI, theme presets + TUI switcher |
 | 27-28 | DevOps plugins (k8s, ports, kill-process), macOS plugins (calendar, apps, clipboard) |
-| 29 | Raycast-style flat list: removed group headers, inline plugin name badges |
+| 29 | Raycast-style flat list: inline plugin name badges |
+| 30 | UX polish: quickkey priority, sidebar ratio, Nerd Font icons, vim mode fixes |
+| 31 | Secrets: macOS Keychain fallback + `lark secret` CLI |
+| 32 | Standard plugins: file search, quicklinks, encode/decode, emoji, translate, Home Assistant |
+| 33 | Plugin Manager: LazyVim-style enable/disable, settings, secret status |
+| v0.2.0 | Published release: Homebrew formula, 35 plugins, CHANGELOG |
 
-## Current Priority: UX Polish (pre-release)
+## Completed (post-polish)
 
-Taylor considers the feature set an "usable MVP" but not daily-driver ready. Polish and UX consistency are the blockers, not features.
+- [x] UX polish: flat list, quickkey priority, sidebar ratio, icons, vim mode transitions
+- [x] Secrets: .env + env var + macOS Keychain fallback, `lark secret set/list/delete` CLI
+- [x] Standard plugin library: 5 new plugins filling Raycast gaps
+- [x] Home Assistant plugin: devices, toggle, scenes, automations
+- [x] Plugin Manager: full-screen tree view, enable/disable, settings, secret status
+- [x] Publishing: v0.2.0 release, Homebrew tap updated
 
-- [x] Flat list with inline plugin name (Phase 29)
-- [x] Hide descriptions by default (toggle with `d`)
-- [x] Quickkey exact-match priority in search
-- [x] Normal mode on Back/Enter from ViewOutput
-- [ ] Sidebar shrinks to ~2/7 when drilled into a plugin (currently 2/3)
-- [ ] Every plugin must have an icon (audit + fill gaps)
-- [ ] Arrow keys behave like hjkl everywhere (l/right = drill in, h/left = back)
+## Next Up
 
-## Next Features (post-polish)
+### Neovim Plugin (`lark.nvim`)
 
-- **Standard plugin library** — identify gaps vs Raycast, build core plugins
-- **Secrets handling** — .env file or keychain integration for API keys
-- **Publishing** — Homebrew + `cargo install`, proper semantic versioning
+Neovim integration that opens Lark as a floating terminal inside Neovim, with context awareness.
+
+**Core idea:**
+- Open Lark in a floating terminal window (`:Lark` command or keymap)
+- Set `LARK_CWD` to the buffer's project root (git root) so plugins like Git, File Search, and Ports use the correct context
+- Pass the current file path as `LARK_FILE` for file-aware plugins
+- On action completion (e.g. open file), send the result back to Neovim (open buffer, run command, etc.)
+
+**Implementation approach:**
+- Lua plugin for Neovim (`lua/lark/init.lua`)
+- Uses `vim.fn.termopen()` or `vim.api.nvim_open_term()` in a floating window
+- Passes environment variables for context (`LARK_CWD`, `LARK_FILE`, `LARK_FILETYPE`)
+- Optional: `lark invoke` JSON output piped back to Neovim for action dispatch
+- Installable via lazy.nvim: `{ "tfinklea/lark.nvim" }`
+
+**Stretch goals:**
+- Telescope-style picker that uses Lark's plugin results as a source
+- `:LarkSearch <query>` that pre-fills the search field
+- File Search results open directly in Neovim buffers
+- Git plugin actions (checkout branch, etc.) run in Neovim's terminal
+
+### Plugin Deep-Dive
+
+Iterate on each plugin individually to bring quality up to Raycast standards:
+- Better error handling and edge cases
+- Richer actions per item
+- Loading states and caching tuning
+- Documentation and screenshots
+
+### Publishing & Distribution
+
+- Publish to crates.io (`cargo install larkline`)
+- AUR package for Arch Linux
+- Nix flake
 
 ## Constraints
 
