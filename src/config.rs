@@ -881,6 +881,37 @@ pub fn load_secrets() -> std::collections::HashMap<String, String> {
     secrets
 }
 
+/// Fill in missing secrets from macOS Keychain.
+///
+/// For each declared secret key that isn't already in the map or the process
+/// environment, queries `security find-generic-password -s <KEY> -w`. No-op
+/// on non-macOS platforms.
+pub fn resolve_keychain_secrets(
+    secrets: &mut std::collections::HashMap<String, String>,
+    declared_keys: &[&str],
+) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    for key in declared_keys {
+        if secrets.contains_key(*key) || std::env::var(key).is_ok() {
+            continue;
+        }
+        if let Ok(output) = std::process::Command::new("security")
+            .args(["find-generic-password", "-s", key, "-w"])
+            .output()
+        {
+            if output.status.success() {
+                let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !value.is_empty() {
+                    tracing::info!(key = key, "loaded secret from macOS Keychain");
+                    secrets.insert((*key).to_string(), value);
+                }
+            }
+        }
+    }
+}
+
 /// Generate a default `.env` template if one doesn't exist yet.
 pub fn generate_env_if_missing() -> anyhow::Result<()> {
     let path = env_path();
@@ -896,6 +927,10 @@ pub fn generate_env_if_missing() -> anyhow::Result<()> {
 # Larkline Secrets
 # Add API keys here. Plugins access them via lark.env(\"KEY_NAME\").
 # This file should never be committed to version control.
+#
+# Fallback order: .env → process environment → macOS Keychain.
+# To store a secret in Keychain instead of here:
+#   security add-generic-password -U -a \"$USER\" -s KEY_NAME -w 'value'
 #
 # GITHUB_TOKEN=ghp_your_token_here
 # OPENAI_API_KEY=sk-your_key_here

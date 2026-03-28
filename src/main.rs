@@ -313,7 +313,12 @@ async fn main() -> Result<()> {
     let plugins: Vec<Arc<dyn plugin::Plugin>> =
         discovered.into_iter().map(plugin::build_plugin).collect();
 
-    let secrets = config::load_secrets();
+    let mut secrets = config::load_secrets();
+    let declared_keys: Vec<&str> = plugins
+        .iter()
+        .flat_map(|p| p.metadata().secrets.iter().map(String::as_str))
+        .collect();
+    config::resolve_keychain_secrets(&mut secrets, &declared_keys);
 
     let mut terminal = tui::init()?;
     let result = app::App::new(plugins, &config, config_warnings, secrets)
