@@ -1903,6 +1903,13 @@ impl App {
     ) -> PluginManagerState {
         let env_secrets = crate::config::load_secrets();
 
+        // Scan ALL plugins (unfiltered) so disabled ones still appear as [ ] in the manager.
+        let all_meta: Vec<PluginMetadata> =
+            match registry::scan(&self.plugin_dirs) {
+                Ok(discovered) => discovered.iter().map(|d| d.metadata.clone()).collect(),
+                Err(_) => self.state.plugins.clone(), // fallback to active set
+            };
+
         // Collect unique plugin groups from metadata.
         let mut seen_groups: Vec<String> = Vec::new();
         let mut group_meta: std::collections::HashMap<
@@ -1910,7 +1917,7 @@ impl App {
             (String, String, String, String, Vec<(String, Option<String>)>, Vec<crate::plugin::traits::FormField>, Vec<String>),
         > = std::collections::HashMap::new();
 
-        for meta in &self.state.plugins {
+        for meta in &all_meta {
             let gk = meta
                 .plugin_group
                 .as_deref()
