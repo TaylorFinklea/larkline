@@ -4,7 +4,7 @@ description = "Manage Homebrew packages"
 version = "0.2.0"
 author = "larkline"
 icon = "🍺"
-icon_nerd = ""
+icon_nerd = "󰏗"
 category = "dev"
 
 [[commands]]

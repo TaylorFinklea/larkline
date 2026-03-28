@@ -4,7 +4,7 @@ description = "PRs, reviews, and CI/CD workflow runs"
 version = "0.2.0"
 author = "larkline"
 icon = "🐙"
-icon_nerd = ""
+icon_nerd = "󰊤"
 category = "dev"
 secrets = ["GITHUB_TOKEN"]
 

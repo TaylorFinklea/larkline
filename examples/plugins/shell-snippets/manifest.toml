@@ -4,7 +4,7 @@ description = "Run saved shell commands with confirmation"
 version = "0.1.0"
 author = "taylor"
 icon = "▶"
-icon_nerd = ""
+icon_nerd = "󰆍"
 entry = "init.lua"
 timeout_seconds = 5
 

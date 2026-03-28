@@ -4,7 +4,7 @@ description = "Minimal Lua plugin — proves the Lua engine works"
 version = "0.1.0"
 author = "taylor"
 icon = "👋"
-icon_nerd = ""
+icon_nerd = "󰢱"
 entry = "init.lua"
 timeout_seconds = 5
 

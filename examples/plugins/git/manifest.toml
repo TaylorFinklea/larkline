@@ -4,7 +4,7 @@ description = "Git dashboard across your repos"
 version = "0.2.0"
 author = "taylor"
 icon = "🌿"
-icon_nerd = ""
+icon_nerd = "󰊢"
 category = "dev"
 
 [[commands]]

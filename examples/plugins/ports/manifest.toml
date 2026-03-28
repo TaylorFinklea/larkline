@@ -4,7 +4,7 @@ description = "TCP ports listening on this machine"
 version = "0.1.0"
 author = "larkline"
 icon = "🔌"
-icon_nerd = ""
+icon_nerd = "󰌘"
 category = "dev"
 
 [[commands]]

@@ -4,7 +4,7 @@ description = "CPU, memory, and disk usage via lark API"
 version = "0.1.0"
 author = "taylor"
 icon = "💻"
-icon_nerd = ""
+icon_nerd = "󰍹"
 entry = "init.lua"
 timeout_seconds = 5
 
