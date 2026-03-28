@@ -1674,7 +1674,9 @@ impl App {
                     if self.icon_set == crate::config::IconSet::Nerd {
                         for d in &mut discovered {
                             if let Some(ref nerd) = d.metadata.icon_nerd {
-                                d.metadata.icon = nerd.clone();
+                                if !nerd.is_empty() {
+                                    d.metadata.icon = nerd.clone();
+                                }
                             }
                         }
                     }

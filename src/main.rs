@@ -123,7 +123,9 @@ async fn invoke_plugin(name: &str) -> Result<()> {
     if cfg.ui.icon_set == config::IconSet::Nerd {
         for d in &mut discovered {
             if let Some(ref nerd) = d.metadata.icon_nerd {
-                d.metadata.icon = nerd.clone();
+                if !nerd.is_empty() {
+                    d.metadata.icon = nerd.clone();
+                }
             }
         }
     }
@@ -302,7 +304,9 @@ async fn main() -> Result<()> {
     if config.ui.icon_set == config::IconSet::Nerd {
         for d in &mut discovered {
             if let Some(ref nerd) = d.metadata.icon_nerd {
-                d.metadata.icon = nerd.clone();
+                if !nerd.is_empty() {
+                    d.metadata.icon = nerd.clone();
+                }
             }
         }
     }
