@@ -63,6 +63,8 @@ pub struct UiConfig {
     pub max_items_per_section: usize,
     /// Show plugin descriptions in the unified list.
     pub show_descriptions: bool,
+    /// Sidebar width percentage in browse mode (20-80, default 50).
+    pub sidebar_ratio: u16,
 }
 
 /// Logging settings.
@@ -496,6 +498,7 @@ impl Default for UiConfig {
             icon_set: IconSet::default(),
             max_items_per_section: 5,
             show_descriptions: false,
+            sidebar_ratio: 50,
         }
     }
 }
@@ -719,6 +722,9 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 
 # Maximum items shown per section in the unified list (0 = unlimited).
 # max_items_per_section = 5
+
+# Sidebar width percentage in browse mode (20-80, default 50).
+# sidebar_ratio = 50
 
 [logging]
 # Log level written to stderr. Options: error, warn, info, debug, trace.

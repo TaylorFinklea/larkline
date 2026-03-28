@@ -49,12 +49,17 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     } else if state.sidebar_hidden && state.mode == Mode::Unified {
         render_unified_list(frame, state, theme, chunks[1]);
     } else if show_right_pane {
-        // Horizontal split: unified list (left, 28%) | right pane (right, 72%).
+        // Narrow sidebar when drilled in; configurable ratio for browse-with-preview.
+        let left_pct = if state.mode == Mode::ViewOutput {
+            28
+        } else {
+            state.sidebar_ratio
+        };
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(28),
-                Constraint::Percentage(72),
+                Constraint::Percentage(left_pct),
+                Constraint::Percentage(100 - left_pct),
             ])
             .split(chunks[1]);
 

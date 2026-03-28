@@ -215,6 +215,8 @@ pub struct AppState {
     pub pending_g: bool,
     /// Whether the sidebar is hidden in `ViewOutput` mode.
     pub sidebar_hidden: bool,
+    /// Sidebar width percentage in browse mode (20-80).
+    pub sidebar_ratio: u16,
     /// History stack for back-navigation through `ViewOutput` states.
     pub navigation_history: Vec<NavigationEntry>,
     /// Current sort order for the unified launcher list.
@@ -418,6 +420,7 @@ impl App {
                 plugins: metadata,
                 show_icons: config.ui.show_icons,
                 show_descriptions: config.ui.show_descriptions,
+                sidebar_ratio: config.ui.sidebar_ratio.clamp(20, 80),
                 favorites: config.favorites.pinned.clone(),
                 warnings,
                 max_items_per_section: config.ui.max_items_per_section,
