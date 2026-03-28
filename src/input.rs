@@ -81,6 +81,7 @@ pub fn handle_key(
         VimMode::Normal => match mode {
             Mode::Unified => handle_browse_normal(event, keybindings),
             Mode::ViewOutput => handle_view_output(event, keybindings),
+            Mode::PluginManager => handle_plugin_manager(event),
         },
     }
 }
@@ -135,6 +136,8 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
         // Cycle sort order (O = Shift+O).
         KeyCode::Char('O') => Some(Action::CycleSort),
+        // Plugin manager (P = Shift+P).
+        KeyCode::Char('P') => Some(Action::PluginManagerOpen),
         _ => None,
     }
 }
@@ -323,6 +326,27 @@ fn handle_theme_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Enter => Some(Action::ThemePickerClose { confirmed: true }),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::ThemePickerClose { confirmed: false }),
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        _ => None,
+    }
+}
+
+/// Plugin manager keybinding handler.
+fn handle_plugin_manager(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
+        KeyCode::Char(' ') => Some(Action::PluginManagerToggle),
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Action::PluginManagerExpand),
+        KeyCode::Char('s') => Some(Action::PluginManagerSetSecret),
+        KeyCode::Char('x') => Some(Action::PluginManagerDeleteSecret),
+        KeyCode::Char('G') => Some(Action::GoToLast),
+        KeyCode::Char('g') => Some(Action::PendingG),
+        KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => {
+            Some(Action::PluginManagerClose)
+        }
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::Quit)
+        }
         _ => None,
     }
 }

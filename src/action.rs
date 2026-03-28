@@ -125,4 +125,16 @@ pub enum Action {
         /// Whether to persist the selection or revert.
         confirmed: bool,
     },
+    /// Open the plugin manager screen.
+    PluginManagerOpen,
+    /// Close the plugin manager and return to Unified mode.
+    PluginManagerClose,
+    /// Toggle enable/disable on the selected plugin or command row.
+    PluginManagerToggle,
+    /// Expand or collapse a plugin header row.
+    PluginManagerExpand,
+    /// Set a secret (shell out to `lark secret set`).
+    PluginManagerSetSecret,
+    /// Delete a secret from Keychain.
+    PluginManagerDeleteSecret,
 }

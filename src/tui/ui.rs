@@ -45,8 +45,13 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             && state.preview_plugin_index.is_some()
             && chunks[1].width >= 80);
 
+    // Plugin Manager takes full content area.
+    if state.mode == Mode::PluginManager {
+        if let Some(ref pm) = state.plugin_manager {
+            render_plugin_manager(frame, pm, theme, chunks[1]);
+        }
     // Sidebar hidden: ViewOutput gets full width, Unified hides preview.
-    if state.sidebar_hidden && state.mode == Mode::ViewOutput {
+    } else if state.sidebar_hidden && state.mode == Mode::ViewOutput {
         render_output_pane(frame, state, theme, chunks[1]);
     } else if state.sidebar_hidden && state.mode == Mode::Unified {
         render_unified_list(frame, state, theme, chunks[1]);
@@ -854,6 +859,138 @@ fn key_hint<'a>(key: &str, label: &str, theme: &Theme) -> Vec<Span<'a>> {
 }
 
 #[allow(clippy::too_many_lines)]
+fn render_plugin_manager(
+    frame: &mut Frame,
+    pm: &crate::app::PluginManagerState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
+    use crate::app::{PluginManagerRow, SecretSource};
+
+    let items: Vec<ListItem> = pm
+        .rows
+        .iter()
+        .map(|row| match row {
+            PluginManagerRow::PluginHeader {
+                name,
+                icon,
+                category,
+                version,
+                enabled,
+                expanded,
+                command_count,
+                ..
+            } => {
+                let arrow = if *command_count > 1 {
+                    if *expanded { "▼" } else { "►" }
+                } else {
+                    " "
+                };
+                let check = if *enabled { "x" } else { " " };
+                let line = Line::from(vec![
+                    Span::styled(
+                        format!("{arrow} [{check}] "),
+                        Style::default().fg(if *enabled {
+                            theme.accent
+                        } else {
+                            theme.text_dimmed
+                        }),
+                    ),
+                    Span::styled(format!("{icon} "), Style::default().bold()),
+                    Span::styled(
+                        name.as_str(),
+                        Style::default()
+                            .fg(if *enabled { theme.text } else { theme.text_dimmed })
+                            .bold(),
+                    ),
+                    Span::styled(
+                        format!("  {category}  v{version}"),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
+                ]);
+                ListItem::new(line)
+            }
+            PluginManagerRow::Command {
+                name,
+                quickkey,
+                enabled,
+                ..
+            } => {
+                let check = if *enabled { "x" } else { " " };
+                let qk = quickkey
+                    .as_deref()
+                    .map_or(String::new(), |q| format!(" ({q})"));
+                let line = Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(
+                        format!("[{check}] "),
+                        Style::default().fg(if *enabled {
+                            theme.accent
+                        } else {
+                            theme.text_dimmed
+                        }),
+                    ),
+                    Span::styled(
+                        format!("{name}{qk}"),
+                        Style::default().fg(if *enabled {
+                            theme.text
+                        } else {
+                            theme.text_dimmed
+                        }),
+                    ),
+                ]);
+                ListItem::new(line)
+            }
+            PluginManagerRow::Setting {
+                label, value, ..
+            } => {
+                let line = Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled("⚙ ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(label.as_str(), Style::default().fg(theme.text)),
+                    Span::styled(format!(" = {value}"), Style::default().fg(theme.text_dimmed)),
+                ]);
+                ListItem::new(line)
+            }
+            PluginManagerRow::Secret { key, source } => {
+                let (status, style) = match source {
+                    SecretSource::DotEnv => ("✅ .env", Style::default().fg(theme.accent)),
+                    SecretSource::EnvVar => ("✅ env", Style::default().fg(theme.accent)),
+                    SecretSource::Keychain => ("✅ keychain", Style::default().fg(theme.accent)),
+                    SecretSource::NotSet => ("❌ NOT SET", Style::default().fg(theme.error)),
+                };
+                let line = Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled("🔑 ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(key.as_str(), Style::default().fg(theme.text)),
+                    Span::raw("  "),
+                    Span::styled(status, style),
+                ]);
+                ListItem::new(line)
+            }
+        })
+        .collect();
+
+    let block = Block::default()
+        .title(" Plugin Manager ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent));
+
+    let highlight_style = Style::default()
+        .bg(theme.highlight_bg)
+        .fg(theme.highlight_fg)
+        .add_modifier(Modifier::BOLD);
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(highlight_style);
+
+    let mut list_state = ListState::default().with_selected(Some(pm.selected));
+    frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+#[allow(clippy::too_many_lines)]
 fn render_status_bar(
     frame: &mut Frame,
     state: &AppState,
@@ -951,6 +1088,14 @@ fn render_status_bar(
                                 Style::default().fg(theme.accent).bold(),
                             ));
                         }
+                    }
+                    Mode::PluginManager => {
+                        spans.extend(key_hint("j/k", "nav", theme));
+                        spans.extend(key_hint("SPC", "toggle", theme));
+                        spans.extend(key_hint("⏎", "expand", theme));
+                        spans.extend(key_hint("s", "set secret", theme));
+                        spans.extend(key_hint("x", "del secret", theme));
+                        spans.extend(key_hint("q", "back", theme));
                     }
                     Mode::ViewOutput => {
                         if state.is_loading {

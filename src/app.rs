@@ -49,6 +49,8 @@ pub enum Mode {
     Unified,
     /// Viewing a plugin's output in the detail pane (table/raw-text fallback).
     ViewOutput,
+    /// Plugin management screen — enable/disable, settings, secrets.
+    PluginManager,
 }
 
 /// A row in the unified launcher list.
@@ -223,6 +225,8 @@ pub struct AppState {
     pub sort_mode: SortMode,
     /// Theme preset picker overlay (None = closed).
     pub theme_picker: Option<ThemePickerState>,
+    /// Plugin manager state (shown in `Mode::PluginManager`).
+    pub plugin_manager: Option<PluginManagerState>,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -352,6 +356,56 @@ pub struct FormFieldState {
     pub toggled: bool,
 }
 
+/// Source of a plugin secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretSource {
+    DotEnv,
+    EnvVar,
+    Keychain,
+    NotSet,
+}
+
+/// A row in the plugin manager tree view.
+#[derive(Debug, Clone)]
+pub enum PluginManagerRow {
+    PluginHeader {
+        group_key: String,
+        name: String,
+        icon: String,
+        category: String,
+        version: String,
+        enabled: bool,
+        expanded: bool,
+        command_count: usize,
+    },
+    Command {
+        group_key: String,
+        name: String,
+        quickkey: Option<String>,
+        enabled: bool,
+    },
+    Setting {
+        #[allow(dead_code)]
+        group_key: String,
+        #[allow(dead_code)]
+        id: String,
+        label: String,
+        value: String,
+    },
+    Secret {
+        key: String,
+        source: SecretSource,
+    },
+}
+
+/// State for the plugin manager screen.
+#[derive(Debug, Clone)]
+pub struct PluginManagerState {
+    pub rows: Vec<PluginManagerRow>,
+    pub selected: usize,
+    pub expanded: std::collections::HashSet<String>,
+}
+
 /// Maximum entries in the navigation history stack.
 const MAX_NAV_HISTORY: usize = 10;
 
@@ -393,6 +447,8 @@ pub struct App {
     secrets: std::collections::HashMap<String, String>,
     /// Currently active theme preset name (e.g. `"nord"`). `None` = default.
     current_preset: Option<String>,
+    /// Plugin manager enable/disable config.
+    pm_config: crate::config::PluginManagerConfig,
 }
 
 impl App {
@@ -439,6 +495,7 @@ impl App {
             icon_set: config.ui.icon_set.clone(),
             secrets,
             current_preset: config.theme.preset.clone(),
+            pm_config: crate::config::load_plugin_manager_config(),
         };
         app.rebuild_unified_list();
 
@@ -776,6 +833,12 @@ impl App {
             Action::Quit => self.state.should_quit = true,
 
             Action::MoveUp => {
+                if let Some(ref mut pm) = self.state.plugin_manager {
+                    if self.state.mode == Mode::PluginManager {
+                        pm.selected = pm.selected.saturating_sub(1);
+                        return;
+                    }
+                }
                 let picker_idx = if let Some(ref mut p) = self.state.theme_picker {
                     if p.selected > 0 {
                         p.selected -= 1;
@@ -817,6 +880,15 @@ impl App {
             }
 
             Action::MoveDown => {
+                if let Some(ref mut pm) = self.state.plugin_manager {
+                    if self.state.mode == Mode::PluginManager {
+                        let max = pm.rows.len().saturating_sub(1);
+                        if pm.selected < max {
+                            pm.selected += 1;
+                        }
+                        return;
+                    }
+                }
                 let picker_idx = if let Some(ref mut p) = self.state.theme_picker {
                     let max = crate::config::PRESET_NAMES.len() - 1;
                     if p.selected < max {
@@ -1476,6 +1548,11 @@ impl App {
             }
 
             Action::GoToFirst => match self.state.mode {
+                Mode::PluginManager => {
+                    if let Some(ref mut pm) = self.state.plugin_manager {
+                        pm.selected = 0;
+                    }
+                }
                 Mode::Unified => {
                     if let Some(first) = self
                         .state
@@ -1501,6 +1578,11 @@ impl App {
 
             Action::GoToLast => {
                 match self.state.mode {
+                    Mode::PluginManager => {
+                        if let Some(ref mut pm) = self.state.plugin_manager {
+                            pm.selected = pm.rows.len().saturating_sub(1);
+                        }
+                    }
                     Mode::Unified => {
                         if let Some(last) = self
                             .state
@@ -1649,6 +1731,99 @@ impl App {
                 }
             }
 
+            Action::PluginManagerOpen => {
+                self.state.power_menu = None;
+                self.state.mode = Mode::PluginManager;
+                self.state.vim_mode = VimMode::Normal;
+                self.state.plugin_manager = Some(self.build_plugin_manager_state());
+            }
+
+            Action::PluginManagerClose => {
+                self.state.plugin_manager = None;
+                self.state.mode = Mode::Unified;
+                // Rebuild unified list in case enable/disable changed.
+                self.rebuild_unified_list();
+            }
+
+            Action::PluginManagerToggle => {
+                if let Some(ref mut pm) = self.state.plugin_manager {
+                    let changed = match pm.rows.get(pm.selected).cloned() {
+                        Some(PluginManagerRow::PluginHeader { group_key, .. }) => {
+                            self.pm_config.toggle_plugin(&group_key);
+                            true
+                        }
+                        Some(PluginManagerRow::Command {
+                            group_key, name, ..
+                        }) => {
+                            self.pm_config.toggle_command(&group_key, &name);
+                            true
+                        }
+                        _ => false,
+                    };
+                    if changed {
+                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
+                            tracing::warn!(error = %e, "failed to save plugin manager config");
+                        }
+                        // Rebuild rows to reflect toggle.
+                        self.state.plugin_manager = Some(self.build_plugin_manager_state());
+                        // Restore selection position.
+                        if let Some(ref mut pm) = self.state.plugin_manager {
+                            pm.selected = pm.selected.min(pm.rows.len().saturating_sub(1));
+                        }
+                    }
+                }
+            }
+
+            Action::PluginManagerExpand => {
+                if let Some(ref mut pm) = self.state.plugin_manager {
+                    if let Some(PluginManagerRow::PluginHeader { group_key, .. }) =
+                        pm.rows.get(pm.selected)
+                    {
+                        let key = group_key.clone();
+                        if pm.expanded.contains(&key) {
+                            pm.expanded.remove(&key);
+                        } else {
+                            pm.expanded.insert(key);
+                        }
+                        let expanded = pm.expanded.clone();
+                        let sel = pm.selected;
+                        let mut new_pm = self.build_plugin_manager_state_with_expanded(&expanded);
+                        new_pm.selected = sel.min(new_pm.rows.len().saturating_sub(1));
+                        new_pm.expanded = expanded;
+                        self.state.plugin_manager = Some(new_pm);
+                    }
+                }
+            }
+
+            Action::PluginManagerSetSecret => {
+                if let Some(ref pm) = self.state.plugin_manager {
+                    if let Some(PluginManagerRow::Secret { key, .. }) = pm.rows.get(pm.selected) {
+                        self.state.status_message = Some((
+                            format!("Run: lark secret set {key}"),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
+            }
+
+            Action::PluginManagerDeleteSecret => {
+                if let Some(ref pm) = self.state.plugin_manager {
+                    if let Some(PluginManagerRow::Secret { key, source, .. }) = pm.rows.get(pm.selected) {
+                        if *source != SecretSource::NotSet {
+                            let key = key.clone();
+                            // Delete from keychain.
+                            let _ = std::process::Command::new("security")
+                                .args(["delete-generic-password", "-s", &key])
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                            // Refresh the manager state.
+                            self.state.plugin_manager = Some(self.build_plugin_manager_state());
+                            self.state.status_message = Some((format!("Deleted {key}"), std::time::Instant::now()));
+                        }
+                    }
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -1696,6 +1871,118 @@ impl App {
                     self.state.warnings = vec![format!("Refresh failed: {e}")];
                 }
             },
+        }
+    }
+
+    /// Build the plugin manager state (all plugins collapsed by default).
+    fn build_plugin_manager_state(&self) -> PluginManagerState {
+        self.build_plugin_manager_state_with_expanded(&std::collections::HashSet::new())
+    }
+
+    /// Build plugin manager state with specified expanded groups.
+    #[allow(clippy::type_complexity)]
+    fn build_plugin_manager_state_with_expanded(
+        &self,
+        expanded_keys: &std::collections::HashSet<String>,
+    ) -> PluginManagerState {
+        let env_secrets = crate::config::load_secrets();
+
+        // Collect unique plugin groups from metadata.
+        let mut seen_groups: Vec<String> = Vec::new();
+        let mut group_meta: std::collections::HashMap<
+            String,
+            (String, String, String, String, Vec<(String, Option<String>)>, Vec<crate::plugin::traits::FormField>, Vec<String>),
+        > = std::collections::HashMap::new();
+
+        for meta in &self.state.plugins {
+            let gk = meta
+                .plugin_group
+                .as_deref()
+                .unwrap_or(&meta.name)
+                .to_string();
+            let entry = group_meta.entry(gk.clone()).or_insert_with(|| {
+                seen_groups.push(gk.clone());
+                (
+                    meta.icon.clone(),
+                    meta.category.clone().unwrap_or_default(),
+                    meta.version.clone(),
+                    gk.clone(),
+                    Vec::new(),
+                    meta.settings_spec.clone(),
+                    meta.secrets.clone(),
+                )
+            });
+            entry.4.push((meta.name.clone(), meta.quickkey.clone()));
+        }
+
+        let mut rows = Vec::new();
+        for gk in &seen_groups {
+            let (icon, cat, ver, _display, commands, settings, secrets) = &group_meta[gk];
+            let is_expanded = expanded_keys.contains(gk);
+            let plugin_enabled = !self.pm_config.is_plugin_disabled(gk);
+
+            rows.push(PluginManagerRow::PluginHeader {
+                group_key: gk.clone(),
+                name: gk.clone(),
+                icon: icon.clone(),
+                category: cat.clone(),
+                version: ver.clone(),
+                enabled: plugin_enabled,
+                expanded: is_expanded,
+                command_count: commands.len(),
+            });
+
+            if is_expanded {
+                // Command rows.
+                for (cmd_name, qk) in commands {
+                    let cmd_enabled = plugin_enabled
+                        && !self.pm_config.is_command_disabled(gk, cmd_name);
+                    rows.push(PluginManagerRow::Command {
+                        group_key: gk.clone(),
+                        name: cmd_name.clone(),
+                        quickkey: qk.clone(),
+                        enabled: cmd_enabled,
+                    });
+                }
+                // Setting rows.
+                let store_path = crate::plugin::store::store_path_for(gk, None);
+                let store = crate::plugin::store::PluginStore::load(store_path);
+                for spec in settings {
+                    let value = store
+                        .get(&spec.id)
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .or_else(|| spec.default_value.clone())
+                        .unwrap_or_else(|| "(not set)".to_string());
+                    rows.push(PluginManagerRow::Setting {
+                        group_key: gk.clone(),
+                        id: spec.id.clone(),
+                        label: spec.label.clone(),
+                        value,
+                    });
+                }
+                // Secret rows.
+                for key in secrets {
+                    let source = if env_secrets.contains_key(key) {
+                        SecretSource::DotEnv
+                    } else if std::env::var(key).is_ok() {
+                        SecretSource::EnvVar
+                    } else if crate::config::keychain_has(key) {
+                        SecretSource::Keychain
+                    } else {
+                        SecretSource::NotSet
+                    };
+                    rows.push(PluginManagerRow::Secret {
+                        key: key.clone(),
+                        source,
+                    });
+                }
+            }
+        }
+
+        PluginManagerState {
+            rows,
+            selected: 0,
+            expanded: expanded_keys.clone(),
         }
     }
 
@@ -1758,14 +2045,23 @@ impl App {
                 },
                 PowerMenuCategory {
                     name: "App".to_string(),
-                    items: vec![PowerMenuItem {
-                        key: 'q',
-                        key_hint: "q".to_string(),
-                        label: "Quit".to_string(),
-                        action: Action::Quit,
-                    }],
+                    items: vec![
+                        PowerMenuItem {
+                            key: 'P',
+                            key_hint: "P".to_string(),
+                            label: "Plugins".to_string(),
+                            action: Action::PluginManagerOpen,
+                        },
+                        PowerMenuItem {
+                            key: 'q',
+                            key_hint: "q".to_string(),
+                            label: "Quit".to_string(),
+                            action: Action::Quit,
+                        },
+                    ],
                 },
             ],
+            Mode::PluginManager => vec![],
             Mode::ViewOutput => vec![
                 {
                     let has_settings = self

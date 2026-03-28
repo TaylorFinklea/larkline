@@ -938,6 +938,104 @@ pub fn generate_env_if_missing() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Plugin Manager — enable/disable state
+// ---------------------------------------------------------------------------
+
+/// Persisted enable/disable state for the plugin manager.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PluginManagerConfig {
+    /// Plugin group keys that are fully disabled.
+    #[serde(default)]
+    pub disabled_plugins: Vec<String>,
+    /// Individual commands disabled as `"GroupKey:CommandName"`.
+    #[serde(default)]
+    pub disabled_commands: Vec<String>,
+}
+
+/// Path to the plugin manager state file.
+fn plugin_manager_path() -> std::path::PathBuf {
+    let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        std::path::PathBuf::from(xdg).join("larkline")
+    } else {
+        let home = std::env::var("HOME")
+            .map_or_else(|_| std::path::PathBuf::from("/tmp"), std::path::PathBuf::from);
+        home.join(".local").join("share").join("larkline")
+    };
+    base.join("plugin-manager.json")
+}
+
+/// Load plugin manager config from disk. Returns defaults if missing/corrupt.
+#[must_use]
+pub fn load_plugin_manager_config() -> PluginManagerConfig {
+    let path = plugin_manager_path();
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return PluginManagerConfig::default();
+    };
+    serde_json::from_str(&contents).unwrap_or_default()
+}
+
+/// Save plugin manager config to disk.
+pub fn save_plugin_manager_config(cfg: &PluginManagerConfig) -> anyhow::Result<()> {
+    let path = plugin_manager_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(cfg)?;
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
+/// Check if a key exists in macOS Keychain.
+#[must_use]
+pub fn keychain_has(key: &str) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    std::process::Command::new("security")
+        .args(["find-generic-password", "-s", key, "-w"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+impl PluginManagerConfig {
+    /// Check if a plugin group is disabled.
+    pub fn is_plugin_disabled(&self, group_key: &str) -> bool {
+        self.disabled_plugins.iter().any(|k| k == group_key)
+    }
+
+    /// Check if a specific command is disabled.
+    pub fn is_command_disabled(&self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        self.disabled_commands.iter().any(|k| k == &key)
+    }
+
+    /// Toggle a plugin's enabled state. Returns the new enabled state.
+    pub fn toggle_plugin(&mut self, group_key: &str) -> bool {
+        if let Some(pos) = self.disabled_plugins.iter().position(|k| k == group_key) {
+            self.disabled_plugins.remove(pos);
+            true // now enabled
+        } else {
+            self.disabled_plugins.push(group_key.to_string());
+            false // now disabled
+        }
+    }
+
+    /// Toggle a command's enabled state. Returns the new enabled state.
+    pub fn toggle_command(&mut self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        if let Some(pos) = self.disabled_commands.iter().position(|k| k == &key) {
+            self.disabled_commands.remove(pos);
+            true // now enabled
+        } else {
+            self.disabled_commands.push(key);
+            false // now disabled
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
