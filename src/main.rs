@@ -414,6 +414,23 @@ async fn main() -> Result<()> {
             }
         }
     }
+    // Filter out disabled plugins/commands.
+    let pm_config = config::load_plugin_manager_config();
+    let discovered: Vec<_> = discovered
+        .into_iter()
+        .filter(|d| {
+            let gk = d
+                .metadata
+                .plugin_group
+                .as_deref()
+                .unwrap_or(&d.metadata.name);
+            if pm_config.is_plugin_disabled(gk) {
+                return false;
+            }
+            !pm_config.is_command_disabled(gk, &d.metadata.name)
+        })
+        .collect();
+
     let plugins: Vec<Arc<dyn plugin::Plugin>> =
         discovered.into_iter().map(plugin::build_plugin).collect();
 

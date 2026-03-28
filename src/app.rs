@@ -1741,8 +1741,8 @@ impl App {
             Action::PluginManagerClose => {
                 self.state.plugin_manager = None;
                 self.state.mode = Mode::Unified;
-                // Rebuild unified list in case enable/disable changed.
-                self.rebuild_unified_list();
+                // Trigger full refresh so disabled plugins are filtered out.
+                self.handle_action(Action::RefreshPlugins);
             }
 
             Action::PluginManagerToggle => {
@@ -1836,6 +1836,22 @@ impl App {
                             }
                         }
                     }
+                    // Filter out disabled plugins/commands.
+                    self.pm_config = crate::config::load_plugin_manager_config();
+                    let discovered: Vec<_> = discovered
+                        .into_iter()
+                        .filter(|d| {
+                            let gk = d
+                                .metadata
+                                .plugin_group
+                                .as_deref()
+                                .unwrap_or(&d.metadata.name);
+                            if self.pm_config.is_plugin_disabled(gk) {
+                                return false;
+                            }
+                            !self.pm_config.is_command_disabled(gk, &d.metadata.name)
+                        })
+                        .collect();
                     let plugins: Vec<Arc<dyn Plugin>> = discovered
                         .into_iter()
                         .map(crate::plugin::build_plugin)
