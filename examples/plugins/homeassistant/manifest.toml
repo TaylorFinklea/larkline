@@ -1,0 +1,35 @@
+[plugin]
+name = "Home Assistant"
+description = "Control your smart home — lights, switches, scenes, automations"
+version = "0.1.0"
+author = "larkline"
+icon = "🏠"
+icon_nerd = "󰟐"
+category = "home"
+secrets = ["HA_TOKEN", "HA_URL"]
+
+[[commands]]
+name = "Devices"
+description = "All entities with current state"
+entry = "devices.lua"
+timeout_seconds = 10
+prefetch = true
+quickkey = "ha"
+
+[[commands]]
+name = "Toggle"
+description = "Toggle a light or switch"
+entry = "toggle.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Scenes"
+description = "Activate a scene"
+entry = "scenes.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Automations"
+description = "Trigger, enable, or disable automations"
+entry = "automations.lua"
+timeout_seconds = 10
