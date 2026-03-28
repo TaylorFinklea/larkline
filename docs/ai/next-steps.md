@@ -2,12 +2,12 @@
 
 > Updated: 2026-03-27
 
-## Immediate (UX polish)
+## UX Polish (pre-release)
 
-- [ ] Sidebar width: shrink to ~2/7 when in ViewOutput, keep 2/3 when browsing
-- [ ] Arrow key parity: ensure Right/Left map to l/h (drill-in / back) in all modes
-- [ ] Plugin icon audit: ensure every plugin has a non-empty `icon_nerd` or `icon`
-- [ ] Esc flow review: Esc from ViewOutput -> main list (highlight current) -> Esc clears search -> Normal mode
+- [x] Sidebar width: configurable `sidebar_ratio`, 50% browse / 28% ViewOutput
+- [x] Arrow key parity: already done (Right=Select, Left=Back)
+- [x] Plugin icon audit: all 16 gaps filled + empty-string bug fixed
+- [x] Esc flow: already working correctly
 
 ## After Polish
 

@@ -27,3 +27,9 @@
 **Context:** Opening a result (Enter) or returning from one (h/Back) left `vim_mode` in Insert, causing j/k to type into the search field instead of navigating.
 
 **Decision:** `open_plugin()` and Back-to-Unified both set `VimMode::Normal`. User re-enters Insert explicitly with `i` or `/`.
+
+## ADR-005: Configurable sidebar ratio (2026-03-27)
+
+**Context:** Sidebar width was fixed at 28/72 for both browse and ViewOutput modes. Taylor wanted a wider sidebar in browse mode and the ability to tune it.
+
+**Decision:** New `sidebar_ratio` config setting (default 50, range 20-80) controls browse-with-preview width. ViewOutput always uses 28% regardless. Clamped at init time.

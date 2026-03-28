@@ -8,17 +8,25 @@
 
 ## Recent Progress
 
-- Phase 29: Flat list — removed `GroupHeader` rows, plugin name shown inline as dimmed badge
-- Descriptions hidden by default (`show_descriptions: false`)
-- Quickkey exact-match pins command to top of search results (`u32::MAX` score)
-- Cursor resets to position 0 on every search query change
-- Back from ViewOutput and Enter on result both enter Normal mode (no more j/k typing into search)
+- Phase 29: Flat list with inline plugin name badges
+- Descriptions hidden by default, quickkey exact-match priority, cursor reset on search
+- Normal mode on Back/Enter from ViewOutput
+- Brew Update command added (multi-command plugin)
+- AI handoff workflow: `docs/ai/` shared state + session protocol
+- Fixed empty `icon_nerd = ""` replacing emoji with blank (3 sites)
+- Filled in Nerd Font icons for all 16 plugins that had gaps
+- Configurable `sidebar_ratio` (default 50% browse, 28% ViewOutput)
 
 ## Changed Files (this session)
 
-- `src/app.rs` — `rebuild_unified_list` flat emit, quickkey priority, cursor reset, vim mode transitions
-- `src/tui/ui.rs` — removed GroupHeader render arm, badge format simplified
-- `src/config.rs` — `show_descriptions` default false
+- `src/app.rs` — flat list, quickkey priority, cursor reset, vim mode, icon guard, sidebar_ratio
+- `src/tui/ui.rs` — removed GroupHeader render, dynamic sidebar width
+- `src/config.rs` — show_descriptions default, sidebar_ratio field + template
+- `src/main.rs` — icon_nerd empty-string guard (2 sites)
+- `examples/plugins/brew/` — multi-command manifest + update.lua
+- `examples/plugins/*/manifest.toml` — 16 Nerd Font icons filled in
+- `docs/ai/` — new handoff workflow files
+- `CLAUDE.md`, `AGENTS.md` — handoff protocol added
 
 ## Blockers
 
@@ -26,11 +34,9 @@ None.
 
 ## Open Questions
 
-- Sidebar width ratio when drilled in — Taylor wants ~2/7, current is 2/3. Need to decide if this is a config value or hardcoded.
-- Arrow key parity with hjkl — is this just mapping Right→`l` and Left→`h`, or are there edge cases in different modes?
+None currently.
 
 ## Validation
 
-- `cargo test` — 138 tests passing
+- `cargo test` — all tests passing
 - `cargo clippy -- -D warnings` — clean
-- Manual testing confirmed: flat list renders, quickkey `ca` pins Calendar, Normal mode on Back/Enter
