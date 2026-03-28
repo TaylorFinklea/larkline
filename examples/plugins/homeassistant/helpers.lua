@@ -3,14 +3,28 @@
 local M = {}
 
 function M.get_config()
-    local url = lark.env("HA_URL")
+    -- URL from plugin settings (configured via Settings UI), token from secrets.
+    local raw_url = lark.store.get("ha_url")
+    local url = (type(raw_url) == "string" and raw_url ~= "") and raw_url or nil
+    -- Strip JSON quotes if stored as a JSON string value.
+    if url and url:sub(1, 1) == '"' then
+        url = url:sub(2, -2)
+    end
     local token = lark.env("HA_TOKEN")
-    if not url or url == "" or not token or token == "" then
+    if not url or url == "" then
         return nil, nil, {
             title = "Home Assistant",
             items = {
-                { label = "HA_URL and HA_TOKEN not set", icon = "!" },
-                { label = "Set via: lark secret set HA_URL", detail = "e.g. http://homeassistant.local:8123", icon = "🔧" },
+                { label = "HA URL not configured", icon = "!" },
+                { label = "Open Settings (press S) to set your HA URL", icon = "🔧" },
+            },
+        }
+    end
+    if not token or token == "" then
+        return nil, nil, {
+            title = "Home Assistant",
+            items = {
+                { label = "HA_TOKEN not set", icon = "!" },
                 { label = "Set via: lark secret set HA_TOKEN", detail = "Long-lived access token from HA profile", icon = "🔑" },
             },
         }

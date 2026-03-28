@@ -6,7 +6,13 @@ author = "larkline"
 icon = "🏠"
 icon_nerd = "󰟐"
 category = "home"
-secrets = ["HA_TOKEN", "HA_URL"]
+secrets = ["HA_TOKEN"]
+
+[[settings]]
+id = "ha_url"
+label = "Home Assistant URL"
+type = "text"
+default = "http://homeassistant.local:8123"
 
 [[commands]]
 name = "Devices"
