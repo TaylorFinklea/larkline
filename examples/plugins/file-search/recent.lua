@@ -1,22 +1,38 @@
--- Recent Files — recently modified files in common working directories.
+-- Recent Files — recently modified files in the project or common directories.
 
 lark.register({
     on_run = function()
         local home = os.getenv("HOME") or "/"
-        -- Search common working dirs for recently modified files (last 3 days).
-        local raw = lark.exec("find", {
-            home .. "/git",
-            home .. "/projects",
-            home .. "/Documents",
-            home .. "/Desktop",
-            "-maxdepth", "4",
-            "-type", "f",
-            "-mtime", "-3",
-            "-not", "-path", "*/.*",
-            "-not", "-path", "*/node_modules/*",
-            "-not", "-path", "*/target/*",
-            "-not", "-name", "*.pyc",
-        })
+        -- Use LARK_CWD (set by lark.nvim) if available, otherwise common dirs.
+        local lark_cwd = lark.env("LARK_CWD")
+
+        local raw
+        if lark_cwd and lark_cwd ~= "" then
+            raw = lark.exec("find", {
+                lark_cwd,
+                "-maxdepth", "4",
+                "-type", "f",
+                "-mtime", "-3",
+                "-not", "-path", "*/.*",
+                "-not", "-path", "*/node_modules/*",
+                "-not", "-path", "*/target/*",
+                "-not", "-name", "*.pyc",
+            })
+        else
+            raw = lark.exec("find", {
+                home .. "/git",
+                home .. "/projects",
+                home .. "/Documents",
+                home .. "/Desktop",
+                "-maxdepth", "4",
+                "-type", "f",
+                "-mtime", "-3",
+                "-not", "-path", "*/.*",
+                "-not", "-path", "*/node_modules/*",
+                "-not", "-path", "*/target/*",
+                "-not", "-name", "*.pyc",
+            })
+        end
 
         if not raw or raw == "" then
             return {

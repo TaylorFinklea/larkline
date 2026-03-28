@@ -12,10 +12,11 @@ lark.register({
             end
 
             -- Try fd first (faster, respects .gitignore), fall back to find.
-            local home = os.getenv("HOME") or "/"
-            local raw = lark.exec("fd", { "--max-results", "50", "--color", "never", query, home })
+            -- Use LARK_CWD (set by lark.nvim) if available, otherwise $HOME.
+            local search_root = lark.env("LARK_CWD") or os.getenv("HOME") or "/"
+            local raw = lark.exec("fd", { "--max-results", "50", "--color", "never", query, search_root })
             if not raw or raw == "" then
-                raw = lark.exec("find", { home, "-maxdepth", "5", "-iname", "*" .. query .. "*", "-not", "-path", "*/.*" })
+                raw = lark.exec("find", { search_root, "-maxdepth", "5", "-iname", "*" .. query .. "*", "-not", "-path", "*/.*" })
             end
 
             if not raw or raw == "" then
@@ -29,6 +30,7 @@ lark.register({
             for path in raw:gmatch("[^\n]+") do
                 local name = path:match("([^/]+)$") or path
                 local dir = path:match("^(.*)/[^/]+$") or ""
+                local home = os.getenv("HOME") or ""
                 if home ~= "" and dir:sub(1, #home) == home then
                     dir = "~" .. dir:sub(#home + 1)
                 end
