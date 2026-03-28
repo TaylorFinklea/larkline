@@ -16,7 +16,9 @@ use ratatui::{
 
 use ansi_to_tui::IntoText;
 
-use crate::app::{AppState, Mode, OutputMode, PowerMenuState, ThemePickerState, UnifiedRow, VimMode};
+use crate::app::{
+    AppState, Mode, OutputMode, PowerMenuState, ThemePickerState, UnifiedRow, VimMode,
+};
 use crate::config::Theme;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -340,12 +342,12 @@ fn render_output_pane(
     };
 
     let title_text = if state.output_searching || !state.output_query.is_empty() {
-        let total = state
-            .plugin_output
-            .as_ref()
-            .map_or(0, |o| o.items.len());
+        let total = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
         let filtered = state.output_filtered_indices.len();
-        format!(" {breadcrumb} /{} ({filtered}/{total}) ", state.output_query)
+        format!(
+            " {breadcrumb} /{} ({filtered}/{total}) ",
+            state.output_query
+        )
     } else {
         format!(" {breadcrumb} ")
     };
@@ -451,8 +453,7 @@ fn render_output_pane(
             ));
         }
 
-        let palette_block = block
-            .title(Line::from(title_parts));
+        let palette_block = block.title(Line::from(title_parts));
         let list = List::new(items).block(palette_block);
         frame.render_widget(list, area);
         return;
@@ -528,9 +529,7 @@ fn render_output_pane(
                         .as_bytes()
                         .into_text()
                         .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
-                    let paragraph = Paragraph::new(text)
-                        .block(block)
-                        .scroll((scroll, 0));
+                    let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 } else {
                     // Format items as plain text lines.
@@ -540,9 +539,7 @@ fn render_output_pane(
                         .map(|i| i.label.as_str())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let paragraph = Paragraph::new(text)
-                        .block(block)
-                        .scroll((scroll, 0));
+                    let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 }
                 return;
@@ -564,9 +561,7 @@ fn render_output_pane(
                 };
                 #[allow(clippy::cast_possible_truncation)]
                 let scroll = state.scroll_offset as u16;
-                let paragraph = Paragraph::new(text)
-                    .block(block)
-                    .scroll((scroll, 0));
+                let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
                 frame.render_widget(paragraph, area);
                 return;
             }
@@ -748,15 +743,13 @@ fn render_form(
                     label_style,
                 )];
                 if field.spec.required {
-                    label_spans
-                        .push(Span::styled("*", Style::default().fg(theme.error)));
+                    label_spans.push(Span::styled("*", Style::default().fg(theme.error)));
                 }
                 lines.push(Line::from(label_spans));
 
                 // Input row.
                 if field.value.is_empty() {
-                    let placeholder =
-                        field.spec.placeholder.as_deref().unwrap_or("");
+                    let placeholder = field.spec.placeholder.as_deref().unwrap_or("");
                     let ph_style = Style::default().fg(theme.text_dimmed);
                     let cursor = if is_focused { "█" } else { "" };
                     lines.push(Line::from(vec![
@@ -779,10 +772,7 @@ fn render_form(
                 } else {
                     lines.push(Line::from(vec![
                         Span::raw("  ["),
-                        Span::styled(
-                            field.value.as_str(),
-                            Style::default().fg(theme.text),
-                        ),
+                        Span::styled(field.value.as_str(), Style::default().fg(theme.text)),
                         Span::raw("]"),
                     ]));
                 }
@@ -793,8 +783,7 @@ fn render_form(
                     label_style,
                 )];
                 if field.spec.required {
-                    label_spans
-                        .push(Span::styled("*", Style::default().fg(theme.error)));
+                    label_spans.push(Span::styled("*", Style::default().fg(theme.error)));
                 }
                 lines.push(Line::from(label_spans));
 
@@ -859,14 +848,8 @@ fn render_form(
 /// Styled key hint: accent-colored key + dimmed label.
 fn key_hint<'a>(key: &str, label: &str, theme: &Theme) -> Vec<Span<'a>> {
     vec![
-        Span::styled(
-            format!(" {key}"),
-            Style::default().fg(theme.accent).bold(),
-        ),
-        Span::styled(
-            format!(" {label}"),
-            Style::default().fg(theme.text_dimmed),
-        ),
+        Span::styled(format!(" {key}"), Style::default().fg(theme.accent).bold()),
+        Span::styled(format!(" {label}"), Style::default().fg(theme.text_dimmed)),
     ]
 }
 
@@ -895,8 +878,7 @@ fn render_status_bar(
         ];
         // Pad the rest of the bar.
         spans.push(Span::raw(""));
-        let bar = Paragraph::new(Line::from(spans))
-            .style(Style::default().bg(theme.status_bar_bg));
+        let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
         frame.render_widget(bar, area);
         return;
     }
@@ -917,8 +899,8 @@ fn render_status_bar(
                     Style::default().fg(theme.accent).bold(),
                 ),
             ];
-            let bar = Paragraph::new(Line::from(spans))
-                .style(Style::default().bg(theme.status_bar_bg));
+            let bar =
+                Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
             frame.render_widget(bar, area);
             return;
         }
@@ -989,10 +971,7 @@ fn render_status_bar(
                                 .plugin_output
                                 .as_ref()
                                 .map_or("output", |o| o.title.as_str());
-                            let n = state
-                                .plugin_output
-                                .as_ref()
-                                .map_or(0, |o| o.items.len());
+                            let n = state.plugin_output.as_ref().map_or(0, |o| o.items.len());
                             if n > 0 {
                                 spans.push(Span::styled(
                                     format!(" {name} — {n} items"),
@@ -1015,18 +994,12 @@ fn render_status_bar(
         }
     }
 
-    let bar =
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
+    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
     frame.render_widget(bar, area);
 }
 
 /// Render a centered popup with categorized actions and key hints.
-fn render_power_menu(
-    frame: &mut Frame,
-    menu: &PowerMenuState,
-    theme: &Theme,
-    area: Rect,
-) {
+fn render_power_menu(frame: &mut Frame, menu: &PowerMenuState, theme: &Theme, area: Rect) {
     const COLS: usize = 3;
     const COL_WIDTH: u16 = 18;
 
@@ -1120,12 +1093,7 @@ fn render_power_menu(
 ///
 /// Shows all built-in presets; the selected one is highlighted. Navigating
 /// with j/k swaps the live theme before this popup is drawn.
-fn render_theme_picker(
-    frame: &mut Frame,
-    picker: &ThemePickerState,
-    theme: &Theme,
-    area: Rect,
-) {
+fn render_theme_picker(frame: &mut Frame, picker: &ThemePickerState, theme: &Theme, area: Rect) {
     let presets = crate::config::PRESET_NAMES;
     #[allow(clippy::cast_possible_truncation)]
     let popup_height = (presets.len() as u16 + 4).min(area.height.saturating_sub(2));
@@ -1170,10 +1138,7 @@ fn render_theme_picker(
     // Split inner: list rows + footer hint.
     let inner_chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
     let list = List::new(items);

@@ -147,9 +147,10 @@ impl PluginEngine {
                 secrets,
                 PLUGIN_LIST.scope(
                     all_plugins,
-                    INVOKE_DEPTH.scope(0, async move {
-                        plugin.execute_with_form(form_values).await
-                    }),
+                    INVOKE_DEPTH.scope(
+                        0,
+                        async move { plugin.execute_with_form(form_values).await },
+                    ),
                 ),
             ));
             let result = match handle.await {
@@ -225,10 +226,8 @@ impl PluginEngine {
             std::path::Path::to_path_buf,
         );
         let timeout = meta.timeout;
-        let store_path = crate::plugin::store::store_path_for(
-            &meta.name,
-            meta.plugin_group.as_deref(),
-        );
+        let store_path =
+            crate::plugin::store::store_path_for(&meta.name, meta.plugin_group.as_deref());
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
@@ -395,7 +394,11 @@ mod tests {
     #[tokio::test]
     async fn sends_started_then_finished_events() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx, std::collections::HashMap::new());
+        let engine = PluginEngine::new(
+            vec![Arc::new(MockPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+        );
         engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
@@ -421,7 +424,11 @@ mod tests {
     #[tokio::test]
     async fn propagates_plugin_error() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(FailPlugin(test_metadata()))], tx, std::collections::HashMap::new());
+        let engine = PluginEngine::new(
+            vec![Arc::new(FailPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+        );
         engine.execute(0);
 
         let _ = rx.recv().await; // PluginStarted
@@ -447,7 +454,11 @@ mod tests {
     #[tokio::test]
     async fn panic_in_plugin_sends_finished_with_error() {
         let (tx, mut rx) = mpsc::channel(4);
-        let engine = PluginEngine::new(vec![Arc::new(PanicPlugin(test_metadata()))], tx, std::collections::HashMap::new());
+        let engine = PluginEngine::new(
+            vec![Arc::new(PanicPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+        );
         engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
@@ -473,7 +484,11 @@ mod tests {
     #[tokio::test]
     async fn execute_all_sends_prefetch_source() {
         let (tx, mut rx) = mpsc::channel(8);
-        let engine = PluginEngine::new(vec![Arc::new(MockPlugin(test_metadata()))], tx, std::collections::HashMap::new());
+        let engine = PluginEngine::new(
+            vec![Arc::new(MockPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+        );
         engine.execute_all();
 
         let event1 = rx.recv().await.unwrap();

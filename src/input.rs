@@ -126,9 +126,7 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
             Some(Action::ToggleDescriptions)
         }
         // Power menu (which-key style overlay).
-        KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => {
-            Some(Action::PowerMenuOpen)
-        }
+        KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => Some(Action::PowerMenuOpen),
         // G → jump to last item.
         KeyCode::Char('G') => Some(Action::GoToLast),
         // g → start pending-g sequence (gg = jump to first).
@@ -208,9 +206,7 @@ fn handle_action_palette(event: KeyEvent) -> Option<Action> {
         KeyCode::Enter => Some(Action::PaletteSelect),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::PaletteDismiss),
         KeyCode::Backspace | KeyCode::Delete => Some(Action::PaletteBackspace),
-        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char(c) if !c.is_control() => Some(Action::PaletteSearch(c)),
         _ => None,
     }
@@ -299,9 +295,7 @@ fn handle_form_input(event: KeyEvent) -> Option<Action> {
         KeyCode::Up => Some(Action::FormSelectPrev),
         KeyCode::Down => Some(Action::FormSelectNext),
         KeyCode::Char(' ') => Some(Action::FormToggle),
-        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char(c) if !c.is_control() => Some(Action::FormInput(c)),
         _ => None,
     }
@@ -328,9 +322,7 @@ fn handle_theme_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Char('k') | KeyCode::Up => Some(Action::MoveUp),
         KeyCode::Enter => Some(Action::ThemePickerClose { confirmed: true }),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::ThemePickerClose { confirmed: false }),
-        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         _ => None,
     }
 }

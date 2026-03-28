@@ -77,8 +77,7 @@ impl ScriptPlugin {
         }
 
         if let Some(values) = form_values {
-            let form_json =
-                serde_json::to_string(&values).unwrap_or_else(|_| "{}".to_string());
+            let form_json = serde_json::to_string(&values).unwrap_or_else(|_| "{}".to_string());
             cmd.env("LARK_FORM_JSON", &form_json);
         }
 

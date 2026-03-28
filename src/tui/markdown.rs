@@ -36,9 +36,7 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                         HeadingLevel::H2 => Style::default()
                             .fg(theme.accent)
                             .add_modifier(Modifier::BOLD),
-                        _ => Style::default()
-                            .fg(theme.text)
-                            .add_modifier(Modifier::BOLD),
+                        _ => Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                     };
                     style_stack.push(style);
                 }
@@ -59,10 +57,7 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                     code_block_buf.clear();
                     code_block_lang = match kind {
                         pulldown_cmark::CodeBlockKind::Fenced(lang) => {
-                            lang.split_whitespace()
-                                .next()
-                                .unwrap_or("")
-                                .to_string()
+                            lang.split_whitespace().next().unwrap_or("").to_string()
                         }
                         pulldown_cmark::CodeBlockKind::Indented => String::new(),
                     };
@@ -85,8 +80,10 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                         lines.push(Line::from(std::mem::take(&mut current_spans)));
                     }
                     let indent = "  ".repeat(list_depth);
-                    current_spans
-                        .push(Span::styled(format!("{indent}• "), current_style(&style_stack)));
+                    current_spans.push(Span::styled(
+                        format!("{indent}• "),
+                        current_style(&style_stack),
+                    ));
                 }
                 Tag::BlockQuote(_) => {
                     in_blockquote = true;
@@ -117,11 +114,10 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                         }
                     } else {
                         // Syntax-highlighted code.
-                        let highlighted =
-                            crate::tui::highlight::highlight_code(
-                                &code_block_buf,
-                                &code_block_lang,
-                            );
+                        let highlighted = crate::tui::highlight::highlight_code(
+                            &code_block_buf,
+                            &code_block_lang,
+                        );
                         lines.extend(highlighted);
                     }
                     lines.push(Line::raw("")); // spacing after code block
@@ -160,8 +156,7 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                 } else {
                     let style = current_style(&style_stack);
                     let prefix = if in_blockquote { "│ " } else { "" };
-                    current_spans
-                        .push(Span::styled(format!("{prefix}{text}"), style));
+                    current_spans.push(Span::styled(format!("{prefix}{text}"), style));
                 }
             }
 

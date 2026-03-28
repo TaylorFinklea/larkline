@@ -629,8 +629,7 @@ impl ThemeConfig {
             highlight_bg: parse_color(base.highlight_bg).expect("preset colors are always valid"),
             highlight_fg: parse_color(base.highlight_fg).expect("preset colors are always valid"),
             error: parse_color(base.error).expect("preset colors are always valid"),
-            status_bar_bg: parse_color(base.status_bar_bg)
-                .expect("preset colors are always valid"),
+            status_bar_bg: parse_color(base.status_bar_bg).expect("preset colors are always valid"),
         }
     }
 }

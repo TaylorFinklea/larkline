@@ -93,11 +93,7 @@ impl PluginStore {
     }
 
     /// Set a key-value pair. Returns an error if the resulting store would exceed 1 MB.
-    pub fn set(
-        &mut self,
-        key: String,
-        value: serde_json::Value,
-    ) -> Result<(), StoreError> {
+    pub fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), StoreError> {
         let old = self.data.insert(key.clone(), value);
 
         // Check total serialized size.
@@ -154,7 +150,13 @@ fn sanitize_name(name: &str) -> String {
     let lowered = name.to_lowercase();
     let replaced: String = lowered
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     // Collapse runs of underscores.

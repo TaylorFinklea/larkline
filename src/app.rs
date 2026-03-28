@@ -535,7 +535,10 @@ impl App {
                             self.state.form_state.is_some(),
                             self.state.action_palette.is_some(),
                             self.state.theme_picker.is_some(),
-                            self.state.power_menu.as_ref().map(|m| m.categories.as_slice()),
+                            self.state
+                                .power_menu
+                                .as_ref()
+                                .map(|m| m.categories.as_slice()),
                             self.state.pending_g,
                         ) {
                             // Clear pending_g for any action except PendingG itself.
@@ -689,10 +692,8 @@ impl App {
                         Ok(output) => {
                             // Record to command history on successful execution.
                             if let Some(meta) = self.state.plugins.get(plugin_index) {
-                                let plugin_name = meta
-                                    .plugin_group
-                                    .as_deref()
-                                    .unwrap_or(&meta.name);
+                                let plugin_name =
+                                    meta.plugin_group.as_deref().unwrap_or(&meta.name);
                                 crate::history::record(plugin_name, &meta.name);
                             }
 
@@ -766,10 +767,7 @@ impl App {
 
         // Auto-dismiss power menu when any other action fires from it.
         if self.state.power_menu.is_some()
-            && !matches!(
-                action,
-                Action::PowerMenuOpen | Action::PowerMenuDismiss
-            )
+            && !matches!(action, Action::PowerMenuOpen | Action::PowerMenuDismiss)
         {
             self.state.power_menu = None;
         }
@@ -1037,19 +1035,13 @@ impl App {
                     .plugin_output
                     .as_ref()
                     .is_some_and(|o| !o.columns.is_empty());
-                let has_markdown = self
-                    .state
-                    .plugin_output
-                    .as_ref()
-                    .is_some_and(|o| {
-                        o.output_format.as_deref() == Some("markdown") && o.raw_text.is_some()
-                    });
+                let has_markdown = self.state.plugin_output.as_ref().is_some_and(|o| {
+                    o.output_format.as_deref() == Some("markdown") && o.raw_text.is_some()
+                });
                 self.state.output_mode = match self.state.output_mode {
                     OutputMode::List => OutputMode::RawText,
                     OutputMode::RawText if has_columns => OutputMode::Table,
-                    OutputMode::RawText | OutputMode::Table if has_markdown => {
-                        OutputMode::Markdown
-                    }
+                    OutputMode::RawText | OutputMode::Table if has_markdown => OutputMode::Markdown,
                     OutputMode::RawText | OutputMode::Table | OutputMode::Markdown => {
                         OutputMode::List
                     }
@@ -1071,11 +1063,7 @@ impl App {
                             id: Some("_copy_label".to_string()),
                             label: "Copy Label".to_string(),
                             kind: ActionKind::Clipboard,
-                            args: vec![item
-                                .copy_text
-                                .as_ref()
-                                .unwrap_or(&item.label)
-                                .clone()],
+                            args: vec![item.copy_text.as_ref().unwrap_or(&item.label).clone()],
                             confirm: false,
                         });
                         actions.push(ItemAction {
@@ -1147,12 +1135,7 @@ impl App {
                 if self.state.mode == Mode::ViewOutput {
                     let text = self
                         .selected_output_item()
-                        .map(|item| {
-                            item.copy_text
-                                .as_ref()
-                                .unwrap_or(&item.label)
-                                .clone()
-                        });
+                        .map(|item| item.copy_text.as_ref().unwrap_or(&item.label).clone());
                     if let Some(text) = text {
                         copy_and_flash(&text, &mut self.state);
                     }
@@ -1238,15 +1221,11 @@ impl App {
                         .and_then(|item| item.url.clone());
                     if let Some(url) = url {
                         open_url(&url);
-                        self.state.status_message = Some((
-                            format!("Opened: {url}"),
-                            std::time::Instant::now(),
-                        ));
+                        self.state.status_message =
+                            Some((format!("Opened: {url}"), std::time::Instant::now()));
                     } else {
-                        self.state.status_message = Some((
-                            "No URL on this item".to_string(),
-                            std::time::Instant::now(),
-                        ));
+                        self.state.status_message =
+                            Some(("No URL on this item".to_string(), std::time::Instant::now()));
                     }
                 }
             }
@@ -1270,7 +1249,10 @@ impl App {
             Action::FormInput(c) => {
                 if let Some(ref mut form) = self.state.form_state {
                     if let Some(field) = form.fields.get_mut(form.focused) {
-                        if matches!(field.spec.field_type, crate::plugin::traits::FieldType::Text) {
+                        if matches!(
+                            field.spec.field_type,
+                            crate::plugin::traits::FieldType::Text
+                        ) {
                             field.value.insert(field.cursor, c);
                             field.cursor += c.len_utf8();
                         }
@@ -1281,8 +1263,10 @@ impl App {
             Action::FormBackspace => {
                 if let Some(ref mut form) = self.state.form_state {
                     if let Some(field) = form.fields.get_mut(form.focused) {
-                        if matches!(field.spec.field_type, crate::plugin::traits::FieldType::Text)
-                            && field.cursor > 0
+                        if matches!(
+                            field.spec.field_type,
+                            crate::plugin::traits::FieldType::Text
+                        ) && field.cursor > 0
                         {
                             // Find the previous char boundary.
                             let prev = field.value[..field.cursor]
@@ -1329,8 +1313,7 @@ impl App {
                             field.spec.field_type
                         {
                             if !options.is_empty() {
-                                field.selected_option =
-                                    (field.selected_option + 1) % options.len();
+                                field.selected_option = (field.selected_option + 1) % options.len();
                                 field.value = options[field.selected_option].clone();
                             }
                         }
@@ -1398,27 +1381,22 @@ impl App {
                                 &meta.name,
                                 meta.plugin_group.as_deref(),
                             );
-                            let mut store =
-                                crate::plugin::store::PluginStore::load(store_path);
+                            let mut store = crate::plugin::store::PluginStore::load(store_path);
                             for field in &form.fields {
                                 let value = match field.spec.field_type {
                                     crate::plugin::traits::FieldType::Toggle => {
                                         if field.toggled { "true" } else { "false" }.to_string()
                                     }
-                                    crate::plugin::traits::FieldType::Select {
-                                        ref options,
-                                    } => options
-                                        .get(field.selected_option)
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                    crate::plugin::traits::FieldType::Text => {
-                                        field.value.clone()
+                                    crate::plugin::traits::FieldType::Select { ref options } => {
+                                        options
+                                            .get(field.selected_option)
+                                            .cloned()
+                                            .unwrap_or_default()
                                     }
+                                    crate::plugin::traits::FieldType::Text => field.value.clone(),
                                 };
-                                let _ = store.set(
-                                    field.spec.id.clone(),
-                                    serde_json::Value::String(value),
-                                );
+                                let _ = store
+                                    .set(field.spec.id.clone(), serde_json::Value::String(value));
                             }
                             if let Err(e) = store.save() {
                                 tracing::warn!(error = %e, "failed to save plugin settings");
@@ -1497,31 +1475,29 @@ impl App {
                 self.state.pending_g = true;
             }
 
-            Action::GoToFirst => {
-                match self.state.mode {
-                    Mode::Unified => {
-                        if let Some(first) = self
-                            .state
-                            .unified_rows
-                            .iter()
-                            .position(UnifiedRow::is_selectable)
-                        {
-                            self.state.unified_selected = first;
-                            self.sync_preview_index();
-                        }
-                    }
-                    Mode::ViewOutput => {
-                        if matches!(
-                            self.state.output_mode,
-                            OutputMode::Markdown | OutputMode::RawText
-                        ) {
-                            self.state.scroll_offset = 0;
-                        } else {
-                            self.state.output_selected = 0;
-                        }
+            Action::GoToFirst => match self.state.mode {
+                Mode::Unified => {
+                    if let Some(first) = self
+                        .state
+                        .unified_rows
+                        .iter()
+                        .position(UnifiedRow::is_selectable)
+                    {
+                        self.state.unified_selected = first;
+                        self.sync_preview_index();
                     }
                 }
-            }
+                Mode::ViewOutput => {
+                    if matches!(
+                        self.state.output_mode,
+                        OutputMode::Markdown | OutputMode::RawText
+                    ) {
+                        self.state.scroll_offset = 0;
+                    } else {
+                        self.state.output_selected = 0;
+                    }
+                }
+            },
 
             Action::GoToLast => {
                 match self.state.mode {
@@ -1610,13 +1586,15 @@ impl App {
                                 let default = stored
                                     .or_else(|| spec.default_value.clone())
                                     .unwrap_or_default();
-                                let selected_option = if let crate::plugin::traits::FieldType::Select { ref options } =
-                                    spec.field_type
-                                {
-                                    options.iter().position(|o| o == &default).unwrap_or(0)
-                                } else {
-                                    0
-                                };
+                                let selected_option =
+                                    if let crate::plugin::traits::FieldType::Select {
+                                        ref options,
+                                    } = spec.field_type
+                                    {
+                                        options.iter().position(|o| o == &default).unwrap_or(0)
+                                    } else {
+                                        0
+                                    };
                                 let toggled = default == "true";
                                 let cursor = default.len();
                                 FormFieldState {
@@ -1755,10 +1733,7 @@ impl App {
                         PowerMenuItem {
                             key: 'O',
                             key_hint: "O".to_string(),
-                            label: format!(
-                                "Sort: {}",
-                                self.state.sort_mode.next().label()
-                            ),
+                            label: format!("Sort: {}", self.state.sort_mode.next().label()),
                             action: Action::CycleSort,
                         },
                         PowerMenuItem {
@@ -2045,7 +2020,10 @@ impl App {
         if self.state.output_filtered_indices.is_empty() && self.state.output_query.is_empty() {
             items.get(self.state.output_selected)
         } else {
-            let real_index = *self.state.output_filtered_indices.get(self.state.output_selected)?;
+            let real_index = *self
+                .state
+                .output_filtered_indices
+                .get(self.state.output_selected)?;
             items.get(real_index)
         }
     }

@@ -357,7 +357,10 @@ mod tests {
         assert_eq!(form.submit_label.as_deref(), Some("Create"));
         assert!(form.fields[0].required);
         assert!(matches!(form.fields[0].field_type, FieldType::Text));
-        assert!(matches!(form.fields[1].field_type, FieldType::Select { .. }));
+        assert!(matches!(
+            form.fields[1].field_type,
+            FieldType::Select { .. }
+        ));
         assert!(matches!(form.fields[2].field_type, FieldType::Toggle));
     }
 

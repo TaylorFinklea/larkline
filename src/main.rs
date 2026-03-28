@@ -158,7 +158,9 @@ async fn invoke_plugin(name: &str) -> Result<()> {
 /// Handle `lark secret set|list|delete` subcommands.
 fn handle_secret_command(args: &[String]) -> Result<()> {
     if !cfg!(target_os = "macos") {
-        anyhow::bail!("Secret management requires macOS Keychain. Use ~/.config/larkline/.env instead.");
+        anyhow::bail!(
+            "Secret management requires macOS Keychain. Use ~/.config/larkline/.env instead."
+        );
     }
 
     let sub = args.first().map(String::as_str);

@@ -136,7 +136,9 @@ pub struct DiscoveredPlugin {
 
 fn setting_to_form_field(s: &ManifestSetting) -> FormField {
     let field_type = match s.field_type.as_str() {
-        "select" => FieldType::Select { options: s.options.clone() },
+        "select" => FieldType::Select {
+            options: s.options.clone(),
+        },
         "toggle" => FieldType::Toggle,
         _ => FieldType::Text,
     };
@@ -206,7 +208,11 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                 quickkey: None,
                 cache: p.cache.unwrap_or(true),
                 secrets: p.secrets,
-                settings_spec: manifest.settings.iter().map(setting_to_form_field).collect(),
+                settings_spec: manifest
+                    .settings
+                    .iter()
+                    .map(setting_to_form_field)
+                    .collect(),
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -225,7 +231,11 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
         let plugin_default_streaming = p.streaming.unwrap_or(false);
         let plugin_default_prefetch = p.prefetch.unwrap_or(false); // commands default lazy
         let plugin_default_cache = p.cache.unwrap_or(true);
-        let settings_spec: Vec<_> = manifest.settings.iter().map(setting_to_form_field).collect();
+        let settings_spec: Vec<_> = manifest
+            .settings
+            .iter()
+            .map(setting_to_form_field)
+            .collect();
 
         let discovered = manifest
             .commands
