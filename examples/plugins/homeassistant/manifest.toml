@@ -1,7 +1,7 @@
 [plugin]
 name = "Home Assistant"
-description = "Control your smart home — lights, switches, scenes, automations"
-version = "0.1.0"
+description = "Control your smart home — lights, switches, scenes, automations, climate, media"
+version = "0.2.0"
 author = "larkline"
 icon = "🏠"
 icon_nerd = "󰟐"
@@ -18,9 +18,27 @@ default = "http://homeassistant.local:8123"
 name = "Devices"
 description = "All entities with current state"
 entry = "devices.lua"
-timeout_seconds = 10
+timeout_seconds = 15
 prefetch = true
 quickkey = "ha"
+
+[[commands]]
+name = "Lights"
+description = "Light control with brightness and color temp"
+entry = "lights.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Climate"
+description = "Thermostats — temperature and HVAC mode"
+entry = "climate.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Media"
+description = "Media players — play/pause, volume, source"
+entry = "media.lua"
+timeout_seconds = 10
 
 [[commands]]
 name = "Toggle"
@@ -32,6 +50,12 @@ timeout_seconds = 10
 name = "Scenes"
 description = "Activate a scene"
 entry = "scenes.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Scripts"
+description = "Run Home Assistant scripts"
+entry = "scripts.lua"
 timeout_seconds = 10
 
 [[commands]]
