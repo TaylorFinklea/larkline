@@ -23,12 +23,14 @@ local function ha_headers(token)
 end
 
 local function friendly_name(entity)
-    if entity.attributes and entity.attributes.friendly_name then return entity.attributes.friendly_name end
-    return entity.entity_id
+    if entity.attributes and type(entity.attributes) == "table" and entity.attributes.friendly_name then
+        return tostring(entity.attributes.friendly_name)
+    end
+    return tostring(entity.entity_id or "unknown")
 end
 
 local function icon_for(entity_id, state)
-    local d = entity_id:match("^([^%.]+)%.")
+    local d = tostring(entity_id):match("^([^%.]+)%.")
     if d == "light" then return state == "on" and "💡" or "🌑"
     elseif d == "switch" then return state == "on" and "🔌" or "⭕"
     elseif d == "fan" then return "🌀"
@@ -55,32 +57,35 @@ lark.register({
         local items = {}
 
         for _, entity in ipairs(states) do
-            local domain = entity.entity_id:match("^([^%.]+)%.")
-            if toggleable[domain] then
-                local name = friendly_name(entity)
-                local state = entity.state or "unknown"
-                local body = lark.json.encode({ entity_id = entity.entity_id })
-                items[#items + 1] = {
-                    label = name,
-                    detail = state .. "  " .. entity.entity_id,
-                    icon = icon_for(entity.entity_id, state),
-                    actions = {
-                        {
-                            label = "Toggle " .. name,
-                            kind = "shell",
-                            args = {
-                                "curl", "-s", "-X", "POST",
-                                url .. "/api/services/" .. domain .. "/toggle",
-                                "-H", "Authorization: Bearer " .. token,
-                                "-H", "Content-Type: application/json",
-                                "-d", body,
-                            },
-                            confirm = true,
+            local eid = entity.entity_id
+            if type(eid) ~= "string" then goto next_toggle end
+            local domain = eid:match("^([^%.]+)%.")
+            if not toggleable[domain] then goto next_toggle end
+
+            local name = friendly_name(entity)
+            local state = tostring(entity.state or "unknown")
+            local body = lark.json.encode({ entity_id = eid })
+            items[#items + 1] = {
+                label = name,
+                detail = state .. "  " .. eid,
+                icon = icon_for(eid, state),
+                actions = {
+                    {
+                        label = "Toggle " .. name,
+                        kind = "shell",
+                        args = {
+                            "curl", "-s", "-X", "POST",
+                            url .. "/api/services/" .. domain .. "/toggle",
+                            "-H", "Authorization: Bearer " .. token,
+                            "-H", "Content-Type: application/json",
+                            "-d", body,
                         },
-                        { label = "Copy entity ID", kind = "clipboard", args = { entity.entity_id } },
+                        confirm = true,
                     },
-                }
-            end
+                    { label = "Copy entity ID", kind = "clipboard", args = { eid } },
+                },
+            }
+            ::next_toggle::
         end
 
         table.sort(items, function(a, b) return a.label < b.label end)

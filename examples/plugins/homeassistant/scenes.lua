@@ -23,8 +23,10 @@ local function ha_headers(token)
 end
 
 local function friendly_name(entity)
-    if entity.attributes and entity.attributes.friendly_name then return entity.attributes.friendly_name end
-    return entity.entity_id
+    if entity.attributes and type(entity.attributes) == "table" and entity.attributes.friendly_name then
+        return tostring(entity.attributes.friendly_name)
+    end
+    return tostring(entity.entity_id or "unknown")
 end
 
 lark.register({
@@ -43,30 +45,33 @@ lark.register({
 
         local items = {}
         for _, entity in ipairs(states) do
-            if entity.entity_id:match("^scene%.") then
-                local name = friendly_name(entity)
-                local body = lark.json.encode({ entity_id = entity.entity_id })
-                items[#items + 1] = {
-                    label = name,
-                    detail = entity.entity_id,
-                    icon = "🎬",
-                    actions = {
-                        {
-                            label = "Activate " .. name,
-                            kind = "shell",
-                            args = {
-                                "curl", "-s", "-X", "POST",
-                                url .. "/api/services/scene/turn_on",
-                                "-H", "Authorization: Bearer " .. token,
-                                "-H", "Content-Type: application/json",
-                                "-d", body,
-                            },
-                            confirm = true,
+            local eid = entity.entity_id
+            if type(eid) ~= "string" then goto next_scene end
+            if not eid:match("^scene%.") then goto next_scene end
+
+            local name = friendly_name(entity)
+            local body = lark.json.encode({ entity_id = eid })
+            items[#items + 1] = {
+                label = name,
+                detail = eid,
+                icon = "🎬",
+                actions = {
+                    {
+                        label = "Activate " .. name,
+                        kind = "shell",
+                        args = {
+                            "curl", "-s", "-X", "POST",
+                            url .. "/api/services/scene/turn_on",
+                            "-H", "Authorization: Bearer " .. token,
+                            "-H", "Content-Type: application/json",
+                            "-d", body,
                         },
-                        { label = "Copy entity ID", kind = "clipboard", args = { entity.entity_id } },
+                        confirm = true,
                     },
-                }
-            end
+                    { label = "Copy entity ID", kind = "clipboard", args = { eid } },
+                },
+            }
+            ::next_scene::
         end
 
         table.sort(items, function(a, b) return a.label < b.label end)

@@ -25,12 +25,14 @@ local function ha_headers(token)
 end
 
 local function friendly_name(entity)
-    if entity.attributes and entity.attributes.friendly_name then return entity.attributes.friendly_name end
-    return entity.entity_id
+    if entity.attributes and type(entity.attributes) == "table" and entity.attributes.friendly_name then
+        return tostring(entity.attributes.friendly_name)
+    end
+    return tostring(entity.entity_id or "unknown")
 end
 
 local function icon_for(entity_id, state)
-    local d = entity_id:match("^([^%.]+)%.")
+    local d = tostring(entity_id):match("^([^%.]+)%.")
     if d == "light" then return state == "on" and "💡" or "🌑"
     elseif d == "switch" then return state == "on" and "🔌" or "⭕"
     elseif d == "binary_sensor" then return state == "on" and "🟢" or "⚪"
@@ -59,8 +61,8 @@ lark.register({
         end
 
         table.sort(states, function(a, b)
-            local da = a.entity_id:match("^([^%.]+)%.") or ""
-            local db = b.entity_id:match("^([^%.]+)%.") or ""
+            local da = tostring(a.entity_id or ""):match("^([^%.]+)%.") or ""
+            local db = tostring(b.entity_id or ""):match("^([^%.]+)%.") or ""
             if da ~= db then return da < db end
             return friendly_name(a) < friendly_name(b)
         end)
@@ -70,35 +72,38 @@ lark.register({
                        climate = true, media_player = true, cover = true, lock = true, fan = true, camera = true }
 
         for _, entity in ipairs(states) do
-            local domain = entity.entity_id:match("^([^%.]+)%.")
-            if show[domain] then
-                local name = friendly_name(entity)
-                local state = entity.state or "unknown"
-                local actions = {
-                    { label = "Copy entity ID", kind = "clipboard", args = { entity.entity_id } },
-                }
-                if domain == "light" or domain == "switch" or domain == "fan" or domain == "cover" or domain == "lock" then
-                    table.insert(actions, 1, {
-                        label = "Toggle",
-                        kind = "shell",
-                        args = {
-                            "curl", "-s", "-X", "POST",
-                            url .. "/api/services/" .. domain .. "/toggle",
-                            "-H", "Authorization: Bearer " .. token,
-                            "-H", "Content-Type: application/json",
-                            "-d", lark.json.encode({ entity_id = entity.entity_id }),
-                        },
-                        confirm = true,
-                    })
-                end
-                items[#items + 1] = {
-                    label = name,
-                    detail = state .. "  " .. entity.entity_id,
-                    icon = icon_for(entity.entity_id, state),
-                    copy_text = entity.entity_id,
-                    actions = actions,
-                }
+            local eid = entity.entity_id
+            if type(eid) ~= "string" then goto next_entity end
+            local domain = eid:match("^([^%.]+)%.")
+            if not show[domain] then goto next_entity end
+
+            local name = friendly_name(entity)
+            local state = tostring(entity.state or "unknown")
+            local actions = {
+                { label = "Copy entity ID", kind = "clipboard", args = { eid } },
+            }
+            if domain == "light" or domain == "switch" or domain == "fan" or domain == "cover" or domain == "lock" then
+                table.insert(actions, 1, {
+                    label = "Toggle",
+                    kind = "shell",
+                    args = {
+                        "curl", "-s", "-X", "POST",
+                        url .. "/api/services/" .. domain .. "/toggle",
+                        "-H", "Authorization: Bearer " .. token,
+                        "-H", "Content-Type: application/json",
+                        "-d", lark.json.encode({ entity_id = eid }),
+                    },
+                    confirm = true,
+                })
             end
+            items[#items + 1] = {
+                label = name,
+                detail = state .. "  " .. eid,
+                icon = icon_for(eid, state),
+                copy_text = eid,
+                actions = actions,
+            }
+            ::next_entity::
         end
 
         if #items == 0 then
