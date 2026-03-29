@@ -1,7 +1,7 @@
 [plugin]
 name = "Home Assistant"
-description = "Control your smart home — lights, switches, scenes, automations, climate, media"
-version = "0.2.0"
+description = "Control your smart home — lights, switches, scenes, automations, climate, media, and more"
+version = "0.3.0"
 author = "larkline"
 icon = "🏠"
 icon_nerd = "󰟐"
@@ -24,8 +24,14 @@ quickkey = "ha"
 
 [[commands]]
 name = "Lights"
-description = "Light control with brightness and color temp"
+description = "Brightness and color temperature control"
 entry = "lights.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Switches"
+description = "Toggle switches on and off"
+entry = "switches.lua"
 timeout_seconds = 10
 
 [[commands]]
@@ -41,8 +47,80 @@ entry = "media.lua"
 timeout_seconds = 10
 
 [[commands]]
+name = "Covers"
+description = "Blinds, curtains, garage doors"
+entry = "covers.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Fans"
+description = "Fan speed control"
+entry = "fans.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Cameras"
+description = "View camera streams"
+entry = "cameras.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Sensors"
+description = "All sensor readings"
+entry = "sensors.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Binary Sensors"
+description = "On/off sensors — motion, doors, windows"
+entry = "binary_sensors.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Batteries"
+description = "Battery levels across all devices"
+entry = "batteries.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Doors"
+description = "Door open/closed status"
+entry = "doors.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Windows"
+description = "Window open/closed status"
+entry = "windows.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Buttons"
+description = "Press button entities"
+entry = "buttons.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Helpers"
+description = "Input booleans, numbers, selects, text, buttons"
+entry = "helpers.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Persons"
+description = "People tracking — home/away status"
+entry = "persons.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Vacuums"
+description = "Robot vacuum control"
+entry = "vacuums.lua"
+timeout_seconds = 10
+
+[[commands]]
 name = "Toggle"
-description = "Toggle a light or switch"
+description = "Quick toggle any light or switch"
 entry = "toggle.lua"
 timeout_seconds = 10
 
