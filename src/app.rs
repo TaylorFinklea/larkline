@@ -1513,11 +1513,17 @@ impl App {
             }
 
             Action::EnterNormalMode => {
-                self.state.vim_mode = VimMode::Normal;
                 self.state.command_input.clear();
-                if self.state.mode == Mode::Unified {
+                if self.state.vim_mode == VimMode::Normal
+                    && self.state.mode == Mode::Unified
+                    && !self.state.query.is_empty()
+                {
+                    // Second Esc in Normal mode: clear search.
                     self.state.query.clear();
                     self.rebuild_unified_list();
+                } else {
+                    // First Esc: just enter Normal mode, keep query.
+                    self.state.vim_mode = VimMode::Normal;
                 }
             }
 

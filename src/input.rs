@@ -136,6 +136,8 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
         // Cycle sort order (O = Shift+O).
         KeyCode::Char('O') => Some(Action::CycleSort),
+        // Esc in Normal mode: clear search query (if any).
+        KeyCode::Esc => Some(Action::EnterNormalMode),
         // Plugin manager (P = Shift+P).
         KeyCode::Char('P') => Some(Action::PluginManagerOpen),
         _ => None,
