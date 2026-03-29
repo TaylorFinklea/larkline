@@ -1,0 +1,34 @@
+[plugin]
+name = "Claude Usage"
+description = "Claude Code API token and cost tracking via ccusage"
+version = "0.1.0"
+author = "larkline"
+icon = "📊"
+icon_nerd = "󰄨"
+category = "dev"
+
+[[commands]]
+name = "Daily"
+description = "Usage by day"
+entry = "daily.lua"
+timeout_seconds = 30
+prefetch = true
+quickkey = "cu"
+
+[[commands]]
+name = "Weekly"
+description = "Usage by week"
+entry = "weekly.lua"
+timeout_seconds = 30
+
+[[commands]]
+name = "Monthly"
+description = "Usage by month"
+entry = "monthly.lua"
+timeout_seconds = 30
+
+[[commands]]
+name = "Sessions"
+description = "Usage by conversation session"
+entry = "sessions.lua"
+timeout_seconds = 30

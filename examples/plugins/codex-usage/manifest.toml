@@ -1,0 +1,27 @@
+[plugin]
+name = "Codex Usage"
+description = "OpenAI Codex token and cost tracking via @ccusage/codex"
+version = "0.1.0"
+author = "larkline"
+icon = "🤖"
+icon_nerd = "󰧑"
+category = "dev"
+
+[[commands]]
+name = "Daily"
+description = "Codex usage by day"
+entry = "daily.lua"
+timeout_seconds = 30
+prefetch = true
+
+[[commands]]
+name = "Monthly"
+description = "Codex usage by month"
+entry = "monthly.lua"
+timeout_seconds = 30
+
+[[commands]]
+name = "Sessions"
+description = "Codex usage by session"
+entry = "sessions.lua"
+timeout_seconds = 30
