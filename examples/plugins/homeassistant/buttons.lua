@@ -71,7 +71,7 @@ lark.register({
                 actions = {
                     { label = "Press", kind = "shell",
                       args = curl_service(url, token, "button/press", lark.json.encode({ entity_id = eid })),
-                      confirm = true },
+                       },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

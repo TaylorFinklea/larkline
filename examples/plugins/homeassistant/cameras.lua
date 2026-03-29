@@ -72,7 +72,7 @@ lark.register({
                 actions = {
                     { label = "Open stream in browser", kind = "shell",
                       args = { "open", stream_url },
-                      confirm = true },
+                       },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

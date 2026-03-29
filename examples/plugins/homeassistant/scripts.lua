@@ -71,7 +71,7 @@ lark.register({
                             "-H", "Content-Type: application/json",
                             "-d", body,
                         },
-                        confirm = true,
+                        
                     },
                     {
                         label = "Open in HA",

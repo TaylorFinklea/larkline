@@ -73,13 +73,13 @@ lark.register({
             local actions = {
                 { label = "Toggle", kind = "shell",
                   args = curl_service(url, token, "fan/toggle", body),
-                  confirm = true },
+                   },
                 { label = "Turn On", kind = "shell",
                   args = curl_service(url, token, "fan/turn_on", body),
-                  confirm = true },
+                   },
                 { label = "Turn Off", kind = "shell",
                   args = curl_service(url, token, "fan/turn_off", body),
-                  confirm = true },
+                   },
             }
 
             -- Speed presets.
@@ -89,7 +89,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "fan/set_percentage",
                         lark.json.encode({ entity_id = eid, percentage = speed })),
-                    confirm = true,
+                    
                 }
             end
 

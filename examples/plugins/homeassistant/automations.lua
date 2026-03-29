@@ -66,7 +66,7 @@ lark.register({
                         "-H", "Content-Type: application/json",
                         "-d", body,
                     },
-                    confirm = true,
+                    
                 },
             }
 
@@ -82,7 +82,7 @@ lark.register({
                     "-H", "Content-Type: application/json",
                     "-d", body,
                 },
-                confirm = true,
+                
             }
 
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }

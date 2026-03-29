@@ -73,13 +73,13 @@ lark.register({
             local actions = {
                 { label = "Toggle", kind = "shell",
                   args = curl_service(url, token, "light/toggle", lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Turn On", kind = "shell",
                   args = curl_service(url, token, "light/turn_on", lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Turn Off", kind = "shell",
                   args = curl_service(url, token, "light/turn_off", lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
             }
 
             -- Brightness presets (25%, 50%, 75%, 100%).
@@ -90,7 +90,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "light/turn_on",
                         lark.json.encode({ entity_id = eid, brightness = bri })),
-                    confirm = true,
+                    
                 }
             end
 
@@ -108,21 +108,21 @@ lark.register({
                         kind = "shell",
                         args = curl_service(url, token, "light/turn_on",
                             lark.json.encode({ entity_id = eid, color_temp_kelvin = 2700 })),
-                        confirm = true,
+                        
                     }
                     actions[#actions + 1] = {
                         label = "Cool White (4000K)",
                         kind = "shell",
                         args = curl_service(url, token, "light/turn_on",
                             lark.json.encode({ entity_id = eid, color_temp_kelvin = 4000 })),
-                        confirm = true,
+                        
                     }
                     actions[#actions + 1] = {
                         label = "Daylight (6500K)",
                         kind = "shell",
                         args = curl_service(url, token, "light/turn_on",
                             lark.json.encode({ entity_id = eid, color_temp_kelvin = 6500 })),
-                        confirm = true,
+                        
                     }
                 end
             end

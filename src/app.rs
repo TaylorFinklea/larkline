@@ -2728,12 +2728,26 @@ fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
             } else {
                 format!("{stdout}{stderr}")
             };
-            state.plugin_output = Some(PluginOutput {
-                title: format!("{cmd} (exit {})", output.status),
-                raw_text: Some(combined),
-                ..Default::default()
-            });
-            state.output_mode = OutputMode::RawText;
+            let trimmed = combined.trim();
+            // If the output is empty or just a JSON empty array/object (typical API response),
+            // show a flash message instead of replacing the output pane.
+            if trimmed.is_empty()
+                || trimmed == "[]"
+                || trimmed == "{}"
+                || trimmed.starts_with('[')
+            {
+                state.status_message = Some((
+                    format!("{cmd} done (exit {})", output.status),
+                    std::time::Instant::now(),
+                ));
+            } else {
+                state.plugin_output = Some(PluginOutput {
+                    title: format!("{cmd} (exit {})", output.status),
+                    raw_text: Some(combined),
+                    ..Default::default()
+                });
+                state.output_mode = OutputMode::RawText;
+            }
         }
         Err(e) => {
             state.plugin_error = Some(format!("shell command failed: {e}"));

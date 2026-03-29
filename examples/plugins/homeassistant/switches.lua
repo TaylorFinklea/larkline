@@ -73,13 +73,13 @@ lark.register({
                 actions = {
                     { label = "Toggle", kind = "shell",
                       args = curl_service(url, token, "switch/toggle", body),
-                      confirm = true },
+                       },
                     { label = "Turn On", kind = "shell",
                       args = curl_service(url, token, "switch/turn_on", body),
-                      confirm = true },
+                       },
                     { label = "Turn Off", kind = "shell",
                       args = curl_service(url, token, "switch/turn_off", body),
-                      confirm = true },
+                       },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

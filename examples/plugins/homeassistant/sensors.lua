@@ -79,7 +79,7 @@ lark.register({
                     { label = "Copy state value", kind = "clipboard", args = { state .. (unit ~= "" and (" " .. unit) or "") } },
                     { label = "Open history in browser", kind = "shell",
                       args = { "open", url .. "/history?entity_id=" .. eid },
-                      confirm = true },
+                       },
                 },
             }
             ::next_label::

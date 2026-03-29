@@ -85,7 +85,7 @@ lark.register({
                             kind = "shell",
                             args = curl_service(url, token, "climate/set_hvac_mode",
                                 lark.json.encode({ entity_id = eid, hvac_mode = mode })),
-                            confirm = true,
+                            
                         }
                     end
                 end
@@ -102,7 +102,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "climate/set_temperature",
                         lark.json.encode({ entity_id = eid, temperature = t })),
-                    confirm = true,
+                    
                 }
             end
 
@@ -113,14 +113,14 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "climate/set_temperature",
                         lark.json.encode({ entity_id = eid, temperature = target_temp + step })),
-                    confirm = true,
+                    
                 }
                 actions[#actions + 1] = {
                     label = "Temp -1°",
                     kind = "shell",
                     args = curl_service(url, token, "climate/set_temperature",
                         lark.json.encode({ entity_id = eid, temperature = target_temp - step })),
-                    confirm = true,
+                    
                 }
             end
 

@@ -94,7 +94,7 @@ lark.register({
                         "-H", "Content-Type: application/json",
                         "-d", lark.json.encode({ entity_id = eid }),
                     },
-                    confirm = true,
+                    
                 })
             end
             items[#items + 1] = {

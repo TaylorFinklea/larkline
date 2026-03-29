@@ -83,27 +83,27 @@ lark.register({
                 { label = "Play/Pause", kind = "shell",
                   args = curl_service(url, token, "media_player/media_play_pause",
                       lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Next Track", kind = "shell",
                   args = curl_service(url, token, "media_player/media_next_track",
                       lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Previous Track", kind = "shell",
                   args = curl_service(url, token, "media_player/media_previous_track",
                       lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Volume Up", kind = "shell",
                   args = curl_service(url, token, "media_player/volume_up",
                       lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Volume Down", kind = "shell",
                   args = curl_service(url, token, "media_player/volume_down",
                       lark.json.encode({ entity_id = eid })),
-                  confirm = true },
+                   },
                 { label = "Mute", kind = "shell",
                   args = curl_service(url, token, "media_player/volume_mute",
                       lark.json.encode({ entity_id = eid, is_volume_mute = true })),
-                  confirm = true },
+                   },
             }
 
             -- Volume presets.
@@ -113,7 +113,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "media_player/volume_set",
                         lark.json.encode({ entity_id = eid, volume_level = pct / 100 })),
-                    confirm = true,
+                    
                 }
             end
 
@@ -127,7 +127,7 @@ lark.register({
                             kind = "shell",
                             args = curl_service(url, token, "media_player/select_source",
                                 lark.json.encode({ entity_id = eid, source = src })),
-                            confirm = true,
+                            
                         }
                     end
                 end
@@ -136,7 +136,7 @@ lark.register({
             actions[#actions + 1] = { label = "Turn Off", kind = "shell",
               args = curl_service(url, token, "media_player/turn_off",
                   lark.json.encode({ entity_id = eid })),
-              confirm = true }
+               }
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }
 
             items[#items + 1] = {

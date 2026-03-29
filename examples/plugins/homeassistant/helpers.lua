@@ -83,7 +83,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "input_boolean/toggle",
                         lark.json.encode({ entity_id = eid })),
-                    confirm = true,
+                    
                 }
             elseif domain == "input_number" then
                 local unit = type(attrs.unit_of_measurement) == "string" and attrs.unit_of_measurement or ""
@@ -104,7 +104,7 @@ lark.register({
                     kind = "shell",
                     args = curl_service(url, token, "input_button/press",
                         lark.json.encode({ entity_id = eid })),
-                    confirm = true,
+                    
                 }
             elseif domain == "input_datetime" then
                 detail = state

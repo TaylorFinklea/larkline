@@ -77,7 +77,7 @@ lark.register({
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                     { label = "Open history in browser", kind = "shell",
                       args = { "open", url .. "/history?entity_id=" .. eid },
-                      confirm = true },
+                       },
                 },
             }
             ::next_label::
