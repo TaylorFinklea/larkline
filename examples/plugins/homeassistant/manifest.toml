@@ -1,7 +1,7 @@
 [plugin]
 name = "Home Assistant"
 description = "Control your smart home — lights, switches, scenes, automations, climate, media, and more"
-version = "0.3.0"
+version = "0.4.0"
 author = "larkline"
 icon = "🏠"
 icon_nerd = "󰟐"
@@ -13,6 +13,25 @@ id = "ha_url"
 label = "Home Assistant URL"
 type = "text"
 default = "http://homeassistant.local:8123"
+
+[[settings]]
+id = "hidden_states"
+label = "Hidden States (comma-separated)"
+type = "text"
+default = "unavailable,unknown"
+
+[[commands]]
+name = "Favorites"
+description = "Your pinned entities"
+entry = "favorites.lua"
+timeout_seconds = 10
+prefetch = true
+
+[[commands]]
+name = "Manage"
+description = "Hide/unhide entities, manage favorites"
+entry = "manage.lua"
+timeout_seconds = 10
 
 [[commands]]
 name = "Devices"

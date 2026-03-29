@@ -51,6 +51,24 @@ lark.register({
         local url, token, err = get_config()
         if err then return err end
 
+        -- Load filters.
+        local hidden_states_raw = lark.store.get("hidden_states") or ""
+        if type(hidden_states_raw) == "string" and hidden_states_raw:sub(1,1) == '"' then
+            hidden_states_raw = hidden_states_raw:sub(2, -2)
+        end
+        local hidden_states_set = {}
+        for s in (tostring(hidden_states_raw)):gmatch("[^,]+") do
+            hidden_states_set[s:match("^%s*(.-)%s*$")] = true
+        end
+        local hidden_entities_raw = lark.store.get("hidden_entities")
+        local hidden_entities_set = {}
+        if type(hidden_entities_raw) == "string" and hidden_entities_raw ~= "" then
+            local hok, hlist = pcall(lark.json.decode, hidden_entities_raw)
+            if hok and type(hlist) == "table" then
+                for _, eid in ipairs(hlist) do hidden_entities_set[eid] = true end
+            end
+        end
+
         local resp = lark.http.get(url .. "/api/states", { headers = ha_headers(token), timeout = 8 })
         if not resp or resp.status ~= 200 then
             local code = resp and resp.status or "no response"
@@ -75,11 +93,13 @@ lark.register({
         for _, entity in ipairs(states) do
             local eid = entity.entity_id
             if type(eid) ~= "string" then goto next_entity end
+            if hidden_entities_set[eid] then goto next_entity end
             local domain = eid:match("^([^%.]+)%.")
             if not show[domain] then goto next_entity end
 
             local name = friendly_name(entity)
             local state = tostring(entity.state or "unknown")
+            if hidden_states_set[state] then goto next_entity end
             local actions = {
                 { label = "Copy entity ID", kind = "clipboard", args = { eid } },
             }
