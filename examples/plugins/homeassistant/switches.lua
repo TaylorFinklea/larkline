@@ -101,9 +101,9 @@ lark.register({
                       args = curl_service(url, token, "switch/turn_off", body),
                        },
                     { label = "⭐ Favorite", kind = "shell",
-                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
+                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
                     { label = "🚫 Hide", kind = "shell",
-                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
+                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

@@ -125,7 +125,7 @@ lark.register({
                 }
             end
             actions[#actions + 1] = { label = "Remove from Favorites", kind = "shell",
-              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "unfavorite", eid } }
+              args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "unfavorite", eid } }
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }
 
             items[#items + 1] = {

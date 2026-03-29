@@ -145,9 +145,9 @@ lark.register({
             end
 
             actions[#actions + 1] = { label = "⭐ Favorite", kind = "shell",
-              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } }
+              args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } }
             actions[#actions + 1] = { label = "🚫 Hide", kind = "shell",
-              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } }
+              args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } }
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }
 
             items[#items + 1] = {
