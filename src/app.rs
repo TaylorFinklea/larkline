@@ -993,6 +993,14 @@ impl App {
                 self.state.copy_menu = None;
                 self.state.form_state = None;
                 self.state.action_palette = None;
+
+                // Two-step Esc for output search: first clear query, then go back.
+                if !self.state.output_query.is_empty() {
+                    self.state.output_query.clear();
+                    self.state.output_searching = false;
+                    self.rebuild_output_filter();
+                    return;
+                }
                 self.reset_output_search();
 
                 if let Some(entry) = self.state.navigation_history.pop() {
@@ -1287,11 +1295,11 @@ impl App {
                 self.rebuild_output_filter();
             }
 
-            Action::OutputClearSearch => {
-                self.state.output_query.clear();
+            Action::OutputExitSearch => {
+                // First Esc: exit search mode, keep filter visible for j/k navigation.
                 self.state.output_searching = false;
-                self.rebuild_output_filter();
             }
+
 
             Action::OpenUrl => {
                 if self.state.mode == Mode::ViewOutput {

@@ -62,8 +62,8 @@ pub enum Action {
     OutputSearch(char),
     /// Delete the last character from the output search query.
     OutputBackspaceSearch,
-    /// Clear output search and exit search mode.
-    OutputClearSearch,
+    /// Exit output search mode but keep the filter visible.
+    OutputExitSearch,
     /// Open the selected item's URL in the system browser.
     OpenUrl,
     /// Toggle plugin description visibility in the unified list.

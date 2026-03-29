@@ -310,7 +310,8 @@ fn handle_form_input(event: KeyEvent) -> Option<Action> {
 fn handle_output_search(event: KeyEvent) -> Option<Action> {
     match event.code {
         KeyCode::Backspace | KeyCode::Delete => Some(Action::OutputBackspaceSearch),
-        KeyCode::Esc | KeyCode::Enter => Some(Action::OutputClearSearch),
+        // Esc exits search mode but keeps the filter; Enter also exits.
+        KeyCode::Esc | KeyCode::Enter => Some(Action::OutputExitSearch),
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         // Navigation still works during search.
         KeyCode::Up => Some(Action::MoveUp),
