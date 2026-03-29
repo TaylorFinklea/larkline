@@ -157,6 +157,10 @@ lark.register({
               args = curl_service(url, token, "media_player/turn_off",
                   lark.json.encode({ entity_id = eid })),
                }
+            actions[#actions + 1] = { label = "⭐ Favorite", kind = "shell",
+              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } }
+            actions[#actions + 1] = { label = "🚫 Hide", kind = "shell",
+              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } }
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }
 
             items[#items + 1] = {

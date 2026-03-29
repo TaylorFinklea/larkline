@@ -92,6 +92,10 @@ lark.register({
                     { label = "Press", kind = "shell",
                       args = curl_service(url, token, "button/press", lark.json.encode({ entity_id = eid })),
                        },
+                    { label = "⭐ Favorite", kind = "shell",
+                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
+                    { label = "🚫 Hide", kind = "shell",
+                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

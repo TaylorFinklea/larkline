@@ -124,6 +124,8 @@ lark.register({
                     args = curl_service(url, token, "script/turn_on", lark.json.encode({ entity_id = eid })),
                 }
             end
+            actions[#actions + 1] = { label = "Remove from Favorites", kind = "shell",
+              args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "unfavorite", eid } }
             actions[#actions + 1] = { label = "Copy entity ID", kind = "clipboard", args = { eid } }
 
             items[#items + 1] = {

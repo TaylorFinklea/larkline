@@ -95,6 +95,10 @@ lark.register({
                 icon = "📊",
                 copy_text = eid,
                 actions = {
+                    { label = "⭐ Favorite", kind = "shell",
+                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
+                    { label = "🚫 Hide", kind = "shell",
+                      args = { "bash", os.getenv("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                     { label = "Copy state value", kind = "clipboard", args = { state .. (unit ~= "" and (" " .. unit) or "") } },
                     { label = "Open history in browser", kind = "shell",
