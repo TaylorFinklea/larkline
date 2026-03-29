@@ -17,9 +17,32 @@ local function fmt_time(iso)
     return iso:match("T(%d+:%d+)") or ""
 end
 
+local function get_since()
+    local raw = lark.store.get("time_range") or "7d"
+    local range = tostring(raw):gsub('^"', ""):gsub('"$', "")
+    if range == "today" then
+        return (lark.exec("date", { "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "3d" then
+        return (lark.exec("date", { "-v-3d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "7d" then
+        return (lark.exec("date", { "-v-7d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "30d" then
+        return (lark.exec("date", { "-v-30d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    end
+    return ""
+end
+
 lark.register({
     on_run = function()
-        local raw = lark.exec("npx", { "ccusage", "blocks", "--json", "--recent", "--order", "desc" })
+        local args = { "ccusage", "blocks", "--json", "--order", "desc" }
+        local since = get_since()
+        if since ~= "" then
+            args[#args + 1] = "--since"
+            args[#args + 1] = since
+        else
+            args[#args + 1] = "--recent"
+        end
+        local raw = lark.exec("npx", args)
         if not raw or raw == "" then
             return { title = "Claude Usage", items = { { label = "ccusage not found — npm i -g ccusage", icon = "!" } } }
         end

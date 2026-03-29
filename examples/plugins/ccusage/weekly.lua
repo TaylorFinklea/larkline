@@ -12,11 +12,33 @@ local function fmt_cost(n)
     return string.format("$%.2f", n)
 end
 
+local function get_since()
+    local raw = lark.store.get("time_range") or "7d"
+    local range = tostring(raw):gsub('^"', ""):gsub('"$', "")
+    if range == "today" then
+        return (lark.exec("date", { "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "3d" then
+        return (lark.exec("date", { "-v-3d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "7d" then
+        return (lark.exec("date", { "-v-7d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    elseif range == "30d" then
+        return (lark.exec("date", { "-v-30d", "+%Y%m%d" }) or ""):match("%d+") or ""
+    end
+    return ""
+end
+
 lark.register({
     on_run = function()
-        local raw = lark.exec("npx", { "ccusage", "weekly", "--json", "--order", "desc" })
+        local args = { "ccusage", "weekly", "--json", "--order", "desc" }
+        local since = get_since()
+        if since ~= "" then
+            args[#args + 1] = "--since"
+            args[#args + 1] = since
+        end
+
+        local raw = lark.exec("npx", args)
         if not raw or raw == "" then
-            return { title = "Claude Usage", items = { { label = "ccusage not found — npm i -g ccusage", icon = "!" } } }
+            return { title = "Claude Usage", items = { { label = "ccusage not found", icon = "!" } } }
         end
 
         local ok, data = pcall(lark.json.decode, raw)
@@ -44,8 +66,9 @@ lark.register({
             return { title = "Claude Usage — Weekly", items = { { label = "No usage data", icon = "📭" } } }
         end
 
+        local range_label = tostring(lark.store.get("time_range") or "7d"):gsub('^"', ""):gsub('"$', "")
         table.insert(items, 1, {
-            label = "Total: " .. fmt_cost(total_cost),
+            label = "Total: " .. fmt_cost(total_cost) .. "  (" .. range_label .. ")",
             detail = #data.weekly .. " weeks",
             icon = "💰",
             copy_text = fmt_cost(total_cost),
