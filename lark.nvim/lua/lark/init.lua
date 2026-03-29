@@ -84,7 +84,8 @@ local function close()
 end
 
 --- Open Lark in a floating terminal.
-function M.open()
+---@param extra_args string|nil  Additional CLI args (e.g. "--query foo")
+function M.open(extra_args)
   -- Close existing window if open.
   close()
 
@@ -104,6 +105,9 @@ function M.open()
   end
 
   local cmd = env_prefix .. M.config.binary
+  if extra_args and extra_args ~= "" then
+    cmd = cmd .. " " .. extra_args
+  end
 
   -- Open terminal in the floating buffer.
   vim.fn.termopen(cmd, {
@@ -132,11 +136,13 @@ function M.toggle()
 end
 
 --- Open Lark with a pre-filled search query.
----@param query string
+---@param query string|nil
 function M.search(query)
-  -- TODO: Once lark supports --query flag, pass it directly.
-  -- For now, just open lark.
-  M.open()
+  if query and query ~= "" then
+    M.open("--query " .. vim.fn.shellescape(query))
+  else
+    M.open()
+  end
 end
 
 --- Setup function for lazy.nvim.

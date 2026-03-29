@@ -59,6 +59,7 @@ Usage: lark [OPTIONS]
 Options:
   --help, -h              Show this help message
   --version               Show version
+  --query <TEXT>          Open with search pre-filled
   --print-alias <SHELL>   Print shell integration (zsh, bash, fish)
 
 Commands:
@@ -374,6 +375,12 @@ async fn main() -> Result<()> {
         return handle_secret_command(&args[2..]);
     }
 
+    // Parse --query flag (pre-fill search on launch).
+    let initial_query = args
+        .iter()
+        .position(|a| a == "--query")
+        .and_then(|i| args.get(i + 1).cloned());
+
     // Generate a commented default config on first run.
     // Errors here are non-fatal — silently fall through.
     if let Err(e) = config::generate_default_if_missing() {
@@ -442,9 +449,11 @@ async fn main() -> Result<()> {
     config::resolve_keychain_secrets(&mut secrets, &declared_keys);
 
     let mut terminal = tui::init()?;
-    let result = app::App::new(plugins, &config, config_warnings, secrets)
-        .run(&mut terminal)
-        .await;
+    let mut app = app::App::new(plugins, &config, config_warnings, secrets);
+    if let Some(query) = initial_query {
+        app.set_initial_query(&query);
+    }
+    let result = app.run(&mut terminal).await;
     tui::restore()?;
 
     result

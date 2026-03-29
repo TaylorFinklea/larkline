@@ -525,6 +525,13 @@ impl App {
         app
     }
 
+    /// Set an initial search query (from `--query` CLI flag).
+    pub fn set_initial_query(&mut self, query: &str) {
+        self.state.query = query.to_string();
+        self.state.vim_mode = VimMode::Insert;
+        self.rebuild_unified_list();
+    }
+
     /// Create an `App` with stub plugins for testing.
     #[cfg(test)]
     pub fn with_stubs() -> Self {
