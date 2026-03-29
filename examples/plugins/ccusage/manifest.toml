@@ -28,6 +28,12 @@ entry = "monthly.lua"
 timeout_seconds = 30
 
 [[commands]]
+name = "Blocks"
+description = "Billing blocks with timestamps and burn rate (last 3 days)"
+entry = "blocks.lua"
+timeout_seconds = 30
+
+[[commands]]
 name = "Sessions"
 description = "Usage by conversation session"
 entry = "sessions.lua"
