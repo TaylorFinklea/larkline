@@ -45,12 +45,13 @@ lark.register({
         if err then return err end
 
         local resp = lark.http.get(url .. "/api/states", { headers = ha_headers(token), timeout = 8 })
-        if not resp or resp == "" then
-            return { title = "Toggle", items = { { label = "Failed to fetch states", icon = "!" } } }
+        if not resp or resp.status ~= 200 then
+            local code = resp and resp.status or "no response"
+            return { title = "Toggle", items = { { label = "HA API error: " .. tostring(code), icon = "!" } } }
         end
-        local states = lark.json.decode(resp)
-        if not states then
-            return { title = "Toggle", items = { { label = "Invalid response", icon = "!" } } }
+        local ok, states = pcall(lark.json.decode, resp.body)
+        if not ok or not states then
+            return { title = "Toggle", items = { { label = "Invalid JSON from HA", icon = "!" } } }
         end
 
         local toggleable = { light = true, switch = true, fan = true, cover = true, lock = true }
