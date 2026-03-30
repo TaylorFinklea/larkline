@@ -1,12 +1,12 @@
 [package]
 name = "larkline"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "The line to all your tools — a keyboard-driven terminal command palette"
-repository = "https://github.com/tfinklea/larkline"
+repository = "https://github.com/TaylorFinklea/larkline"
 license = "GPL-3.0-only"
 rust-version = "1.85"
-homepage = "https://github.com/tfinklea/larkline"
+homepage = "https://github.com/TaylorFinklea/larkline"
 authors = ["Taylor Finklea"]
 keywords = ["cli", "tui", "command-palette", "terminal", "productivity"]
 categories = ["command-line-utilities"]

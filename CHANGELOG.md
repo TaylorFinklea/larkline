@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.3.0
+
+### Plugin Manager
+- **LazyVim-style Plugin Manager** — full-screen tree view (`P` key or Space → P)
+- Enable/disable plugins and individual commands with Space toggle
+- View settings values and secret status (✅ .env/keychain or ❌ NOT SET)
+- Persists enable/disable state across restarts
+- Disabled plugins filtered from the unified list
+
+### Home Assistant (21 commands)
+- 13 new entity commands: Switches, Covers, Fans, Cameras, Sensors, Binary Sensors, Batteries, Doors, Windows, Buttons, Helpers, Persons, Vacuums
+- Lights: brightness presets (25/50/75/100%), color temperature (warm/cool/daylight)
+- Climate: HVAC mode switching, temperature presets and +/- increment
+- Media Players: play/pause, next/prev, volume presets, source selection
+- Scripts: run scripts, open in HA editor
+- ⭐ Favorite and 🚫 Hide actions on every entity
+- Persistent filters: hidden states (default unavailable/unknown), hidden entities
+- Favorites command with domain-appropriate quick actions
+- Shell actions show flash message instead of curl output
+- No more confirmation prompts for API calls
+
+### New Plugins
+- **Claude Usage** — daily/weekly/monthly/blocks/sessions with configurable time range
+- **Codex Usage** — daily/monthly/sessions for OpenAI Codex tracking
+
+### Calendar
+- **My Schedule** — threaded ANSI timeline view of next 14 days with day-of-week headers, vertical threading, color-coded events, and location display
+
+### UX Improvements
+- **Two-step Esc everywhere** — Esc exits search mode (keeps filter), second Esc clears
+- **--query flag** — `lark --query "git"` opens with search pre-filled
+- **Space in form text fields** — now types a space instead of toggling
+- **Auto-detect RawText output mode** — plugins returning raw_text scroll properly
+- Shell actions with empty/JSON output show flash message instead of output pane
+
+### lark.nvim
+- Neovim integration: floating terminal via `:Lark`, `:LarkToggle`, `:LarkSearch`
+- Context passing: `LARK_CWD` (git root), `LARK_FILE`, `LARK_FILETYPE`
+- File Search respects `LARK_CWD` for project-scoped results
+
+### Calculator
+- Rewritten to use `qalc` (libqalculate) with `bc` fallback
+- Supports unit conversions, currency, constants, trig
+
 ## v0.2.0
 
 ### New Plugins (13)
