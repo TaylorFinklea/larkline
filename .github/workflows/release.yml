@@ -86,3 +86,101 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-tap:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Compute SHA256 values
+        id: sha
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "sha_aarch64=$(shasum -a 256 "lark-${TAG}-aarch64-apple-darwin.tar.gz" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_x86_64_mac=$(shasum -a 256 "lark-${TAG}-x86_64-apple-darwin.tar.gz" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "sha_x86_64_linux=$(shasum -a 256 "lark-${TAG}-x86_64-unknown-linux-gnu.tar.gz" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew formula
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.TAP_TOKEN }}
+          script: |
+            const version = '${{ steps.sha.outputs.version }}';
+            const sha_aarch64 = '${{ steps.sha.outputs.sha_aarch64 }}';
+            const sha_x86_64_mac = '${{ steps.sha.outputs.sha_x86_64_mac }}';
+            const sha_x86_64_linux = '${{ steps.sha.outputs.sha_x86_64_linux }}';
+
+            const formula = [
+              '# Homebrew formula for larkline.',
+              '#',
+              '# Install: brew install TaylorFinklea/tap/larkline',
+              '# Binary name: lark',
+              '# After install: lark plugin sync',
+              'class Larkline < Formula',
+              '  desc "The line to all your tools — a keyboard-driven terminal command palette"',
+              '  homepage "https://github.com/TaylorFinklea/larkline"',
+              `  version "${version}"`,
+              '  license "GPL-3.0-only"',
+              '',
+              '  on_macos do',
+              '    if Hardware::CPU.arm?',
+              '      url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-aarch64-apple-darwin.tar.gz"',
+              `      sha256 "${sha_aarch64}"`,
+              '    else',
+              '      url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-x86_64-apple-darwin.tar.gz"',
+              `      sha256 "${sha_x86_64_mac}"`,
+              '    end',
+              '  end',
+              '',
+              '  on_linux do',
+              '    url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-x86_64-unknown-linux-gnu.tar.gz"',
+              `    sha256 "${sha_x86_64_linux}"`,
+              '  end',
+              '',
+              '  def install',
+              '    bin.install "lark"',
+              '  end',
+              '',
+              '  def caveats',
+              '    <<~EOS',
+              '      Run `lark plugin sync` to install the standard plugin library.',
+              '    EOS',
+              '  end',
+              '',
+              '  test do',
+              '    assert_match version.to_s, shell_output("#{bin}/lark --version")',
+              '  end',
+              'end',
+              '',
+            ].join('\n');
+
+            // Get current file SHA for update
+            let fileSha;
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: 'TaylorFinklea',
+                repo: 'homebrew-tap',
+                path: 'Formula/larkline.rb',
+              });
+              fileSha = data.sha;
+            } catch (e) {
+              fileSha = undefined;
+            }
+
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: 'TaylorFinklea',
+              repo: 'homebrew-tap',
+              path: 'Formula/larkline.rb',
+              message: `Update larkline to v${version}`,
+              content: Buffer.from(formula).toString('base64'),
+              sha: fileSha,
+            });
+
+            console.log(`Updated homebrew-tap formula to v${version}`);
