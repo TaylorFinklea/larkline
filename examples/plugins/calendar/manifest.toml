@@ -1,19 +1,25 @@
 [plugin]
 name = "Calendar"
 description = "Upcoming events from Calendar.app"
-version = "0.1.0"
+version = "0.2.0"
 author = "larkline"
 icon = "📅"
 icon_nerd = "󰃭"
 category = "tools"
 
 [[commands]]
+name = "My Schedule"
+description = "Threaded timeline view of upcoming events"
+entry = "schedule.lua"
+quickkey = "ca"
+timeout_seconds = 15
+prefetch = true
+
+[[commands]]
 name = "Today"
 description = "Events for today"
 entry = "today.lua"
-quickkey = "ca"
 timeout_seconds = 10
-prefetch = true
 
 [[commands]]
 name = "Tomorrow"
