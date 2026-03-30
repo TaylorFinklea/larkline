@@ -69,7 +69,10 @@ Commands:
   invoke <NAME>           Execute a plugin by name and print JSON output
   secret set <KEY>        Save a secret to macOS Keychain (prompts for value)
   secret list             List secrets stored in Keychain for larkline plugins
-  secret delete <KEY>     Remove a secret from macOS Keychain"
+  secret delete <KEY>     Remove a secret from macOS Keychain
+  plugin sync             Install/update standard plugins from GitHub
+  plugin list             List installed plugins
+  plugin remove <NAME>    Remove an installed plugin"
     );
 }
 
@@ -254,6 +257,151 @@ fn keychain_has(key: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Standard plugin repo cache location.
+fn plugin_cache_dir() -> std::path::PathBuf {
+    let base = if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        std::path::PathBuf::from(xdg)
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        std::path::PathBuf::from(home).join(".cache")
+    };
+    base.join("larkline").join("standard-plugins")
+}
+
+/// Handle `lark plugin sync|list|remove` subcommands.
+#[allow(clippy::too_many_lines)]
+fn handle_plugin_command(args: &[String]) -> Result<()> {
+    let sub = args.first().map(String::as_str);
+    let plugin_dir = config::default_plugin_dir();
+
+    match sub {
+        Some("sync") => {
+            let cache = plugin_cache_dir();
+            let repo_url = "https://github.com/TaylorFinklea/larkline.git";
+
+            // Clone or update the repo cache.
+            if cache.join(".git").exists() {
+                println!("Updating standard plugin library...");
+                let status = std::process::Command::new("git")
+                    .args(["-C", &cache.to_string_lossy(), "pull", "--ff-only", "-q"])
+                    .status()?;
+                if !status.success() {
+                    // If pull fails, re-clone.
+                    std::fs::remove_dir_all(&cache)?;
+                    let status = std::process::Command::new("git")
+                        .args(["clone", "--depth", "1", "-q", repo_url, &cache.to_string_lossy()])
+                        .status()?;
+                    if !status.success() {
+                        anyhow::bail!("Failed to clone plugin repository");
+                    }
+                }
+            } else {
+                println!("Downloading standard plugin library...");
+                if let Some(parent) = cache.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let status = std::process::Command::new("git")
+                    .args(["clone", "--depth", "1", "-q", repo_url, &cache.to_string_lossy()])
+                    .status()?;
+                if !status.success() {
+                    anyhow::bail!("Failed to clone plugin repository");
+                }
+            }
+
+            // Symlink each plugin from examples/plugins/ to the user's plugin dir.
+            let source_dir = cache.join("examples").join("plugins");
+            if !source_dir.exists() {
+                anyhow::bail!("Plugin source directory not found in cache");
+            }
+
+            std::fs::create_dir_all(&plugin_dir)?;
+
+            let mut installed = 0;
+            let mut skipped = 0;
+            for entry in std::fs::read_dir(&source_dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let target = plugin_dir.join(&name);
+
+                if target.exists() {
+                    skipped += 1;
+                    continue;
+                }
+
+                // Create symlink to cached plugin.
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(entry.path(), &target)?;
+                #[cfg(windows)]
+                std::os::windows::fs::symlink_dir(entry.path(), &target)?;
+
+                installed += 1;
+                println!("  + {}", name.to_string_lossy());
+            }
+
+            println!(
+                "\nDone! {installed} plugins installed, {skipped} already present."
+            );
+            println!("Plugin directory: {}", plugin_dir.display());
+            println!("\nLaunch lark and press R to refresh the plugin list.");
+        }
+
+        Some("list") => {
+            if !plugin_dir.exists() {
+                println!("No plugins installed. Run: lark plugin sync");
+                return Ok(());
+            }
+
+            let mut count = 0;
+            for entry in std::fs::read_dir(&plugin_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                // Only show directories (or symlinks to directories).
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let manifest = path.join("manifest.toml");
+                let status = if manifest.exists() { "✅" } else { "⚠ no manifest" };
+                let link = if path.is_symlink() {
+                    format!(" → {}", std::fs::read_link(&path).unwrap_or_default().display())
+                } else {
+                    String::new()
+                };
+                println!("  {status} {}{link}", name.to_string_lossy());
+                count += 1;
+            }
+
+            if count == 0 {
+                println!("No plugins installed. Run: lark plugin sync");
+            } else {
+                println!("\n{count} plugins in {}", plugin_dir.display());
+            }
+        }
+
+        Some("remove") => {
+            let name = args
+                .get(1)
+                .ok_or_else(|| anyhow::anyhow!("Usage: lark plugin remove <NAME>"))?;
+            let target = plugin_dir.join(name);
+            if !target.exists() {
+                anyhow::bail!("Plugin not found: {name}");
+            }
+            if target.is_symlink() {
+                std::fs::remove_file(&target)?;
+            } else {
+                std::fs::remove_dir_all(&target)?;
+            }
+            println!("Removed plugin: {name}");
+        }
+
+        _ => {
+            anyhow::bail!("Usage: lark plugin <sync|list|remove> [NAME]");
+        }
+    }
+
+    Ok(())
+}
+
 fn generate_manifest(name: &str, entry: &str) -> String {
     format!(
         r#"[plugin]
@@ -373,6 +521,9 @@ async fn main() -> Result<()> {
     }
     if args.get(1).is_some_and(|a| a == "secret") {
         return handle_secret_command(&args[2..]);
+    }
+    if args.get(1).is_some_and(|a| a == "plugin") {
+        return handle_plugin_command(&args[2..]);
     }
 
     // Parse --query flag (pre-fill search on launch).
