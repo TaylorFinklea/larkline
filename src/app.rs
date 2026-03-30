@@ -2420,6 +2420,8 @@ impl App {
             OutputMode::Markdown
         } else if !output.columns.is_empty() {
             OutputMode::Table
+        } else if output.raw_text.is_some() && output.items.is_empty() {
+            OutputMode::RawText
         } else {
             OutputMode::List
         }
