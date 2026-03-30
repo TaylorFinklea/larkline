@@ -143,6 +143,33 @@ fn render_unified_list(
         .unified_rows
         .iter()
         .map(|row| match row {
+            UnifiedRow::Widget {
+                name,
+                icon,
+                summary,
+                group_name,
+                ..
+            } => {
+                let mut spans = Vec::new();
+                if state.show_icons {
+                    spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
+                }
+                spans.push(Span::styled(
+                    name.as_str(),
+                    Style::default().fg(theme.accent).bold(),
+                ));
+                spans.push(Span::styled(
+                    format!("  {summary}"),
+                    Style::default().fg(theme.text),
+                ));
+                if let Some(group) = group_name {
+                    spans.push(Span::styled(
+                        format!("  {group}"),
+                        Style::default().fg(theme.text_dimmed),
+                    ));
+                }
+                ListItem::new(Line::from(spans))
+            }
             UnifiedRow::Command {
                 name,
                 description,

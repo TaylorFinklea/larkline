@@ -27,12 +27,16 @@ description = "Open pull requests you authored"
 entry = "my-prs.lua"
 quickkey = "gp"
 timeout_seconds = 15
+widget = true
+widget_refresh_secs = 60
 
 [[commands]]
 name = "Review Requests"
 description = "PRs requesting your review"
 entry = "reviews.lua"
 timeout_seconds = 15
+widget = true
+widget_refresh_secs = 60
 
 [[commands]]
 name = "Workflow Runs"
@@ -40,3 +44,5 @@ description = "Recent GitHub Actions runs across your repos"
 entry = "workflows.lua"
 quickkey = "gw"
 timeout_seconds = 30
+widget = true
+widget_refresh_secs = 60

@@ -93,6 +93,10 @@ struct ManifestPlugin {
     /// Advisory list of secret env var names this plugin needs.
     #[serde(default)]
     secrets: Vec<String>,
+    /// Show a compact widget summary at the top of the unified list.
+    widget: Option<bool>,
+    /// Widget auto-refresh interval in seconds.
+    widget_refresh_secs: Option<u64>,
 }
 
 /// A single command within a multi-command plugin manifest.
@@ -110,6 +114,8 @@ struct ManifestCommand {
     streaming: Option<bool>,
     prefetch: Option<bool>,
     cache: Option<bool>,
+    widget: Option<bool>,
+    widget_refresh_secs: Option<u64>,
 }
 
 /// Which backend should execute this plugin.
@@ -168,6 +174,7 @@ fn kind_for_entry(entry: &str) -> PluginKind {
 /// Returns one `DiscoveredPlugin` per declared command. Single-entry (legacy) manifests
 /// return a `Vec` with exactly one element. Multi-command manifests return one element
 /// per `[[commands]]` entry.
+#[allow(clippy::too_many_lines)]
 pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, RegistryError> {
     let manifest_path = plugin_dir.join("manifest.toml");
     let contents =
@@ -213,6 +220,8 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                     .iter()
                     .map(setting_to_form_field)
                     .collect(),
+                widget: p.widget.unwrap_or(false),
+                widget_refresh_secs: p.widget_refresh_secs.unwrap_or(60),
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -263,6 +272,10 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                         cache: cmd.cache.unwrap_or(plugin_default_cache),
                         secrets: p.secrets.clone(),
                         settings_spec: settings_spec.clone(),
+                        widget: cmd.widget.unwrap_or(p.widget.unwrap_or(false)),
+                        widget_refresh_secs: cmd
+                            .widget_refresh_secs
+                            .unwrap_or(p.widget_refresh_secs.unwrap_or(60)),
                     },
                     plugin_dir: plugin_dir_buf.clone(),
                     entry: cmd.entry,

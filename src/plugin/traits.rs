@@ -18,6 +18,7 @@ use thiserror::Error;
 
 /// Metadata about a plugin, loaded from its `manifest.toml`.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct PluginMetadata {
     /// Display name shown in the plugin list.
     pub name: String,
@@ -57,6 +58,10 @@ pub struct PluginMetadata {
     /// Settings declared in the manifest. Larkline renders these as a persistent form
     /// accessible from the power menu; submitted values are written to the plugin's store.
     pub settings_spec: Vec<FormField>,
+    /// Show a compact summary widget at the top of the unified list.
+    pub widget: bool,
+    /// Widget auto-refresh interval in seconds (0 = no auto-refresh, default 60).
+    pub widget_refresh_secs: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +435,8 @@ mod tests {
             cache: true,
             secrets: vec![],
             settings_spec: vec![],
+            widget: false,
+            widget_refresh_secs: 0,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }

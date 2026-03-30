@@ -56,6 +56,16 @@ pub enum Mode {
 /// A row in the unified launcher list.
 #[derive(Debug, Clone)]
 pub enum UnifiedRow {
+    /// A compact widget summary row (shown above commands).
+    Widget {
+        plugin_index: usize,
+        name: String,
+        icon: String,
+        /// Compact summary text (e.g., "3 items", "2 dirty repos").
+        summary: String,
+        /// Group name for display.
+        group_name: Option<String>,
+    },
     /// A selectable command row.
     Command {
         /// Index into `AppState::plugins`.
@@ -223,6 +233,8 @@ pub struct AppState {
     pub navigation_history: Vec<NavigationEntry>,
     /// Current sort order for the unified launcher list.
     pub sort_mode: SortMode,
+    /// Last time each widget plugin was refreshed (keyed by `plugin_index`).
+    pub widget_last_refresh: std::collections::HashMap<usize, std::time::Instant>,
     /// Theme preset picker overlay (None = closed).
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
@@ -634,6 +646,39 @@ impl App {
                     self.state.status_message = None;
                 }
             }
+
+            // Auto-refresh widget plugins on their configured interval.
+            if self.state.mode == Mode::Unified {
+                let now = std::time::Instant::now();
+                let due: Vec<usize> = self
+                    .state
+                    .plugins
+                    .iter()
+                    .enumerate()
+                    .filter(|(pidx, meta)| {
+                        meta.widget
+                            && meta.widget_refresh_secs > 0
+                            && now
+                                .duration_since(
+                                    self.state
+                                        .widget_last_refresh
+                                        .get(pidx)
+                                        .copied()
+                                        .unwrap_or(now),
+                                )
+                                .as_secs()
+                                >= meta.widget_refresh_secs
+                    })
+                    .map(|(pidx, _)| pidx)
+                    .collect();
+                if !due.is_empty() {
+                    for pidx in &due {
+                        self.state.widget_last_refresh.insert(*pidx, now);
+                        self.engine.execute(*pidx);
+                    }
+                    self.rebuild_unified_list();
+                }
+            }
         }
 
         Ok(())
@@ -724,23 +769,29 @@ impl App {
                 result,
                 source,
             } => match source {
-                ExecutionSource::Prefetch => match result {
-                    Ok(output) => {
-                        let entry = self
-                            .state
-                            .result_cache
-                            .entry(plugin_index)
-                            .or_insert(CachedResult::Ready(output.clone()));
-                        if matches!(entry, CachedResult::Loading(_)) {
-                            *entry = CachedResult::Ready(output);
+                ExecutionSource::Prefetch => {
+                    match result {
+                        Ok(output) => {
+                            let entry = self
+                                .state
+                                .result_cache
+                                .entry(plugin_index)
+                                .or_insert(CachedResult::Ready(output.clone()));
+                            if matches!(entry, CachedResult::Loading(_)) {
+                                *entry = CachedResult::Ready(output);
+                            }
+                        }
+                        Err(e) => {
+                            self.state
+                                .result_cache
+                                .insert(plugin_index, CachedResult::Error(e.to_string()));
                         }
                     }
-                    Err(e) => {
-                        self.state
-                            .result_cache
-                            .insert(plugin_index, CachedResult::Error(e.to_string()));
+                    // Refresh widget summaries when prefetch results arrive.
+                    if self.state.plugins.get(plugin_index).is_some_and(|m| m.widget) {
+                        self.rebuild_unified_list();
                     }
-                },
+                }
                 ExecutionSource::UserSelected => {
                     let was_revalidating = matches!(
                         self.state.result_cache.get(&plugin_index),
@@ -2537,25 +2588,59 @@ impl App {
         ordered.extend(rest);
 
         let rows = if query.is_empty() {
-            // ── Flat display (empty query) ─────────────────────────────────────────
-            // Emit every command as a flat row carrying its group name inline.
-            // Multi-command plugins show group_name in dimmed text; single-command
-            // plugins (where name == group) omit the badge to avoid redundancy.
-            ordered
-                .iter()
-                .map(|&pidx| {
-                    let meta = &self.state.plugins[pidx];
-                    UnifiedRow::Command {
-                        plugin_index: pidx,
-                        name: meta.name.clone(),
-                        description: meta.description.clone(),
-                        icon: meta.icon.clone(),
-                        quickkey: meta.quickkey.clone(),
-                        group_name: meta.plugin_group.clone(),
-                        match_positions: vec![],
+            // ── Widget rows (empty query only) ────────────────────────────────────
+            let mut rows: Vec<UnifiedRow> = Vec::new();
+            for &pidx in &ordered {
+                let meta = &self.state.plugins[pidx];
+                if !meta.widget {
+                    continue;
+                }
+                // Derive summary from cached output.
+                let summary = match self.state.result_cache.get(&pidx) {
+                    Some(CachedResult::Ready(output)) => {
+                        if output.items.is_empty() {
+                            "ready".to_string()
+                        } else {
+                            let count = output.items.len();
+                            let first = &output.items[0].label;
+                            if count == 1 {
+                                first.clone()
+                            } else {
+                                format!("{first}  +{}", count - 1)
+                            }
+                        }
                     }
-                })
-                .collect()
+                    Some(CachedResult::Loading(_)) => "loading…".to_string(),
+                    Some(CachedResult::Error(e)) => format!("⚠ {}", &e[..e.len().min(30)]),
+                    Some(CachedResult::Revalidating(output)) => {
+                        let count = output.items.len();
+                        format!("{count} items (refreshing…)")
+                    }
+                    None => "…".to_string(),
+                };
+                rows.push(UnifiedRow::Widget {
+                    plugin_index: pidx,
+                    name: meta.name.clone(),
+                    icon: meta.icon.clone(),
+                    summary,
+                    group_name: meta.plugin_group.clone(),
+                });
+            }
+
+            // ── Command rows ──────────────────────────────────────────────────────
+            for &pidx in &ordered {
+                let meta = &self.state.plugins[pidx];
+                rows.push(UnifiedRow::Command {
+                    plugin_index: pidx,
+                    name: meta.name.clone(),
+                    description: meta.description.clone(),
+                    icon: meta.icon.clone(),
+                    quickkey: meta.quickkey.clone(),
+                    group_name: meta.plugin_group.clone(),
+                    match_positions: vec![],
+                });
+            }
+            rows
         } else {
             // ── Global search (non-empty query) ───────────────────────────────────
             // Score each command's "name description" haystack; sort descending; emit flat.
@@ -2628,7 +2713,8 @@ impl App {
             .unified_rows
             .get(self.state.unified_selected)
             .map(|r| match r {
-                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
+                UnifiedRow::Command { plugin_index, .. }
+                | UnifiedRow::Widget { plugin_index, .. } => *plugin_index,
             });
 
         // How many selectable rows were before the old selection (position fallback).
@@ -2670,7 +2756,7 @@ impl App {
                 .enumerate()
                 .filter_map(|(i, r)| match r {
                     UnifiedRow::Command { plugin_index, .. } if *plugin_index == pidx => Some(i),
-                    UnifiedRow::Command { .. } => None,
+                    _ => None,
                 })
                 .next_back(); // last occurrence = canonical position (not Recent duplicate)
             if let Some(pos) = match_pos {
@@ -2700,7 +2786,8 @@ impl App {
             .unified_rows
             .get(self.state.unified_selected)
             .map(|r| match r {
-                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
+                UnifiedRow::Command { plugin_index, .. }
+                | UnifiedRow::Widget { plugin_index, .. } => *plugin_index,
             });
     }
 }
@@ -2829,6 +2916,8 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 cache: true,
                 secrets: vec![],
                 settings_spec: vec![],
+                widget: false,
+                widget_refresh_secs: 0,
             })) as Arc<dyn Plugin>
         }};
     }
@@ -2889,6 +2978,7 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 UnifiedRow::Command { name, .. } => Some(name.as_str()),
+                UnifiedRow::Widget { .. } => None,
             })
             .collect()
     }

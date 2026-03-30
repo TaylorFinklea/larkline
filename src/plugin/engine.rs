@@ -361,6 +361,8 @@ mod tests {
             cache: true,
             secrets: vec![],
             settings_spec: vec![],
+            widget: false,
+            widget_refresh_secs: 0,
         }
     }
 

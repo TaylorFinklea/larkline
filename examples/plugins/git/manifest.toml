@@ -14,6 +14,8 @@ entry = "status.lua"
 quickkey = "gs"
 timeout_seconds = 15
 prefetch = true
+widget = true
+widget_refresh_secs = 30
 
 [[commands]]
 name = "Branches"
