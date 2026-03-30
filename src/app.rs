@@ -1440,7 +1440,10 @@ impl App {
                                 // Space cycles forward in Select fields too.
                                 self.handle_action(Action::FormSelectNext);
                             }
-                            crate::plugin::traits::FieldType::Text => {}
+                            crate::plugin::traits::FieldType::Text => {
+                                // Space in a text field = insert a space character.
+                                self.handle_action(Action::FormInput(' '));
+                            }
                         }
                     }
                 }
