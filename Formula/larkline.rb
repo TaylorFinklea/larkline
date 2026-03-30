@@ -1,11 +1,11 @@
-# Homebrew formula for lark.
+# Homebrew formula for larkline.
 #
 # This file is maintained in the main repo for version control.
-# Copy it to the tap repo (github.com/TaylorFinklea/homebrew-tap) at Formula/lark.rb.
+# Copy it to the tap repo (github.com/TaylorFinklea/homebrew-tap) at Formula/larkline.rb.
 #
-# After tagging a release and downloading the tarballs, update the sha256 values:
-#   shasum -a 256 lark-v<VERSION>-<TARGET>.tar.gz
-class Lark < Formula
+# Install: brew install TaylorFinklea/tap/larkline
+# Binary name: lark
+class Larkline < Formula
   desc "The line to all your tools — a keyboard-driven terminal command palette"
   homepage "https://github.com/TaylorFinklea/larkline"
   version "0.3.0"
