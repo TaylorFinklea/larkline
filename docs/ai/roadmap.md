@@ -60,6 +60,41 @@ Neovim integration that opens Lark as a floating terminal inside Neovim, with co
 - File Search results open directly in Neovim buffers
 - Git plugin actions (checkout branch, etc.) run in Neovim's terminal
 
+### Dashboard Widgets (Priority: High)
+
+Auto-refreshing status widgets at the top of the unified list — like Raycast menu bar items but terminal-native. Commands you use frequently (Git Status, GitHub PRs, Workflow Runs) show live summaries without needing to open them.
+
+**Core idea:**
+- Plugins opt in via a new `widget` field in manifest or command config
+- Widget defines: what data to show (a compact summary), refresh interval (cron-like)
+- Widgets render as a compact row/section above the command list
+- Clicking/entering a widget opens the full command output
+- The prefetch cache already powers background execution — widgets extend this with scheduled re-execution and a compact display format
+
+**Design questions to resolve:**
+- Widget display format: single-line summary? Multi-line card? Configurable?
+- Plugin API: `on_widget()` callback returning a compact summary vs. deriving from existing `on_run()` output (e.g., first N items, item count, status text)
+- Scheduling: per-widget cron string in manifest, or a global "widget refresh" interval?
+- Configuration: which widgets are active should be user-configurable (Plugin Manager?)
+- Layout: horizontal row of widgets at top? Vertical section? Collapsible?
+
+**Example manifest:**
+```toml
+[[commands]]
+name = "Status"
+entry = "status.lua"
+prefetch = true
+widget = true
+widget_refresh = "30s"
+widget_summary = "count"  # or "first", "custom"
+```
+
+**Inspiration:**
+- Raycast menu bar extras (weather, media, batteries — compact, auto-refresh)
+- LazyVim dashboard (recent files, project info at launch)
+- tmux status bar (compact, always-visible info)
+- Datadog/Grafana dashboards (widgets with configurable data sources)
+
 ### Plugin Deep-Dive
 
 Iterate on each plugin individually to bring quality up to Raycast standards:
@@ -73,6 +108,7 @@ Iterate on each plugin individually to bring quality up to Raycast standards:
 - Publish to crates.io (`cargo install larkline`)
 - AUR package for Arch Linux
 - Nix flake
+- Automated release pipeline (done: scripts/release.sh + CI tap update)
 
 ## Constraints
 
