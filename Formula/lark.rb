@@ -14,16 +14,16 @@ class Lark < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "PLACEHOLDER"
+      sha256 "8e4ae52f4ecb5b96314e5a077d3be55fcaaca80830e00b34243321e793e730a6"
     else
       url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "PLACEHOLDER"
+      sha256 "0d4ff0423ce712b69bc49a10e20ea4383b14faced246bbbbbaa01b7c09c3762c"
     end
   end
 
   on_linux do
     url "https://github.com/TaylorFinklea/larkline/releases/download/v#{version}/lark-v#{version}-x86_64-unknown-linux-gnu.tar.gz"
-    sha256 "PLACEHOLDER"
+    sha256 "b5f7b17c530dd606dd8708ac3d52a585554fd3e11f4cb9b5d798d445795b6e3b"
   end
 
   def install
