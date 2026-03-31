@@ -137,4 +137,8 @@ pub enum Action {
     PluginManagerSetSecret,
     /// Delete a secret from Keychain.
     PluginManagerDeleteSecret,
+    /// Move focus to the widget row.
+    WidgetFocusUp,
+    /// Toggle widget row visibility.
+    WidgetToggleVisibility,
 }

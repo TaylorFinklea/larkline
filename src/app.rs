@@ -56,16 +56,6 @@ pub enum Mode {
 /// A row in the unified launcher list.
 #[derive(Debug, Clone)]
 pub enum UnifiedRow {
-    /// A compact widget summary row (shown above commands).
-    Widget {
-        plugin_index: usize,
-        name: String,
-        icon: String,
-        /// Compact summary text (e.g., "3 items", "2 dirty repos").
-        summary: String,
-        /// Group name for display.
-        group_name: Option<String>,
-    },
     /// A selectable command row.
     Command {
         /// Index into `AppState::plugins`.
@@ -235,6 +225,14 @@ pub struct AppState {
     pub sort_mode: SortMode,
     /// Last time each widget plugin was refreshed (keyed by `plugin_index`).
     pub widget_last_refresh: std::collections::HashMap<usize, std::time::Instant>,
+    /// Whether the widget dashboard row is visible.
+    pub widgets_visible: bool,
+    /// Whether focus is on the widget row (vs the command list).
+    pub widget_focused: bool,
+    /// Index of the currently selected widget card.
+    pub widget_selected: usize,
+    /// Plugin indices of active widget commands (built at startup, refreshed on R).
+    pub widget_indices: Vec<usize>,
     /// Theme preset picker overlay (None = closed).
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
@@ -510,6 +508,7 @@ impl App {
             pm_config: crate::config::load_plugin_manager_config(),
         };
         app.rebuild_unified_list();
+        app.rebuild_widget_indices();
 
         // Apply default_plugin pre-selection: find the first Command row with the named plugin.
         if let Some(ref name) = config.general.default_plugin {
@@ -891,6 +890,10 @@ impl App {
             Action::Quit => self.state.should_quit = true,
 
             Action::MoveUp => {
+                // Widget focused: k stays in widgets (no-op at top).
+                if self.state.widget_focused {
+                    return;
+                }
                 if let Some(ref mut pm) = self.state.plugin_manager {
                     if self.state.mode == Mode::PluginManager {
                         pm.selected = pm.selected.saturating_sub(1);
@@ -938,6 +941,11 @@ impl App {
             }
 
             Action::MoveDown => {
+                // Widget focused: j goes back to command list.
+                if self.state.widget_focused {
+                    self.state.widget_focused = false;
+                    return;
+                }
                 if let Some(ref mut pm) = self.state.plugin_manager {
                     if self.state.mode == Mode::PluginManager {
                         let max = pm.rows.len().saturating_sub(1);
@@ -1008,6 +1016,14 @@ impl App {
             }
 
             Action::Select => {
+                // Widget focused: l/Enter → next card.
+                if self.state.widget_focused {
+                    let max = self.state.widget_indices.len().saturating_sub(1);
+                    if self.state.widget_selected < max {
+                        self.state.widget_selected += 1;
+                    }
+                    return;
+                }
                 if self.state.mode == Mode::ViewOutput {
                     // In ViewOutput: 0 actions → URL fallback, 1 → run it,
                     // 2+ → open the action palette.
@@ -1040,6 +1056,13 @@ impl App {
             }
 
             Action::Back => {
+                // Widget focused: h/Back moves to previous card.
+                if self.state.widget_focused {
+                    if self.state.widget_selected > 0 {
+                        self.state.widget_selected -= 1;
+                    }
+                    return;
+                }
                 // Clear ephemeral overlays.
                 self.state.copy_menu = None;
                 self.state.form_state = None;
@@ -1899,6 +1922,20 @@ impl App {
                 }
             }
 
+            Action::WidgetFocusUp => {
+                if self.state.widgets_visible && !self.state.widget_indices.is_empty() {
+                    self.state.widget_focused = true;
+                    self.state.vim_mode = VimMode::Normal;
+                }
+            }
+
+            Action::WidgetToggleVisibility => {
+                if !self.state.widget_indices.is_empty() {
+                    self.state.widgets_visible = !self.state.widgets_visible;
+                    self.state.widget_focused = false;
+                }
+            }
+
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
                     // Resolve icons based on configured icon set.
@@ -2534,11 +2571,23 @@ impl App {
 
     /// Rebuild the unified launcher list from plugin metadata.
     ///
-    /// - **Empty query:** flat `Command` rows ordered by favorites then alphabetically.
-    ///   Multi-command plugins set `group_name` so the plugin name appears inline (dimmed).
-    /// - **Non-empty query:** globally-ranked flat `Command` list scored by nucleo on
-    ///   `name + group + description`. Each `Command` carries a `group_name` badge and
-    ///   `match_positions` for character-level highlighting.
+    /// Rebuild the list of widget plugin indices.
+    fn rebuild_widget_indices(&mut self) {
+        self.state.widget_indices = self
+            .state
+            .plugins
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.widget && m.prefetch)
+            .map(|(i, _)| i)
+            .collect();
+        self.state.widgets_visible = !self.state.widget_indices.is_empty();
+        if self.state.widget_selected >= self.state.widget_indices.len() {
+            self.state.widget_selected = 0;
+        }
+    }
+
+    /// Rebuild the unified launcher list from plugin metadata.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn rebuild_unified_list(&mut self) {
         use nucleo_matcher::pattern::AtomKind;
@@ -2588,59 +2637,22 @@ impl App {
         ordered.extend(rest);
 
         let rows = if query.is_empty() {
-            // ── Widget rows (empty query only) ────────────────────────────────────
-            let mut rows: Vec<UnifiedRow> = Vec::new();
-            for &pidx in &ordered {
-                let meta = &self.state.plugins[pidx];
-                if !meta.widget {
-                    continue;
-                }
-                // Derive summary from cached output.
-                let summary = match self.state.result_cache.get(&pidx) {
-                    Some(CachedResult::Ready(output)) => {
-                        if output.items.is_empty() {
-                            "ready".to_string()
-                        } else {
-                            let count = output.items.len();
-                            let first = &output.items[0].label;
-                            if count == 1 {
-                                first.clone()
-                            } else {
-                                format!("{first}  +{}", count - 1)
-                            }
-                        }
+            // ── Flat display (empty query) ─────────────────────────────────────────
+            ordered
+                .iter()
+                .map(|&pidx| {
+                    let meta = &self.state.plugins[pidx];
+                    UnifiedRow::Command {
+                        plugin_index: pidx,
+                        name: meta.name.clone(),
+                        description: meta.description.clone(),
+                        icon: meta.icon.clone(),
+                        quickkey: meta.quickkey.clone(),
+                        group_name: meta.plugin_group.clone(),
+                        match_positions: vec![],
                     }
-                    Some(CachedResult::Loading(_)) => "loading…".to_string(),
-                    Some(CachedResult::Error(e)) => format!("⚠ {}", &e[..e.len().min(30)]),
-                    Some(CachedResult::Revalidating(output)) => {
-                        let count = output.items.len();
-                        format!("{count} items (refreshing…)")
-                    }
-                    None => "…".to_string(),
-                };
-                rows.push(UnifiedRow::Widget {
-                    plugin_index: pidx,
-                    name: meta.name.clone(),
-                    icon: meta.icon.clone(),
-                    summary,
-                    group_name: meta.plugin_group.clone(),
-                });
-            }
-
-            // ── Command rows ──────────────────────────────────────────────────────
-            for &pidx in &ordered {
-                let meta = &self.state.plugins[pidx];
-                rows.push(UnifiedRow::Command {
-                    plugin_index: pidx,
-                    name: meta.name.clone(),
-                    description: meta.description.clone(),
-                    icon: meta.icon.clone(),
-                    quickkey: meta.quickkey.clone(),
-                    group_name: meta.plugin_group.clone(),
-                    match_positions: vec![],
-                });
-            }
-            rows
+                })
+                .collect()
         } else {
             // ── Global search (non-empty query) ───────────────────────────────────
             // Score each command's "name description" haystack; sort descending; emit flat.
@@ -2713,8 +2725,7 @@ impl App {
             .unified_rows
             .get(self.state.unified_selected)
             .map(|r| match r {
-                UnifiedRow::Command { plugin_index, .. }
-                | UnifiedRow::Widget { plugin_index, .. } => *plugin_index,
+                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
             });
 
         // How many selectable rows were before the old selection (position fallback).
@@ -2756,7 +2767,7 @@ impl App {
                 .enumerate()
                 .filter_map(|(i, r)| match r {
                     UnifiedRow::Command { plugin_index, .. } if *plugin_index == pidx => Some(i),
-                    _ => None,
+                    UnifiedRow::Command { .. } => None,
                 })
                 .next_back(); // last occurrence = canonical position (not Recent duplicate)
             if let Some(pos) = match_pos {
@@ -2786,8 +2797,7 @@ impl App {
             .unified_rows
             .get(self.state.unified_selected)
             .map(|r| match r {
-                UnifiedRow::Command { plugin_index, .. }
-                | UnifiedRow::Widget { plugin_index, .. } => *plugin_index,
+                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
             });
     }
 }
@@ -2978,7 +2988,6 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 UnifiedRow::Command { name, .. } => Some(name.as_str()),
-                UnifiedRow::Widget { .. } => None,
             })
             .collect()
     }

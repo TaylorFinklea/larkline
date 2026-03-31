@@ -27,34 +27,55 @@ const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     let area = frame.area();
 
-    // Vertical split: search bar | content area | status bar
+    // Vertical split: search bar | [widgets] | content area | status bar
+    let has_widgets = state.widgets_visible && !state.widget_indices.is_empty();
+    let widget_height = if has_widgets { 6 } else { 0 };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Search bar
-            Constraint::Min(0),    // Content area (expands to fill)
-            Constraint::Length(1), // Status bar
-        ])
+        .constraints(if has_widgets {
+            vec![
+                Constraint::Length(3),              // Search bar
+                Constraint::Length(widget_height),   // Widget dashboard row
+                Constraint::Min(0),                 // Content area
+                Constraint::Length(1),              // Status bar
+            ]
+        } else {
+            vec![
+                Constraint::Length(3),  // Search bar
+                Constraint::Length(0),  // No widgets
+                Constraint::Min(0),    // Content area
+                Constraint::Length(1),  // Status bar
+            ]
+        })
         .split(area);
 
     render_search_bar(frame, state, theme, chunks[0]);
-    render_status_bar(frame, state, theme, chunks[2]);
+    render_status_bar(frame, state, theme, chunks[3]);
+
+    // Render widget dashboard row.
+    if has_widgets {
+        render_widget_row(frame, state, theme, chunks[1]);
+    }
+
+    // Content area is now chunks[2] instead of chunks[1].
+    let content_area = chunks[2];
 
     let show_right_pane = state.mode == Mode::ViewOutput
         || (state.mode == Mode::Unified
             && state.preview_plugin_index.is_some()
-            && chunks[1].width >= 80);
+            && content_area.width >= 80);
 
     // Plugin Manager takes full content area.
     if state.mode == Mode::PluginManager {
         if let Some(ref pm) = state.plugin_manager {
-            render_plugin_manager(frame, pm, theme, chunks[1]);
+            render_plugin_manager(frame, pm, theme, content_area);
         }
     // Sidebar hidden: ViewOutput gets full width, Unified hides preview.
     } else if state.sidebar_hidden && state.mode == Mode::ViewOutput {
-        render_output_pane(frame, state, theme, chunks[1]);
+        render_output_pane(frame, state, theme, content_area);
     } else if state.sidebar_hidden && state.mode == Mode::Unified {
-        render_unified_list(frame, state, theme, chunks[1]);
+        render_unified_list(frame, state, theme, content_area);
     } else if show_right_pane {
         // Narrow sidebar when drilled in; configurable ratio for browse-with-preview.
         let left_pct = if state.mode == Mode::ViewOutput {
@@ -68,7 +89,7 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
                 Constraint::Percentage(left_pct),
                 Constraint::Percentage(100 - left_pct),
             ])
-            .split(chunks[1]);
+            .split(content_area);
 
         render_unified_list(frame, state, theme, content_chunks[0]);
         if state.mode == Mode::ViewOutput {
@@ -77,7 +98,7 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             render_preview_pane(frame, state, theme, content_chunks[1]);
         }
     } else {
-        render_unified_list(frame, state, theme, chunks[1]);
+        render_unified_list(frame, state, theme, content_area);
     }
 
     // Power menu overlay — rendered last (on top of everything).
@@ -143,33 +164,6 @@ fn render_unified_list(
         .unified_rows
         .iter()
         .map(|row| match row {
-            UnifiedRow::Widget {
-                name,
-                icon,
-                summary,
-                group_name,
-                ..
-            } => {
-                let mut spans = Vec::new();
-                if state.show_icons {
-                    spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
-                }
-                spans.push(Span::styled(
-                    name.as_str(),
-                    Style::default().fg(theme.accent).bold(),
-                ));
-                spans.push(Span::styled(
-                    format!("  {summary}"),
-                    Style::default().fg(theme.text),
-                ));
-                if let Some(group) = group_name {
-                    spans.push(Span::styled(
-                        format!("  {group}"),
-                        Style::default().fg(theme.text_dimmed),
-                    ));
-                }
-                ListItem::new(Line::from(spans))
-            }
             UnifiedRow::Command {
                 name,
                 description,
@@ -883,6 +877,110 @@ fn key_hint<'a>(key: &str, label: &str, theme: &Theme) -> Vec<Span<'a>> {
         Span::styled(format!(" {key}"), Style::default().fg(theme.accent).bold()),
         Span::styled(format!(" {label}"), Style::default().fg(theme.text_dimmed)),
     ]
+}
+
+#[allow(clippy::too_many_lines)]
+fn render_widget_row(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+) {
+    use crate::app::CachedResult;
+
+    let indices = &state.widget_indices;
+    if indices.is_empty() || area.width < 10 {
+        return;
+    }
+
+    // Split horizontally into equal-width cards.
+    let card_count = indices.len().min(6); // max 6 cards
+    let constraints: Vec<Constraint> = (0..card_count)
+        .map(|_| Constraint::Percentage(100 / u16::try_from(card_count).unwrap_or(1)))
+        .collect();
+    let card_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+
+    for (i, &pidx) in indices.iter().take(card_count).enumerate() {
+        let Some(meta) = state.plugins.get(pidx) else {
+            continue;
+        };
+
+        let is_selected = state.widget_focused && state.widget_selected == i;
+        let border_color = if is_selected {
+            theme.accent
+        } else {
+            theme.text_dimmed
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .title(Span::styled(
+                format!(" {} {} ", meta.icon, meta.name),
+                Style::default().fg(theme.accent).bold(),
+            ));
+
+        // Build card content from cache.
+        let mut lines: Vec<Line> = Vec::new();
+
+        match state.result_cache.get(&pidx) {
+            Some(CachedResult::Ready(output) | CachedResult::Revalidating(output)) => {
+                let max_lines = (area.height as usize).saturating_sub(2); // border eats 2
+                for item in output.items.iter().take(max_lines) {
+                    let label = if item.label.len() > card_areas[i].width as usize - 3 {
+                        format!(
+                            "{}…",
+                            &item.label[..card_areas[i].width as usize - 4]
+                        )
+                    } else {
+                        item.label.clone()
+                    };
+                    lines.push(Line::from(Span::styled(
+                        label,
+                        Style::default().fg(theme.text),
+                    )));
+                }
+                if output.items.len() > max_lines {
+                    lines.push(Line::from(Span::styled(
+                        format!("+{} more", output.items.len() - max_lines),
+                        Style::default().fg(theme.text_dimmed),
+                    )));
+                }
+                if lines.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No items",
+                        Style::default().fg(theme.text_dimmed),
+                    )));
+                }
+            }
+            Some(CachedResult::Loading(_)) => {
+                lines.push(Line::from(Span::styled(
+                    "Loading…",
+                    Style::default().fg(theme.text_dimmed),
+                )));
+            }
+            Some(CachedResult::Error(e)) => {
+                let msg = if e.len() > 20 { &e[..20] } else { e };
+                lines.push(Line::from(Span::styled(
+                    format!("⚠ {msg}"),
+                    Style::default().fg(theme.error),
+                )));
+            }
+            None => {
+                lines.push(Line::from(Span::styled(
+                    "…",
+                    Style::default().fg(theme.text_dimmed),
+                )));
+            }
+        }
+
+        let paragraph = Paragraph::new(lines).block(block);
+        frame.render_widget(paragraph, card_areas[i]);
+    }
 }
 
 #[allow(clippy::too_many_lines)]
