@@ -1,40 +1,29 @@
 # Current State
 
-> Updated: 2026-03-27
+> Updated: 2026-03-31
 
 ## Active Branch
 
 `main` (clean)
 
-## Recent Progress
+## Recent Progress (this session)
 
-- Phase 29: Flat list with inline plugin name badges
-- Descriptions hidden by default, quickkey exact-match priority, cursor reset on search
-- Normal mode on Back/Enter from ViewOutput
-- Brew Update command added (multi-command plugin)
-- AI handoff workflow: `docs/ai/` shared state + session protocol
-- Fixed empty `icon_nerd = ""` replacing emoji with blank (3 sites)
-- Filled in Nerd Font icons for all 16 plugins that had gaps
-- Configurable `sidebar_ratio` (default 50% browse, 28% ViewOutput)
-
-## Changed Files (this session)
-
-- `src/app.rs` — flat list, quickkey priority, cursor reset, vim mode, icon guard, sidebar_ratio
-- `src/tui/ui.rs` — removed GroupHeader render, dynamic sidebar width
-- `src/config.rs` — show_descriptions default, sidebar_ratio field + template
-- `src/main.rs` — icon_nerd empty-string guard (2 sites)
-- `examples/plugins/brew/` — multi-command manifest + update.lua
-- `examples/plugins/*/manifest.toml` — 16 Nerd Font icons filled in
-- `docs/ai/` — new handoff workflow files
-- `CLAUDE.md`, `AGENTS.md` — handoff protocol added
-
-## Blockers
-
-None.
-
-## Open Questions
-
-None currently.
+- Phase 29: Raycast-style flat list, quickkey priority, cursor reset, vim mode fixes
+- Two-step Esc everywhere (main search + output search)
+- Plugin Manager: LazyVim-style enable/disable with full-screen tree view
+- Home Assistant: 21 commands with filters, favorites, hide, resp.body fix, os.getenv fix
+- Dashboard Widgets: bordered card panes with auto-refresh, context-aware navigation
+- Widget management: reorder (H/L), hide (D), toggle visibility (W), persist order
+- Context-aware power menu: adapts like which-key based on focused element
+- Calendar: My Schedule threaded ANSI timeline, auto-detect RawText mode
+- Calculator: qalc/bc backend, space in form fields fix
+- Claude Usage + Codex Usage plugins with time range settings
+- lark.nvim: Neovim floating terminal with --query flag
+- Secrets: macOS Keychain fallback + lark secret CLI
+- Plugin distribution: lark plugin sync/list/remove
+- Automated release pipeline: scripts/release.sh + CI tap update
+- Homebrew formula renamed to larkline (avoid LarkSuite conflict)
+- v0.3.0 + v0.3.1 released
 
 ## Validation
 
