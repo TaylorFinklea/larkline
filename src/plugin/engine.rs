@@ -109,7 +109,8 @@ impl PluginEngine {
             return;
         }
         for i in 0..self.plugins.len() {
-            if self.plugins[i].metadata().prefetch {
+            let meta = self.plugins[i].metadata();
+            if meta.prefetch || meta.widget {
                 self.execute_with_source(i, ExecutionSource::Prefetch);
             }
         }

@@ -2578,7 +2578,7 @@ impl App {
             .plugins
             .iter()
             .enumerate()
-            .filter(|(_, m)| m.widget && m.prefetch)
+            .filter(|(_, m)| m.widget)
             .map(|(i, _)| i)
             .collect();
         self.state.widgets_visible = !self.state.widget_indices.is_empty();
