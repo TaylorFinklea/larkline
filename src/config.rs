@@ -951,6 +951,13 @@ pub struct PluginManagerConfig {
     /// Individual commands disabled as `"GroupKey:CommandName"`.
     #[serde(default)]
     pub disabled_commands: Vec<String>,
+    /// Widget commands that are hidden from the dashboard as `"GroupKey:CommandName"`.
+    #[serde(default)]
+    pub disabled_widgets: Vec<String>,
+    /// Ordered list of widget command keys for card arrangement.
+    /// Commands not in this list appear after those that are, in default order.
+    #[serde(default)]
+    pub widget_order: Vec<String>,
 }
 
 /// Path to the plugin manager state file.
@@ -1033,6 +1040,48 @@ impl PluginManagerConfig {
             self.disabled_commands.push(key);
             false // now disabled
         }
+    }
+
+    /// Check if a widget is disabled.
+    pub fn is_widget_disabled(&self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        self.disabled_widgets.iter().any(|k| k == &key)
+    }
+
+    /// Toggle a widget's visibility. Returns the new visible state.
+    pub fn toggle_widget(&mut self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        if let Some(pos) = self.disabled_widgets.iter().position(|k| k == &key) {
+            self.disabled_widgets.remove(pos);
+            true // now visible
+        } else {
+            self.disabled_widgets.push(key);
+            false // now hidden
+        }
+    }
+
+    /// Move a widget earlier in the order. Returns true if moved.
+    pub fn move_widget_up(&mut self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        if let Some(pos) = self.widget_order.iter().position(|k| k == &key) {
+            if pos > 0 {
+                self.widget_order.swap(pos, pos - 1);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Move a widget later in the order. Returns true if moved.
+    pub fn move_widget_down(&mut self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        if let Some(pos) = self.widget_order.iter().position(|k| k == &key) {
+            if pos + 1 < self.widget_order.len() {
+                self.widget_order.swap(pos, pos + 1);
+                return true;
+            }
+        }
+        false
     }
 }
 

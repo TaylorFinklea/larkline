@@ -1929,6 +1929,60 @@ impl App {
                 }
             }
 
+            Action::WidgetDisable => {
+                if self.state.widget_focused {
+                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
+                        let meta = &self.state.plugins[pidx];
+                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name).to_string();
+                        let name = meta.name.clone();
+                        self.pm_config.toggle_widget(&gk, &name);
+                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
+                            tracing::warn!(error = %e, "failed to save widget config");
+                        }
+                        self.rebuild_widget_indices();
+                        self.state.status_message = Some((
+                            format!("Hidden widget: {name}"),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
+            }
+
+            Action::WidgetMoveLeft => {
+                if self.state.widget_focused && self.state.widget_selected > 0 {
+                    // Ensure widget_order has all current widgets.
+                    self.ensure_widget_order();
+                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
+                        let meta = &self.state.plugins[pidx];
+                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
+                        self.pm_config.move_widget_up(gk, &meta.name);
+                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
+                            tracing::warn!(error = %e, "failed to save widget order");
+                        }
+                        self.state.widget_selected -= 1;
+                        self.rebuild_widget_indices();
+                    }
+                }
+            }
+
+            Action::WidgetMoveRight => {
+                if self.state.widget_focused
+                    && self.state.widget_selected + 1 < self.state.widget_indices.len()
+                {
+                    self.ensure_widget_order();
+                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
+                        let meta = &self.state.plugins[pidx];
+                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
+                        self.pm_config.move_widget_down(gk, &meta.name);
+                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
+                            tracing::warn!(error = %e, "failed to save widget order");
+                        }
+                        self.state.widget_selected += 1;
+                        self.rebuild_widget_indices();
+                    }
+                }
+            }
+
             Action::WidgetToggleVisibility => {
                 if !self.state.widget_indices.is_empty() {
                     self.state.widgets_visible = !self.state.widgets_visible;
@@ -2569,18 +2623,65 @@ impl App {
         });
     }
 
-    /// Rebuild the unified launcher list from plugin metadata.
-    ///
+    /// Ensure `widget_order` contains all current widget keys (for reordering).
+    fn ensure_widget_order(&mut self) {
+        let current: Vec<String> = self
+            .state
+            .widget_indices
+            .iter()
+            .map(|&i| {
+                let m = &self.state.plugins[i];
+                format!(
+                    "{}:{}",
+                    m.plugin_group.as_deref().unwrap_or(&m.name),
+                    m.name
+                )
+            })
+            .collect();
+        // Add any missing keys to the order.
+        for key in &current {
+            if !self.pm_config.widget_order.contains(key) {
+                self.pm_config.widget_order.push(key.clone());
+            }
+        }
+        // Remove stale keys.
+        self.pm_config
+            .widget_order
+            .retain(|k| current.contains(k));
+    }
+
     /// Rebuild the list of widget plugin indices.
     fn rebuild_widget_indices(&mut self) {
-        self.state.widget_indices = self
+        // Collect all widget-eligible indices, excluding disabled widgets.
+        let mut indices: Vec<usize> = self
             .state
             .plugins
             .iter()
             .enumerate()
-            .filter(|(_, m)| m.widget)
+            .filter(|(_, m)| {
+                m.widget && {
+                    let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
+                    !self.pm_config.is_widget_disabled(gk, &m.name)
+                }
+            })
             .map(|(i, _)| i)
             .collect();
+
+        // Sort by widget_order config: ordered widgets first, rest in discovery order.
+        if !self.pm_config.widget_order.is_empty() {
+            let order = &self.pm_config.widget_order;
+            indices.sort_by_key(|&i| {
+                let m = &self.state.plugins[i];
+                let key = format!(
+                    "{}:{}",
+                    m.plugin_group.as_deref().unwrap_or(&m.name),
+                    m.name
+                );
+                order.iter().position(|k| k == &key).unwrap_or(usize::MAX)
+            });
+        }
+
+        self.state.widget_indices = indices;
         self.state.widgets_visible = !self.state.widget_indices.is_empty();
         if self.state.widget_selected >= self.state.widget_indices.len() {
             self.state.widget_selected = 0;

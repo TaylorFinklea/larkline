@@ -138,9 +138,12 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('O') => Some(Action::CycleSort),
         // Esc in Normal mode: clear search query (if any).
         KeyCode::Esc => Some(Action::EnterNormalMode),
-        // Widget focus (W = Shift+W toggles, K = Shift+K focuses up).
+        // Widget management (Shift keys).
         KeyCode::Char('W') => Some(Action::WidgetToggleVisibility),
         KeyCode::Char('K') => Some(Action::WidgetFocusUp),
+        KeyCode::Char('H') => Some(Action::WidgetMoveLeft),
+        KeyCode::Char('L') => Some(Action::WidgetMoveRight),
+        KeyCode::Char('D') => Some(Action::WidgetDisable),
         // Plugin manager (P = Shift+P).
         KeyCode::Char('P') => Some(Action::PluginManagerOpen),
         _ => None,

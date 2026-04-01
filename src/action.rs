@@ -141,4 +141,10 @@ pub enum Action {
     WidgetFocusUp,
     /// Toggle widget row visibility.
     WidgetToggleVisibility,
+    /// Hide the selected widget card from the dashboard.
+    WidgetDisable,
+    /// Move the selected widget card left in order.
+    WidgetMoveLeft,
+    /// Move the selected widget card right in order.
+    WidgetMoveRight,
 }
