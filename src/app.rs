@@ -2179,56 +2179,199 @@ impl App {
     #[allow(clippy::too_many_lines)]
     fn build_power_menu_categories(&self) -> Vec<PowerMenuCategory> {
         match self.state.mode {
-            Mode::Unified => vec![
+            Mode::Unified if self.state.widget_focused => {
+                // Widget-focused context menu.
+                vec![
+                    PowerMenuCategory {
+                        name: "Widget".to_string(),
+                        items: vec![
+                            PowerMenuItem {
+                                key: 'h',
+                                key_hint: "h/l".to_string(),
+                                label: "Navigate cards".to_string(),
+                                action: Action::Back,
+                            },
+                            PowerMenuItem {
+                                key: 'j',
+                                key_hint: "j".to_string(),
+                                label: "Back to list".to_string(),
+                                action: Action::MoveDown,
+                            },
+                            PowerMenuItem {
+                                key: 'H',
+                                key_hint: "H".to_string(),
+                                label: "Move card left".to_string(),
+                                action: Action::WidgetMoveLeft,
+                            },
+                            PowerMenuItem {
+                                key: 'L',
+                                key_hint: "L".to_string(),
+                                label: "Move card right".to_string(),
+                                action: Action::WidgetMoveRight,
+                            },
+                            PowerMenuItem {
+                                key: 'D',
+                                key_hint: "D".to_string(),
+                                label: "Hide this widget".to_string(),
+                                action: Action::WidgetDisable,
+                            },
+                            PowerMenuItem {
+                                key: 'W',
+                                key_hint: "W".to_string(),
+                                label: "Hide all widgets".to_string(),
+                                action: Action::WidgetToggleVisibility,
+                            },
+                        ],
+                    },
+                    PowerMenuCategory {
+                        name: "App".to_string(),
+                        items: vec![
+                            PowerMenuItem {
+                                key: 'P',
+                                key_hint: "P".to_string(),
+                                label: "Plugins".to_string(),
+                                action: Action::PluginManagerOpen,
+                            },
+                            PowerMenuItem {
+                                key: 'q',
+                                key_hint: "q".to_string(),
+                                label: "Quit".to_string(),
+                                action: Action::Quit,
+                            },
+                        ],
+                    },
+                ]
+            }
+            Mode::Unified => {
+                let mut widget_items = vec![
+                    PowerMenuItem {
+                        key: 'K',
+                        key_hint: "K".to_string(),
+                        label: "Focus widgets".to_string(),
+                        action: Action::WidgetFocusUp,
+                    },
+                    PowerMenuItem {
+                        key: 'W',
+                        key_hint: "W".to_string(),
+                        label: if self.state.widgets_visible {
+                            "Hide widgets".to_string()
+                        } else {
+                            "Show widgets".to_string()
+                        },
+                        action: Action::WidgetToggleVisibility,
+                    },
+                ];
+                // Only show widget items if there are widgets.
+                if self.state.widget_indices.is_empty() {
+                    widget_items.clear();
+                }
+
+                vec![
+                    PowerMenuCategory {
+                        name: "Navigation".to_string(),
+                        items: vec![
+                            PowerMenuItem {
+                                key: '/',
+                                key_hint: "/".to_string(),
+                                label: "Search".to_string(),
+                                action: Action::EnterInsertMode,
+                            },
+                            PowerMenuItem {
+                                key: ':',
+                                key_hint: ":".to_string(),
+                                label: "Command".to_string(),
+                                action: Action::EnterCommandMode,
+                            },
+                        ],
+                    },
+                    PowerMenuCategory {
+                        name: "Display".to_string(),
+                        items: {
+                            let mut items = vec![
+                                PowerMenuItem {
+                                    key: 'd',
+                                    key_hint: "d".to_string(),
+                                    label: "Descriptions".to_string(),
+                                    action: Action::ToggleDescriptions,
+                                },
+                                PowerMenuItem {
+                                    key: 'O',
+                                    key_hint: "O".to_string(),
+                                    label: format!(
+                                        "Sort: {}",
+                                        self.state.sort_mode.next().label()
+                                    ),
+                                    action: Action::CycleSort,
+                                },
+                                PowerMenuItem {
+                                    key: 'R',
+                                    key_hint: "R".to_string(),
+                                    label: "Refresh".to_string(),
+                                    action: Action::RefreshPlugins,
+                                },
+                                PowerMenuItem {
+                                    key: 's',
+                                    key_hint: "s".to_string(),
+                                    label: "Sidebar".to_string(),
+                                    action: Action::ToggleSidebar,
+                                },
+                                PowerMenuItem {
+                                    key: 'T',
+                                    key_hint: "T".to_string(),
+                                    label: "Theme".to_string(),
+                                    action: Action::ThemePickerOpen,
+                                },
+                            ];
+                            items.extend(widget_items);
+                            items
+                        },
+                    },
+                    PowerMenuCategory {
+                        name: "App".to_string(),
+                        items: vec![
+                            PowerMenuItem {
+                                key: 'P',
+                                key_hint: "P".to_string(),
+                                label: "Plugins".to_string(),
+                                action: Action::PluginManagerOpen,
+                            },
+                            PowerMenuItem {
+                                key: 'q',
+                                key_hint: "q".to_string(),
+                                label: "Quit".to_string(),
+                                action: Action::Quit,
+                            },
+                        ],
+                    },
+                ]
+            }
+            Mode::PluginManager => vec![
                 PowerMenuCategory {
-                    name: "Navigation".to_string(),
+                    name: "Plugin Manager".to_string(),
                     items: vec![
                         PowerMenuItem {
-                            key: '/',
-                            key_hint: "/".to_string(),
-                            label: "Search".to_string(),
-                            action: Action::EnterInsertMode,
+                            key: ' ',
+                            key_hint: "SPC".to_string(),
+                            label: "Toggle enable".to_string(),
+                            action: Action::PluginManagerToggle,
                         },
                         PowerMenuItem {
-                            key: ':',
-                            key_hint: ":".to_string(),
-                            label: "Command".to_string(),
-                            action: Action::EnterCommandMode,
-                        },
-                    ],
-                },
-                PowerMenuCategory {
-                    name: "Display".to_string(),
-                    items: vec![
-                        PowerMenuItem {
-                            key: 'd',
-                            key_hint: "d".to_string(),
-                            label: "Descriptions".to_string(),
-                            action: Action::ToggleDescriptions,
-                        },
-                        PowerMenuItem {
-                            key: 'O',
-                            key_hint: "O".to_string(),
-                            label: format!("Sort: {}", self.state.sort_mode.next().label()),
-                            action: Action::CycleSort,
-                        },
-                        PowerMenuItem {
-                            key: 'R',
-                            key_hint: "R".to_string(),
-                            label: "Refresh".to_string(),
-                            action: Action::RefreshPlugins,
+                            key: '\n',
+                            key_hint: "⏎".to_string(),
+                            label: "Expand/collapse".to_string(),
+                            action: Action::PluginManagerExpand,
                         },
                         PowerMenuItem {
                             key: 's',
                             key_hint: "s".to_string(),
-                            label: "Sidebar".to_string(),
-                            action: Action::ToggleSidebar,
+                            label: "Set secret".to_string(),
+                            action: Action::PluginManagerSetSecret,
                         },
                         PowerMenuItem {
-                            key: 'T',
-                            key_hint: "T".to_string(),
-                            label: "Theme".to_string(),
-                            action: Action::ThemePickerOpen,
+                            key: 'x',
+                            key_hint: "x".to_string(),
+                            label: "Delete secret".to_string(),
+                            action: Action::PluginManagerDeleteSecret,
                         },
                     ],
                 },
@@ -2236,21 +2379,14 @@ impl App {
                     name: "App".to_string(),
                     items: vec![
                         PowerMenuItem {
-                            key: 'P',
-                            key_hint: "P".to_string(),
-                            label: "Plugins".to_string(),
-                            action: Action::PluginManagerOpen,
-                        },
-                        PowerMenuItem {
                             key: 'q',
                             key_hint: "q".to_string(),
-                            label: "Quit".to_string(),
-                            action: Action::Quit,
+                            label: "Back".to_string(),
+                            action: Action::PluginManagerClose,
                         },
                     ],
                 },
             ],
-            Mode::PluginManager => vec![],
             Mode::ViewOutput => vec![
                 {
                     let has_settings = self
