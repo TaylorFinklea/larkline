@@ -3239,8 +3239,8 @@ mod tests {
         app.state
             .unified_rows
             .iter()
-            .filter_map(|r| match r {
-                UnifiedRow::Command { name, .. } => Some(name.as_str()),
+            .map(|r| match r {
+                UnifiedRow::Command { name, .. } => name.as_str(),
             })
             .collect()
     }
