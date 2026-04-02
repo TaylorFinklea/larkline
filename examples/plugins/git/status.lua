@@ -101,7 +101,7 @@ lark.register({
             actions[#actions + 1] = { label = "Open in Terminal", kind = "shell",
                 args = { "open", "-a", "Terminal", path } }
             actions[#actions + 1] = { label = "Open in Editor", kind = "shell",
-                args = { "code", path } }
+                args = { lark.env("EDITOR") or "vim", path } }
             actions[#actions + 1] = { label = "Copy branch", kind = "clipboard", args = { branch } }
             actions[#actions + 1] = { label = "Copy path", kind = "clipboard", args = { path } }
 

@@ -27,8 +27,10 @@ lark.register({
                     icon = is_symlink and "🔗" or "📁",
                     copy_text = plugin_dir .. "/" .. name,
                     actions = {
+                        { label = "Open in Finder", kind = "shell",
+                            args = { "open", plugin_dir .. "/" .. name } },
                         { label = "Open in Editor", kind = "shell",
-                            args = { "code", plugin_dir .. "/" .. name } },
+                            args = { lark.env("EDITOR") or "vim", plugin_dir .. "/" .. name } },
                         { label = "Copy path", kind = "clipboard",
                             args = { plugin_dir .. "/" .. name } },
                     },
