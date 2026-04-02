@@ -1,0 +1,34 @@
+[plugin]
+name = "Developer"
+description = "Create and test Lark plugins"
+version = "0.1.0"
+author = "larkline"
+icon = "🛠"
+icon_nerd = "󰛓"
+category = "dev"
+
+[[commands]]
+name = "New Plugin"
+description = "Scaffold a new Lua or shell plugin"
+entry = "new.lua"
+timeout_seconds = 5
+
+[[commands]]
+name = "API Reference"
+description = "lark.* host API quick reference"
+entry = "api.lua"
+timeout_seconds = 5
+prefetch = true
+
+[[commands]]
+name = "Installed Plugins"
+description = "List all installed plugins with paths"
+entry = "list.lua"
+timeout_seconds = 5
+prefetch = true
+
+[[commands]]
+name = "Test Plugin"
+description = "Run a plugin via lark invoke and show output"
+entry = "test.lua"
+timeout_seconds = 15
