@@ -891,7 +891,12 @@ impl App {
 
             Action::MoveUp => {
                 // Widget focused: k stays in widgets (no-op at top).
-                if self.state.widget_focused {
+                // But overlays take priority.
+                if self.state.widget_focused
+                    && self.state.action_palette.is_none()
+                    && self.state.copy_menu.is_none()
+                    && self.state.theme_picker.is_none()
+                {
                     return;
                 }
                 if let Some(ref mut pm) = self.state.plugin_manager {
@@ -942,7 +947,12 @@ impl App {
 
             Action::MoveDown => {
                 // Widget focused: j goes back to command list.
-                if self.state.widget_focused {
+                // But overlays (palette, copy menu, picker) take priority.
+                if self.state.widget_focused
+                    && self.state.action_palette.is_none()
+                    && self.state.copy_menu.is_none()
+                    && self.state.theme_picker.is_none()
+                {
                     self.state.widget_focused = false;
                     return;
                 }
