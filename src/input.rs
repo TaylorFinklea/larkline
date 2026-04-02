@@ -350,12 +350,8 @@ fn handle_plugin_manager(event: KeyEvent) -> Option<Action> {
         KeyCode::Char('x') => Some(Action::PluginManagerDeleteSecret),
         KeyCode::Char('G') => Some(Action::GoToLast),
         KeyCode::Char('g') => Some(Action::PendingG),
-        KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => {
-            Some(Action::PluginManagerClose)
-        }
-        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Esc | KeyCode::Char('q' | 'h') | KeyCode::Left => Some(Action::PluginManagerClose),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         _ => None,
     }
 }

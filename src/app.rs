@@ -787,7 +787,12 @@ impl App {
                         }
                     }
                     // Refresh widget summaries when prefetch results arrive.
-                    if self.state.plugins.get(plugin_index).is_some_and(|m| m.widget) {
+                    if self
+                        .state
+                        .plugins
+                        .get(plugin_index)
+                        .is_some_and(|m| m.widget)
+                    {
                         self.rebuild_unified_list();
                     }
                 }
@@ -1384,7 +1389,6 @@ impl App {
                 self.state.output_searching = false;
             }
 
-
             Action::OpenUrl => {
                 if self.state.mode == Mode::ViewOutput {
                     let url = self
@@ -1916,7 +1920,9 @@ impl App {
 
             Action::PluginManagerDeleteSecret => {
                 if let Some(ref pm) = self.state.plugin_manager {
-                    if let Some(PluginManagerRow::Secret { key, source, .. }) = pm.rows.get(pm.selected) {
+                    if let Some(PluginManagerRow::Secret { key, source, .. }) =
+                        pm.rows.get(pm.selected)
+                    {
                         if *source != SecretSource::NotSet {
                             let key = key.clone();
                             // Delete from keychain.
@@ -1926,7 +1932,8 @@ impl App {
                                 .status();
                             // Refresh the manager state.
                             self.state.plugin_manager = Some(self.build_plugin_manager_state());
-                            self.state.status_message = Some((format!("Deleted {key}"), std::time::Instant::now()));
+                            self.state.status_message =
+                                Some((format!("Deleted {key}"), std::time::Instant::now()));
                         }
                     }
                 }
@@ -1943,17 +1950,19 @@ impl App {
                 if self.state.widget_focused {
                     if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
                         let meta = &self.state.plugins[pidx];
-                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name).to_string();
+                        let gk = meta
+                            .plugin_group
+                            .as_deref()
+                            .unwrap_or(&meta.name)
+                            .to_string();
                         let name = meta.name.clone();
                         self.pm_config.toggle_widget(&gk, &name);
                         if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
                             tracing::warn!(error = %e, "failed to save widget config");
                         }
                         self.rebuild_widget_indices();
-                        self.state.status_message = Some((
-                            format!("Hidden widget: {name}"),
-                            std::time::Instant::now(),
-                        ));
+                        self.state.status_message =
+                            Some((format!("Hidden widget: {name}"), std::time::Instant::now()));
                     }
                 }
             }
@@ -2072,7 +2081,7 @@ impl App {
     }
 
     /// Build plugin manager state with specified expanded groups.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_lines)]
     fn build_plugin_manager_state_with_expanded(
         &self,
         expanded_keys: &std::collections::HashSet<String>,
@@ -2080,17 +2089,24 @@ impl App {
         let env_secrets = crate::config::load_secrets();
 
         // Scan ALL plugins (unfiltered) so disabled ones still appear as [ ] in the manager.
-        let all_meta: Vec<PluginMetadata> =
-            match registry::scan(&self.plugin_dirs) {
-                Ok(discovered) => discovered.iter().map(|d| d.metadata.clone()).collect(),
-                Err(_) => self.state.plugins.clone(), // fallback to active set
-            };
+        let all_meta: Vec<PluginMetadata> = match registry::scan(&self.plugin_dirs) {
+            Ok(discovered) => discovered.iter().map(|d| d.metadata.clone()).collect(),
+            Err(_) => self.state.plugins.clone(), // fallback to active set
+        };
 
         // Collect unique plugin groups from metadata.
         let mut seen_groups: Vec<String> = Vec::new();
         let mut group_meta: std::collections::HashMap<
             String,
-            (String, String, String, String, Vec<(String, Option<String>)>, Vec<crate::plugin::traits::FormField>, Vec<String>),
+            (
+                String,
+                String,
+                String,
+                String,
+                Vec<(String, Option<String>)>,
+                Vec<crate::plugin::traits::FormField>,
+                Vec<String>,
+            ),
         > = std::collections::HashMap::new();
 
         for meta in &all_meta {
@@ -2134,8 +2150,8 @@ impl App {
             if is_expanded {
                 // Command rows.
                 for (cmd_name, qk) in commands {
-                    let cmd_enabled = plugin_enabled
-                        && !self.pm_config.is_command_disabled(gk, cmd_name);
+                    let cmd_enabled =
+                        plugin_enabled && !self.pm_config.is_command_disabled(gk, cmd_name);
                     rows.push(PluginManagerRow::Command {
                         group_key: gk.clone(),
                         name: cmd_name.clone(),
@@ -2307,10 +2323,7 @@ impl App {
                                 PowerMenuItem {
                                     key: 'O',
                                     key_hint: "O".to_string(),
-                                    label: format!(
-                                        "Sort: {}",
-                                        self.state.sort_mode.next().label()
-                                    ),
+                                    label: format!("Sort: {}", self.state.sort_mode.next().label()),
                                     action: Action::CycleSort,
                                 },
                                 PowerMenuItem {
@@ -2387,14 +2400,12 @@ impl App {
                 },
                 PowerMenuCategory {
                     name: "App".to_string(),
-                    items: vec![
-                        PowerMenuItem {
-                            key: 'q',
-                            key_hint: "q".to_string(),
-                            label: "Back".to_string(),
-                            action: Action::PluginManagerClose,
-                        },
-                    ],
+                    items: vec![PowerMenuItem {
+                        key: 'q',
+                        key_hint: "q".to_string(),
+                        label: "Back".to_string(),
+                        action: Action::PluginManagerClose,
+                    }],
                 },
             ],
             Mode::ViewOutput => vec![
@@ -2791,9 +2802,7 @@ impl App {
             }
         }
         // Remove stale keys.
-        self.pm_config
-            .widget_order
-            .retain(|k| current.contains(k));
+        self.pm_config.widget_order.retain(|k| current.contains(k));
     }
 
     /// Rebuild the list of widget plugin indices.
@@ -3088,10 +3097,7 @@ fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
             let trimmed = combined.trim();
             // If the output is empty or just a JSON empty array/object (typical API response),
             // show a flash message instead of replacing the output pane.
-            if trimmed.is_empty()
-                || trimmed == "[]"
-                || trimmed == "{}"
-                || trimmed.starts_with('[')
+            if trimmed.is_empty() || trimmed == "[]" || trimmed == "{}" || trimmed.starts_with('[')
             {
                 state.status_message = Some((
                     format!("{cmd} done (exit {})", output.status),

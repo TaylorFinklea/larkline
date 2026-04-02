@@ -35,17 +35,17 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
         .direction(Direction::Vertical)
         .constraints(if has_widgets {
             vec![
-                Constraint::Length(3),              // Search bar
-                Constraint::Length(widget_height),   // Widget dashboard row
-                Constraint::Min(0),                 // Content area
-                Constraint::Length(1),              // Status bar
+                Constraint::Length(3),             // Search bar
+                Constraint::Length(widget_height), // Widget dashboard row
+                Constraint::Min(0),                // Content area
+                Constraint::Length(1),             // Status bar
             ]
         } else {
             vec![
-                Constraint::Length(3),  // Search bar
-                Constraint::Length(0),  // No widgets
+                Constraint::Length(3), // Search bar
+                Constraint::Length(0), // No widgets
                 Constraint::Min(0),    // Content area
-                Constraint::Length(1),  // Status bar
+                Constraint::Length(1), // Status bar
             ]
         })
         .split(area);
@@ -932,10 +932,7 @@ fn render_widget_row(
                 let max_lines = (area.height as usize).saturating_sub(2); // border eats 2
                 for item in output.items.iter().take(max_lines) {
                     let label = if item.label.len() > card_areas[i].width as usize - 3 {
-                        format!(
-                            "{}…",
-                            &item.label[..card_areas[i].width as usize - 4]
-                        )
+                        format!("{}…", &item.label[..card_areas[i].width as usize - 4])
                     } else {
                         item.label.clone()
                     };
@@ -1025,7 +1022,11 @@ fn render_plugin_manager(
                     Span::styled(
                         name.as_str(),
                         Style::default()
-                            .fg(if *enabled { theme.text } else { theme.text_dimmed })
+                            .fg(if *enabled {
+                                theme.text
+                            } else {
+                                theme.text_dimmed
+                            })
                             .bold(),
                     ),
                     Span::styled(
@@ -1066,14 +1067,15 @@ fn render_plugin_manager(
                 ]);
                 ListItem::new(line)
             }
-            PluginManagerRow::Setting {
-                label, value, ..
-            } => {
+            PluginManagerRow::Setting { label, value, .. } => {
                 let line = Line::from(vec![
                     Span::raw("    "),
                     Span::styled("⚙ ", Style::default().fg(theme.text_dimmed)),
                     Span::styled(label.as_str(), Style::default().fg(theme.text)),
-                    Span::styled(format!(" = {value}"), Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        format!(" = {value}"),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
                 ]);
                 ListItem::new(line)
             }

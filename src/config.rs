@@ -965,8 +965,10 @@ fn plugin_manager_path() -> std::path::PathBuf {
     let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         std::path::PathBuf::from(xdg).join("larkline")
     } else {
-        let home = std::env::var("HOME")
-            .map_or_else(|_| std::path::PathBuf::from("/tmp"), std::path::PathBuf::from);
+        let home = std::env::var("HOME").map_or_else(
+            |_| std::path::PathBuf::from("/tmp"),
+            std::path::PathBuf::from,
+        );
         home.join(".local").join("share").join("larkline")
     };
     base.join("plugin-manager.json")

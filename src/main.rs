@@ -289,7 +289,14 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
                     // If pull fails, re-clone.
                     std::fs::remove_dir_all(&cache)?;
                     let status = std::process::Command::new("git")
-                        .args(["clone", "--depth", "1", "-q", repo_url, &cache.to_string_lossy()])
+                        .args([
+                            "clone",
+                            "--depth",
+                            "1",
+                            "-q",
+                            repo_url,
+                            &cache.to_string_lossy(),
+                        ])
                         .status()?;
                     if !status.success() {
                         anyhow::bail!("Failed to clone plugin repository");
@@ -301,7 +308,14 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
                     std::fs::create_dir_all(parent)?;
                 }
                 let status = std::process::Command::new("git")
-                    .args(["clone", "--depth", "1", "-q", repo_url, &cache.to_string_lossy()])
+                    .args([
+                        "clone",
+                        "--depth",
+                        "1",
+                        "-q",
+                        repo_url,
+                        &cache.to_string_lossy(),
+                    ])
                     .status()?;
                 if !status.success() {
                     anyhow::bail!("Failed to clone plugin repository");
@@ -338,9 +352,7 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
                 println!("  + {}", name.to_string_lossy());
             }
 
-            println!(
-                "\nDone! {installed} plugins installed, {skipped} already present."
-            );
+            println!("\nDone! {installed} plugins installed, {skipped} already present.");
             println!("Plugin directory: {}", plugin_dir.display());
             println!("\nLaunch lark and press R to refresh the plugin list.");
         }
@@ -361,9 +373,16 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
                 }
                 let name = entry.file_name();
                 let manifest = path.join("manifest.toml");
-                let status = if manifest.exists() { "✅" } else { "⚠ no manifest" };
+                let status = if manifest.exists() {
+                    "✅"
+                } else {
+                    "⚠ no manifest"
+                };
                 let link = if path.is_symlink() {
-                    format!(" → {}", std::fs::read_link(&path).unwrap_or_default().display())
+                    format!(
+                        " → {}",
+                        std::fs::read_link(&path).unwrap_or_default().display()
+                    )
                 } else {
                     String::new()
                 };
