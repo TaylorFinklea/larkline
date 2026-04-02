@@ -1,7 +1,7 @@
 [plugin]
 name = "Git"
 description = "Git dashboard across your repos"
-version = "0.2.0"
+version = "0.3.0"
 author = "taylor"
 icon = "🌿"
 icon_nerd = "󰊢"
@@ -9,7 +9,7 @@ category = "dev"
 
 [[commands]]
 name = "Status"
-description = "Working tree status across all tracked repos"
+description = "Working tree status, ahead/behind, stash count"
 entry = "status.lua"
 quickkey = "gs"
 timeout_seconds = 15
@@ -19,11 +19,24 @@ widget_refresh_secs = 30
 
 [[commands]]
 name = "Branches"
-description = "Current branch and last commit across repos"
+description = "All branches with checkout, pull, delete actions"
 entry = "branches.lua"
 quickkey = "gb"
 timeout_seconds = 15
 prefetch = true
+
+[[commands]]
+name = "Log"
+description = "Recent commits with diff and cherry-pick actions"
+entry = "log.lua"
+quickkey = "gl"
+timeout_seconds = 15
+
+[[commands]]
+name = "Stash"
+description = "View and manage stashes — apply, pop, drop"
+entry = "stash.lua"
+timeout_seconds = 10
 
 [[commands]]
 name = "Manage Repos"
