@@ -147,4 +147,14 @@ pub enum Action {
     WidgetMoveLeft,
     /// Move the selected widget card right in order.
     WidgetMoveRight,
+    /// Open the widget picker overlay.
+    WidgetPickerOpen,
+    /// Close the widget picker overlay.
+    WidgetPickerClose,
+    /// Toggle a widget on/off in the picker.
+    WidgetPickerToggle,
+    /// Navigate up in the widget picker.
+    WidgetPickerUp,
+    /// Navigate down in the widget picker.
+    WidgetPickerDown,
 }

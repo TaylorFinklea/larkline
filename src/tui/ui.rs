@@ -110,6 +110,11 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     if let Some(ref picker) = state.theme_picker {
         render_theme_picker(frame, picker, theme, frame.area());
     }
+
+    // Widget picker overlay.
+    if let Some(ref picker) = state.widget_picker {
+        render_widget_picker(frame, picker, theme, frame.area());
+    }
 }
 
 fn render_search_bar(
@@ -1207,6 +1212,7 @@ fn render_status_bar(
                             // Widget row is focused — show widget-specific keys.
                             spans.extend(key_hint("h/l", "reorder", theme));
                             spans.extend(key_hint("⏎", "open", theme));
+                            spans.extend(key_hint("A", "add/remove", theme));
                             spans.extend(key_hint("D", "disable", theme));
                             spans.extend(key_hint("W", "hide all", theme));
                             spans.extend(key_hint("j/Esc", "back to list", theme));
@@ -1447,6 +1453,74 @@ fn render_theme_picker(frame: &mut Frame, picker: &ThemePickerState, theme: &The
 
     let hint = Paragraph::new(Span::styled(
         " Enter confirm · Esc cancel",
+        Style::default().fg(theme.text_dimmed),
+    ));
+    frame.render_widget(hint, inner_chunks[1]);
+    frame.render_widget(block, popup_area);
+}
+
+/// Render the widget picker as a centered popup with toggle checkboxes.
+fn render_widget_picker(
+    frame: &mut Frame,
+    picker: &crate::app::WidgetPickerState,
+    theme: &Theme,
+    area: Rect,
+) {
+    #[allow(clippy::cast_possible_truncation)]
+    let popup_height = (picker.entries.len() as u16 + 4).min(area.height.saturating_sub(2));
+    let popup_width: u16 = 45_u16.min(area.width.saturating_sub(4));
+
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            " Widgets ",
+            Style::default().fg(theme.accent).bold(),
+        ));
+
+    let items: Vec<ListItem> = picker
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let check = if entry.enabled { "[x]" } else { "[ ]" };
+            let text = format!(" {check} {} {}", entry.icon, entry.label);
+            let style = if i == picker.selected {
+                Style::default()
+                    .fg(theme.highlight_fg)
+                    .bg(theme.highlight_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else if entry.enabled {
+                Style::default().fg(theme.text)
+            } else {
+                Style::default().fg(theme.text_dimmed)
+            };
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(picker.selected));
+
+    let inner = block.inner(popup_area);
+
+    let inner_chunks = ratatui::layout::Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    let list = List::new(items);
+    frame.render_stateful_widget(list, inner_chunks[0], &mut list_state);
+
+    let hint = Paragraph::new(Span::styled(
+        " Space toggle · Esc close",
         Style::default().fg(theme.text_dimmed),
     ));
     frame.render_widget(hint, inner_chunks[1]);

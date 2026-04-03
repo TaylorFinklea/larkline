@@ -27,6 +27,7 @@ pub fn handle_key(
     has_form: bool,
     has_action_palette: bool,
     has_theme_picker: bool,
+    has_widget_picker: bool,
     power_menu: Option<&[PowerMenuCategory]>,
     pending_g: bool,
 ) -> Option<Action> {
@@ -43,6 +44,11 @@ pub fn handle_key(
     // Theme picker intercepts keys when open.
     if has_theme_picker {
         return handle_theme_picker(event);
+    }
+
+    // Widget picker intercepts keys when open.
+    if has_widget_picker {
+        return handle_widget_picker(event);
     }
 
     // Action palette intercepts keys when open.
@@ -144,6 +150,8 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
         KeyCode::Char('H') => Some(Action::WidgetMoveLeft),
         KeyCode::Char('L') => Some(Action::WidgetMoveRight),
         KeyCode::Char('D') => Some(Action::WidgetDisable),
+        // Widget picker — choose which widgets to show.
+        KeyCode::Char('A') => Some(Action::WidgetPickerOpen),
         // Plugin manager (P = Shift+P).
         KeyCode::Char('P') => Some(Action::PluginManagerOpen),
         _ => None,
@@ -323,6 +331,20 @@ fn handle_output_search(event: KeyEvent) -> Option<Action> {
         KeyCode::Up => Some(Action::MoveUp),
         KeyCode::Down => Some(Action::MoveDown),
         KeyCode::Char(c) if !c.is_control() => Some(Action::OutputSearch(c)),
+        _ => None,
+    }
+}
+
+/// Widget picker handler: j/k navigate, Space toggles, Esc/q closes.
+fn handle_widget_picker(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Char('j') | KeyCode::Down => Some(Action::WidgetPickerDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Action::WidgetPickerUp),
+        KeyCode::Char(' ') | KeyCode::Enter => Some(Action::WidgetPickerToggle),
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::WidgetPickerClose),
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::Quit)
+        }
         _ => None,
     }
 }

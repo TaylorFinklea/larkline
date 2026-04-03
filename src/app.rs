@@ -237,6 +237,8 @@ pub struct AppState {
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
     pub plugin_manager: Option<PluginManagerState>,
+    /// Widget picker overlay (shown when adding/removing widgets).
+    pub widget_picker: Option<WidgetPickerState>,
     /// Update hint: `Some("0.5.0")` when a newer version is available.
     pub update_hint: Option<String>,
     /// How larkline was installed (for upgrade instructions).
@@ -325,6 +327,28 @@ pub struct PowerMenuCategory {
 pub struct PowerMenuState {
     /// Categorized action groups.
     pub categories: Vec<PowerMenuCategory>,
+}
+
+/// A widget-eligible command for the widget picker overlay.
+#[derive(Debug, Clone)]
+pub struct WidgetPickerEntry {
+    /// Display name: "Plugin: Command" or just "Command".
+    pub label: String,
+    /// Icon from the manifest.
+    pub icon: String,
+    /// Key used in `disabled_widgets` — `"GroupKey:CommandName"`.
+    pub key: String,
+    /// Whether this widget is currently enabled (not in the disabled list).
+    pub enabled: bool,
+}
+
+/// Overlay state for the widget picker.
+#[derive(Debug, Clone)]
+pub struct WidgetPickerState {
+    /// All widget-eligible commands.
+    pub entries: Vec<WidgetPickerEntry>,
+    /// Currently highlighted entry.
+    pub selected: usize,
 }
 
 /// Overlay state for the theme preset picker.
@@ -630,6 +654,7 @@ impl App {
                             self.state.form_state.is_some(),
                             self.state.action_palette.is_some(),
                             self.state.theme_picker.is_some(),
+                            self.state.widget_picker.is_some(),
                             self.state
                                 .power_menu
                                 .as_ref()
@@ -2036,6 +2061,83 @@ impl App {
                 if !self.state.widget_indices.is_empty() {
                     self.state.widgets_visible = !self.state.widgets_visible;
                     self.state.widget_focused = false;
+                }
+            }
+
+            Action::WidgetPickerOpen => {
+                // Build entries from all widget-eligible commands.
+                let entries: Vec<WidgetPickerEntry> = self
+                    .state
+                    .plugins
+                    .iter()
+                    .filter(|m| m.widget)
+                    .map(|m| {
+                        let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
+                        let key = format!("{gk}:{}", m.name);
+                        let label = if let Some(ref pg) = m.plugin_group {
+                            format!("{pg}: {}", m.name)
+                        } else {
+                            m.name.clone()
+                        };
+                        let enabled = !self.pm_config.is_widget_disabled(gk, &m.name);
+                        WidgetPickerEntry {
+                            label,
+                            icon: m.icon.clone(),
+                            key,
+                            enabled,
+                        }
+                    })
+                    .collect();
+
+                if entries.is_empty() {
+                    self.state.status_message = Some((
+                        "No widget-eligible plugins found".to_string(),
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    self.state.widget_picker = Some(WidgetPickerState {
+                        entries,
+                        selected: 0,
+                    });
+                }
+            }
+
+            Action::WidgetPickerClose => {
+                self.state.widget_picker = None;
+            }
+
+            Action::WidgetPickerUp => {
+                if let Some(ref mut picker) = self.state.widget_picker {
+                    if picker.selected > 0 {
+                        picker.selected -= 1;
+                    }
+                }
+            }
+
+            Action::WidgetPickerDown => {
+                if let Some(ref mut picker) = self.state.widget_picker {
+                    if picker.selected + 1 < picker.entries.len() {
+                        picker.selected += 1;
+                    }
+                }
+            }
+
+            Action::WidgetPickerToggle => {
+                if let Some(ref mut picker) = self.state.widget_picker {
+                    if let Some(entry) = picker.entries.get_mut(picker.selected) {
+                        // Parse group_key and command_name from the key.
+                        if let Some((gk, cmd)) = entry.key.split_once(':') {
+                            self.pm_config.toggle_widget(gk, cmd);
+                            entry.enabled = !self.pm_config.is_widget_disabled(gk, cmd);
+                            if let Err(e) =
+                                crate::config::save_plugin_manager_config(&self.pm_config)
+                            {
+                                tracing::warn!(error = %e, "failed to save widget config");
+                            }
+                            self.rebuild_widget_indices();
+                            self.state.widgets_visible = !self.state.widget_indices.is_empty();
+                        }
+                    }
                 }
             }
 
