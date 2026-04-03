@@ -1203,12 +1203,30 @@ fn render_status_bar(
 
                 match state.mode {
                     Mode::Unified => {
-                        spans.extend(key_hint("j/k", "nav", theme));
-                        spans.extend(key_hint("⏎", "run", theme));
-                        spans.extend(key_hint("/", "search", theme));
-                        spans.extend(key_hint(":", "cmd", theme));
-                        spans.extend(key_hint("SPC", "menu", theme));
-                        spans.extend(key_hint("q", "quit", theme));
+                        if state.widget_focused {
+                            // Widget row is focused — show widget-specific keys.
+                            spans.extend(key_hint("h/l", "reorder", theme));
+                            spans.extend(key_hint("⏎", "open", theme));
+                            spans.extend(key_hint("D", "disable", theme));
+                            spans.extend(key_hint("W", "hide all", theme));
+                            spans.extend(key_hint("j/Esc", "back to list", theme));
+                        } else {
+                            spans.extend(key_hint("j/k", "nav", theme));
+                            spans.extend(key_hint("⏎", "run", theme));
+                            spans.extend(key_hint("/", "search", theme));
+                            spans.extend(key_hint(":", "cmd", theme));
+                            spans.extend(key_hint("SPC", "menu", theme));
+                            spans.extend(key_hint("q", "quit", theme));
+                            if !state.widget_indices.is_empty() {
+                                if state.widgets_visible {
+                                    // Widgets showing — hint how to focus them.
+                                    spans.extend(key_hint("K", "widgets", theme));
+                                } else {
+                                    // Widgets hidden — hint how to show them.
+                                    spans.extend(key_hint("W", "show widgets", theme));
+                                }
+                            }
+                        }
                         if state.sort_mode != crate::app::SortMode::Alpha {
                             spans.push(Span::styled(
                                 format!("  ↓ {}", state.sort_mode.label()),
