@@ -24,91 +24,46 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 | 31 | Secrets: macOS Keychain fallback + `lark secret` CLI |
 | 32 | Standard plugins: file search, quicklinks, encode/decode, emoji, translate, Home Assistant |
 | 33 | Plugin Manager: LazyVim-style enable/disable, settings, secret status |
-| v0.2.0 | Published release: Homebrew formula, 35 plugins, CHANGELOG |
+| v0.2.0 | Published release: Homebrew formula, 35 plugins |
+| v0.3.0 | Calendar, ccusage/codex-usage, lark.nvim, plugin distribution |
+| v0.3.1 | Homebrew formula rename (larkline), brew upgrade fix |
+| v0.4.0 | Dashboard widgets, widget management, git deep-dive, developer plugin, CI fmt fixes |
+| v0.5.0 | Background update checker, Docker deep-dive (6 commands, Portainer-style) |
 
-## Completed (post-polish)
+## Completed (post-v0.5.0)
 
-- [x] UX polish: flat list, quickkey priority, sidebar ratio, icons, vim mode transitions
-- [x] Secrets: .env + env var + macOS Keychain fallback, `lark secret set/list/delete` CLI
-- [x] Standard plugin library: 5 new plugins filling Raycast gaps
-- [x] Home Assistant plugin: devices, toggle, scenes, automations
-- [x] Plugin Manager: full-screen tree view, enable/disable, settings, secret status
-- [x] Publishing: v0.2.0 release, Homebrew tap updated
+- [x] Dashboard Widgets: bordered card panes, auto-refresh, reorder/disable/toggle
+- [x] Widget picker: overlay to choose which widgets to show
+- [x] Widget discoverability: contextual status bar hints
+- [x] Background update checker: GitHub API, daily cache, install method detection
+- [x] Docker deep-dive: containers (stats/logs/exec/widget), compose, images, volumes, networks, system
+- [x] Git deep-dive: richer status, branches, log, stash
+- [x] Developer plugin + Claude Code skill
+- [x] Automated release pipeline: CI builds + auto-updates Homebrew tap
+- [x] Context-aware power menu (adapts to focused element)
 
 ## Next Up
 
-### Neovim Plugin (`lark.nvim`)
-
-Neovim integration that opens Lark as a floating terminal inside Neovim, with context awareness.
-
-**Core idea:**
-- Open Lark in a floating terminal window (`:Lark` command or keymap)
-- Set `LARK_CWD` to the buffer's project root (git root) so plugins like Git, File Search, and Ports use the correct context
-- Pass the current file path as `LARK_FILE` for file-aware plugins
-- On action completion (e.g. open file), send the result back to Neovim (open buffer, run command, etc.)
-
-**Implementation approach:**
-- Lua plugin for Neovim (`lua/lark/init.lua`)
-- Uses `vim.fn.termopen()` or `vim.api.nvim_open_term()` in a floating window
-- Passes environment variables for context (`LARK_CWD`, `LARK_FILE`, `LARK_FILETYPE`)
-- Optional: `lark invoke` JSON output piped back to Neovim for action dispatch
-- Installable via lazy.nvim: `{ "tfinklea/lark.nvim" }`
-
-**Stretch goals:**
-- Telescope-style picker that uses Lark's plugin results as a source
-- `:LarkSearch <query>` that pre-fills the search field
-- File Search results open directly in Neovim buffers
-- Git plugin actions (checkout branch, etc.) run in Neovim's terminal
-
-### Dashboard Widgets (Priority: High)
-
-Auto-refreshing status widgets at the top of the unified list — like Raycast menu bar items but terminal-native. Commands you use frequently (Git Status, GitHub PRs, Workflow Runs) show live summaries without needing to open them.
-
-**Core idea:**
-- Plugins opt in via a new `widget` field in manifest or command config
-- Widget defines: what data to show (a compact summary), refresh interval (cron-like)
-- Widgets render as a compact row/section above the command list
-- Clicking/entering a widget opens the full command output
-- The prefetch cache already powers background execution — widgets extend this with scheduled re-execution and a compact display format
-
-**Design questions to resolve:**
-- Widget display format: single-line summary? Multi-line card? Configurable?
-- Plugin API: `on_widget()` callback returning a compact summary vs. deriving from existing `on_run()` output (e.g., first N items, item count, status text)
-- Scheduling: per-widget cron string in manifest, or a global "widget refresh" interval?
-- Configuration: which widgets are active should be user-configurable (Plugin Manager?)
-- Layout: horizontal row of widgets at top? Vertical section? Collapsible?
-
-**Example manifest:**
-```toml
-[[commands]]
-name = "Status"
-entry = "status.lua"
-prefetch = true
-widget = true
-widget_refresh = "30s"
-widget_summary = "count"  # or "first", "custom"
-```
-
-**Inspiration:**
-- Raycast menu bar extras (weather, media, batteries — compact, auto-refresh)
-- LazyVim dashboard (recent files, project info at launch)
-- tmux status bar (compact, always-visible info)
-- Datadog/Grafana dashboards (widgets with configurable data sources)
-
 ### Plugin Deep-Dive
 
-Iterate on each plugin individually to bring quality up to Raycast standards:
-- Better error handling and edge cases
-- Richer actions per item
-- Loading states and caching tuning
-- Documentation and screenshots
+Continue iterating on individual plugins to Raycast quality:
+- Kubernetes: log streaming, describe pod, context switching
+- SSH: connection status, recent connections
+- Weather: forecast view, location setting
+- GitHub: review request count, workflow status icons
+
+### Neovim Plugin (`lark.nvim`)
+
+Stretch goals remaining:
+- Action dispatch back to Neovim (file search opens buffers)
+- Telescope-style picker using Lark's plugin results as a source
 
 ### Publishing & Distribution
 
 - Publish to crates.io (`cargo install larkline`)
 - AUR package for Arch Linux
 - Nix flake
-- Automated release pipeline (done: scripts/release.sh + CI tap update)
+- Fix `lark plugin sync` to update existing plugins (not just add new)
 
 ## Constraints
 

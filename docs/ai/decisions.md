@@ -33,3 +33,19 @@
 **Context:** Sidebar width was fixed at 28/72 for both browse and ViewOutput modes. Taylor wanted a wider sidebar in browse mode and the ability to tune it.
 
 **Decision:** New `sidebar_ratio` config setting (default 50, range 20-80) controls browse-with-preview width. ViewOutput always uses 28% regardless. Clamped at init time.
+
+## ADR-006: Background update checker with daily cache (2026-04-03)
+
+**Context:** Users install larkline via Homebrew or Cargo but have no way to know when a new version is available. Widget feature was invisible to v0.3.1 users.
+
+**Decision:** Check GitHub releases API once per day in a background tokio task. Cache result to `~/.local/share/larkline/update-check.json`. Detect install method from binary path (Homebrew prefix vs `.cargo/bin`). Show upgrade hint in status bar.
+
+**Consequences:** Zero-latency on cached hits (read JSON on startup). 5-second timeout on API calls, fully non-blocking via oneshot channel. Users see actionable upgrade command specific to their install method.
+
+## ADR-007: Widget picker overlay for discoverability (2026-04-03)
+
+**Context:** Widget management was buried in keybindings (K/W/H/L/D) that only the developer knew about. Taylor (the creator) couldn't figure out how to add/remove widgets.
+
+**Decision:** Add a centered popup overlay (like theme picker) showing all widget-eligible commands with [x]/[ ] checkboxes. Triggered by `A` in Normal mode. Space toggles. Persists to existing `plugin-manager.json` disabled_widgets list. Also added contextual status bar hints: `K widgets` / `W show widgets` / `A add/remove`.
+
+**Consequences:** Widget management is now discoverable from the status bar without reading docs. Reuses existing PluginManagerConfig persistence — no new state file.

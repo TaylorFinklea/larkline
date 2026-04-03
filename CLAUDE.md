@@ -101,6 +101,8 @@ Core dependencies are locked in `docs/ARCHITECTURE.md` under Technology Stack. D
 - **Phase 7 (Enhanced Output):** ANSI rendering (`ansi-to-tui`), shell action execution with Y/N confirmation, table output (`columns` + `metadata` on items), streaming output (newline-delimited JSON, engine-level dispatch), Nerd Font icon system (`icon_nerd` field, `icon_set` config toggle), standard plugin library (7 Lua + 2 shell plugins)
 - **Phase 6 (Distribution & Community):** `--help`/`-h` flag, `lark init-plugin <name>` scaffolder (Lua + `--shell`), README polish, `icon_set` in default config template
 - **Phase 8 (Unified Search):** Prefetch cache (`ExecutionSource`, `CachedResult`, `execute_all()`), `Mode::Unified` replaces Browse/Search, `UnifiedRow` grouped sections + items, nucleo item-level fuzzy filter, action feedback flash messages, `max_items_per_section` config, `prefetch: bool` manifest field
+- **v0.4.0:** Dashboard widgets (card panes, auto-refresh, reorder/disable), widget management, plugin manager, git deep-dive, developer plugin + AI skill, context-aware power menu
+- **v0.5.0:** Background update checker (GitHub API, daily cache, install method detection), Docker deep-dive (6 commands — full Portainer replacement), widget picker overlay, widget discoverability hints
 
 ## Keybindings (defaults)
 
