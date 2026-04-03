@@ -1,7 +1,7 @@
 [plugin]
 name = "Docker"
-description = "Manage containers, images, volumes, and Compose projects"
-version = "0.2.0"
+description = "Full container management — containers, images, volumes, networks, compose, system"
+version = "0.3.0"
 author = "larkline"
 icon = "🐳"
 icon_nerd = "󰡨"
@@ -9,31 +9,45 @@ category = "dev"
 
 [[commands]]
 name = "Containers"
-description = "List all containers with start/stop/restart/logs actions"
+description = "Running and stopped containers with logs, exec, stats, start/stop"
 entry = "containers.lua"
 quickkey = "dc"
 timeout_seconds = 10
 prefetch = true
 widget = true
-widget_refresh_secs = 30
+widget_refresh_secs = 15
+
+[[commands]]
+name = "Compose"
+description = "Compose stacks with up/down/restart/logs/ps"
+entry = "compose.lua"
+quickkey = "dd"
+timeout_seconds = 15
 
 [[commands]]
 name = "Images"
-description = "List local Docker images with remove/inspect actions"
+description = "Local images with pull, remove, and prune"
 entry = "images.lua"
 quickkey = "di"
 timeout_seconds = 10
 
 [[commands]]
 name = "Volumes"
-description = "List Docker volumes with inspect and prune"
+description = "Volumes with inspect, remove, and prune"
 entry = "volumes.lua"
 quickkey = "dv"
 timeout_seconds = 10
 
 [[commands]]
-name = "Compose"
-description = "Detect Compose projects and manage services"
-entry = "compose.lua"
-quickkey = "dd"
+name = "Networks"
+description = "Docker networks with inspect and remove"
+entry = "networks.lua"
+quickkey = "dn"
+timeout_seconds = 10
+
+[[commands]]
+name = "System"
+description = "Disk usage, system info, prune all unused resources"
+entry = "system.lua"
+quickkey = "ds"
 timeout_seconds = 15
