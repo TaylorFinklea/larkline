@@ -1266,6 +1266,17 @@ fn render_status_bar(
         }
     }
 
+    // Append update hint at the end of the status bar if available.
+    if let Some(ref version) = state.update_hint {
+        let hint = state.install_method.upgrade_hint();
+        spans.push(Span::styled(
+            format!("  ↑ v{version} available: {hint}"),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
     frame.render_widget(bar, area);
 }

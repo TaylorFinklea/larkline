@@ -15,6 +15,7 @@ mod history;
 mod input;
 mod plugin;
 mod tui;
+mod update;
 
 /// Returns shell alias/function text that binds Ctrl+L to launch `lark`.
 fn alias_for_shell(shell: &str) -> String {

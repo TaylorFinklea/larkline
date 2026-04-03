@@ -237,6 +237,10 @@ pub struct AppState {
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
     pub plugin_manager: Option<PluginManagerState>,
+    /// Update hint: `Some("0.5.0")` when a newer version is available.
+    pub update_hint: Option<String>,
+    /// How larkline was installed (for upgrade instructions).
+    pub install_method: crate::update::InstallMethod,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -586,10 +590,26 @@ impl App {
     /// Run the main event loop until the user quits.
     // The event loop uses crossterm's sync poll + tokio::spawn for plugins.
     // No direct .await calls here, but `run` must be async so main can await it.
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, clippy::too_many_lines)]
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         // Kick off background prefetch for all eligible plugins.
         self.engine.execute_all();
+
+        // Detect install method and check for updates in the background.
+        self.state.install_method = crate::update::detect_install_method();
+        self.state.update_hint = crate::update::cached_update_available();
+
+        let (update_tx, update_rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        let needs_check = self.state.update_hint.is_none()
+            && !crate::update::load_cache().is_some_and(|c| crate::update::cache_is_fresh(&c));
+        if needs_check {
+            tokio::spawn(async move {
+                let _ = update_tx.send(crate::update::check_for_update().await);
+            });
+        } else {
+            drop(update_tx);
+        }
+        let mut update_rx = Some(update_rx);
 
         while !self.state.should_quit {
             self.refresh_markdown_cache();
@@ -676,6 +696,16 @@ impl App {
                         self.engine.execute(*pidx);
                     }
                     self.rebuild_unified_list();
+                }
+            }
+
+            // Check for background update result (non-blocking).
+            if let Some(ref mut rx) = update_rx {
+                if let Ok(result) = rx.try_recv() {
+                    if let Some(version) = result {
+                        self.state.update_hint = Some(version);
+                    }
+                    update_rx = None;
                 }
             }
         }
