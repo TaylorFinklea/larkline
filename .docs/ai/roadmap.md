@@ -78,6 +78,8 @@ Expand the plugin library with three new integrations:
 
 ## Backlog (parallel work for smaller models)
 
+<!-- tier3_owner: claude -->
+
 These items can be worked on by cheaper AI assistants alongside any phase. They are scoped, low-risk, and don't require deep architectural knowledge.
 
 ### Guardrails
