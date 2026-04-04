@@ -24,7 +24,7 @@ Copy this template and fill it in at the end of each work session. Update `curre
 
 ## Decisions Made
 
-If any architectural decisions were made, add them to `docs/ai/decisions.md` as a new ADR entry.
+If any architectural decisions were made, add them to `.docs/ai/decisions.md` as a new ADR entry.
 
 ## Current State
 

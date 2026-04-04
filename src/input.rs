@@ -342,9 +342,7 @@ fn handle_widget_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Char('k') | KeyCode::Up => Some(Action::WidgetPickerUp),
         KeyCode::Char(' ') | KeyCode::Enter => Some(Action::WidgetPickerToggle),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::WidgetPickerClose),
-        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         _ => None,
     }
 }

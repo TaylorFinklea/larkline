@@ -8,21 +8,7 @@ All agents working on this codebase should leverage:
 
 ## AI Handoff Workflow
 
-### Session Start
-
-Read these before doing any work:
-1. `docs/ai/roadmap.md` — durable goals, milestones, constraints
-2. `docs/ai/current-state.md` — active branch, recent progress, blockers, open questions
-3. `docs/ai/next-steps.md` — exact next actions as a checklist
-
-### Session End
-
-Before ending a work session, update:
-1. `docs/ai/current-state.md` — branch, progress, changed files, blockers, validation status
-2. `docs/ai/next-steps.md` — checked-off completed items, added new next actions
-3. `docs/ai/decisions.md` — append a new ADR entry if any architectural decisions were made
-
-Use `docs/ai/handoff-template.md` as a guide for what to include.
+Handoff state lives in `.docs/ai/` (the global default). See `~/CLAUDE.md` for the full session start/end workflow.
 
 ## Research Before Implementing
 
@@ -59,7 +45,7 @@ When modifying any contract, verify all producers and consumers still work. Run 
 
 ## Current Status
 
-See `docs/ai/current-state.md` for live status. See `docs/ai/roadmap.md` for completed milestones and priorities.
+See `.docs/ai/current-state.md` for live status. See `.docs/ai/roadmap.md` for completed milestones and priorities.
 
 ## Release Artifacts
 
