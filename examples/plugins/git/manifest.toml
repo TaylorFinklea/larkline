@@ -39,6 +39,14 @@ entry = "stash.lua"
 timeout_seconds = 10
 
 [[commands]]
+name = "Sync"
+description = "Repos needing push/pull — review unpushed commits, push or pull"
+entry = "sync.lua"
+quickkey = "gp"
+timeout_seconds = 30
+prefetch = true
+
+[[commands]]
 name = "Manage Repos"
 description = "Add or remove tracked repositories"
 entry = "manage.lua"
