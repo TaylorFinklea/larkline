@@ -1,40 +1,113 @@
 -- AI Projects Dashboard — one row per project with status summary.
+-- Helpers are inlined because the Lark sandbox has no require/dofile.
 
-local lib = require("lib")
+local function discover_projects()
+    local home = lark.env("HOME") or "/tmp"
+    local git_dir = home .. "/git"
+    local raw = lark.exec("ls", { "-1", git_dir })
+    if not raw or raw == "" then return {} end
+    local projects = {}
+    for name in raw:gmatch("[^\n]+") do
+        local base = git_dir .. "/" .. name
+        local ls_new = lark.exec("ls", { base .. "/.docs/ai/current-state.md" })
+        local ls_old = lark.exec("ls", { base .. "/docs/ai/current-state.md" })
+        local ai_dir = nil
+        if ls_new and ls_new:match("current%-state%.md") then
+            ai_dir = base .. "/.docs/ai"
+        elseif ls_old and ls_old:match("current%-state%.md") then
+            ai_dir = base .. "/docs/ai"
+        end
+        if ai_dir then
+            projects[#projects + 1] = { name = name, path = base, ai_dir = ai_dir }
+        end
+    end
+    table.sort(projects, function(a, b) return a.name < b.name end)
+    return projects
+end
+
+local function read_file(path)
+    local content = lark.exec("cat", { path })
+    if content and content ~= "" then return content end
+    return nil
+end
+
+local function extract_date(c)
+    if not c then return nil end
+    return c:match("(%d%d%d%d%-%d%d%-%d%d)")
+end
+
+local function extract_branch(c)
+    if not c then return "?" end
+    return c:match("##%s*Active Branch.-\n%s*`([^`]+)`")
+        or c:match("##%s*Branch.-\n%s*.-`([^`]+)`") or "?"
+end
+
+local function count_open(c)
+    if not c then return 0 end
+    local n = 0; for _ in c:gmatch("%-%s%[%s%]") do n = n + 1 end; return n
+end
+
+local function count_done(c)
+    if not c then return 0 end
+    local n = 0; for _ in c:gmatch("%-%s%[x%]") do n = n + 1 end; return n
+end
+
+local function count_decisions(c)
+    if not c then return 0 end
+    local n = 0; for _ in c:gmatch("\n##%s+[^\n]") do n = n + 1 end; return n
+end
+
+local function recency(date_str)
+    if not date_str then return "⚪", "unknown" end
+    local today_raw = lark.exec("date", { "+%Y-%m-%d" })
+    if not today_raw then return "⚪", "unknown" end
+    local ty, tm, td = today_raw:gsub("%s+$", ""):match("(%d+)-(%d+)-(%d+)")
+    local dy, dm, dd = date_str:match("(%d+)-(%d+)-(%d+)")
+    if not ty or not dy then return "⚪", "unknown" end
+    local diff = (tonumber(ty)*10000+tonumber(tm)*100+tonumber(td))
+              - (tonumber(dy)*10000+tonumber(dm)*100+tonumber(dd))
+    if diff <= 2 then return "🟢", "fresh"
+    elseif diff <= 7 then return "🟡", "recent"
+    else return "⚪", "stale" end
+end
+
+local MONTHS = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
+local function short_date(ds)
+    if not ds then return "???" end
+    local _, m, d = ds:match("(%d+)-(%d+)-(%d+)")
+    if not m then return "???" end
+    return MONTHS[tonumber(m) or 1] .. " " .. (d or "??")
+end
+
+local function extract_active_milestone(c)
+    if not c then return nil end
+    return c:match("###%s+(v%d[^\n]*)") or c:match("###%s+(M%d[^\n]*)")
+        or c:match("###%s+(Phase%s+%d[^\n]*)")
+end
+
+-- Dashboard logic.
 
 lark.register({
     on_run = function()
-        local projects = lib.discover_projects()
-
+        local projects = discover_projects()
         if #projects == 0 then
-            return {
-                title = "AI Projects",
-                items = {
-                    { label = "No projects found", detail = "No .docs/ai/ or docs/ai/ dirs in ~/git", icon = "📭" },
-                },
-            }
+            return { title = "AI Projects", items = {
+                { label = "No projects found", detail = "No .docs/ai/ or docs/ai/ in ~/git", icon = "📭" },
+            }}
         end
 
-        -- Sort by recency: fresh first, then recent, then stale.
-        -- Within each tier, alphabetical.
         local order = { fresh = 1, recent = 2, stale = 3, unknown = 4 }
         local enriched = {}
         for _, proj in ipairs(projects) do
-            local state_content = lib.read_file(proj.ai_dir .. "/current-state.md")
-            local steps_content = lib.read_file(proj.ai_dir .. "/next-steps.md")
-
-            local date = lib.extract_date(state_content)
-            local branch = lib.extract_branch(state_content)
-            local open = lib.count_open_items(steps_content)
-            local icon, tier = lib.recency(date)
-
+            local state = read_file(proj.ai_dir .. "/current-state.md")
+            local steps = read_file(proj.ai_dir .. "/next-steps.md")
+            local date = extract_date(state)
+            local branch = extract_branch(state)
+            local open = count_open(steps)
+            local icon, tier = recency(date)
             enriched[#enriched + 1] = {
-                proj = proj,
-                date = date,
-                branch = branch,
-                open = open,
-                icon = icon,
-                tier = tier,
+                proj = proj, date = date, branch = branch,
+                open = open, icon = icon, tier = tier,
                 sort_key = order[tier] or 4,
             }
         end
@@ -45,31 +118,18 @@ lark.register({
         end)
 
         local items = {}
-        local fresh_count = 0
         local total_open = 0
-
         for _, e in ipairs(enriched) do
-            if e.tier == "fresh" or e.tier == "recent" then fresh_count = fresh_count + 1 end
             total_open = total_open + e.open
-
-            local detail_parts = {}
-            detail_parts[#detail_parts + 1] = e.branch
-            detail_parts[#detail_parts + 1] = lib.short_date(e.date)
+            local parts = { e.branch, short_date(e.date) }
             if e.open > 0 then
-                detail_parts[#detail_parts + 1] = e.open .. " next step" .. (e.open ~= 1 and "s" or "")
+                parts[#parts + 1] = e.open .. " next step" .. (e.open ~= 1 and "s" or "")
             end
-
             items[#items + 1] = {
                 label = e.proj.name,
-                detail = table.concat(detail_parts, "  ·  "),
+                detail = table.concat(parts, "  ·  "),
                 icon = e.icon,
                 action = "open:" .. e.proj.name,
-                metadata = {
-                    columns = { "Branch", "Updated", "Open" },
-                    branch = e.branch,
-                    updated = lib.short_date(e.date),
-                    open = tostring(e.open),
-                },
             }
         end
 
@@ -84,8 +144,7 @@ lark.register({
         local project_name = action:match("^open:(.+)$")
         if not project_name then return end
 
-        -- Find the project and show sub-commands.
-        local projects = lib.discover_projects()
+        local projects = discover_projects()
         local proj = nil
         for _, p in ipairs(projects) do
             if p.name == project_name then proj = p; break end
@@ -96,68 +155,58 @@ lark.register({
             }}
         end
 
-        local state_content = lib.read_file(proj.ai_dir .. "/current-state.md")
-        local steps_content = lib.read_file(proj.ai_dir .. "/next-steps.md")
-        local roadmap_content = lib.read_file(proj.ai_dir .. "/roadmap.md")
-        local decisions_content = lib.read_file(proj.ai_dir .. "/decisions.md")
+        local state = read_file(proj.ai_dir .. "/current-state.md")
+        local steps = read_file(proj.ai_dir .. "/next-steps.md")
+        local roadmap = read_file(proj.ai_dir .. "/roadmap.md")
+        local decs = read_file(proj.ai_dir .. "/decisions.md")
 
-        local date = lib.extract_date(state_content)
-        local branch = lib.extract_branch(state_content)
-        local open_steps = lib.count_open_items(steps_content)
-        local done_steps = lib.count_done_items(steps_content)
-        local milestone = lib.extract_active_milestone(roadmap_content)
-        local num_decisions = lib.count_decisions(decisions_content)
+        local date = extract_date(state)
+        local branch = extract_branch(state)
+        local open = count_open(steps)
+        local done = count_done(steps)
+        local milestone = extract_active_milestone(roadmap)
+        local num_decs = count_decisions(decs)
 
         local items = {}
 
-        -- Current State row.
-        local state_detail = branch .. "  ·  " .. lib.short_date(date)
         items[#items + 1] = {
             label = "Current State",
-            detail = state_detail,
+            detail = branch .. "  ·  " .. short_date(date),
             icon = "📊",
-            action = "view:" .. proj.ai_dir .. "/current-state.md",
+            action = "shell:cat " .. proj.ai_dir .. "/current-state.md",
         }
 
-        -- Next Steps row.
-        local steps_detail = open_steps .. " open"
-        if done_steps > 0 then steps_detail = steps_detail .. ", " .. done_steps .. " done" end
+        local steps_detail = open .. " open"
+        if done > 0 then steps_detail = steps_detail .. ", " .. done .. " done" end
         items[#items + 1] = {
             label = "Next Steps",
             detail = steps_detail,
             icon = "✅",
-            action = "view:" .. proj.ai_dir .. "/next-steps.md",
+            action = "shell:cat " .. proj.ai_dir .. "/next-steps.md",
         }
 
-        -- Roadmap row.
-        local roadmap_detail = milestone or "no active milestone"
         items[#items + 1] = {
             label = "Roadmap",
-            detail = roadmap_detail,
+            detail = milestone or "no active milestone",
             icon = "🗺️",
-            action = "view:" .. proj.ai_dir .. "/roadmap.md",
+            action = "shell:cat " .. proj.ai_dir .. "/roadmap.md",
         }
 
-        -- Decisions row.
-        local dec_detail = num_decisions .. " ADR" .. (num_decisions ~= 1 and "s" or "")
+        local dec_detail = num_decs .. " ADR" .. (num_decs ~= 1 and "s" or "")
         items[#items + 1] = {
             label = "Decisions",
             detail = dec_detail,
             icon = "📝",
-            action = "view:" .. proj.ai_dir .. "/decisions.md",
+            action = "shell:cat " .. proj.ai_dir .. "/decisions.md",
         }
 
-        -- Open in editor action.
         items[#items + 1] = {
-            label = "Open project in editor",
+            label = "Open in editor",
             detail = proj.path,
             icon = "📂",
-            action = "shell:open:" .. proj.path,
+            action = "shell:open " .. proj.path,
         }
 
-        return {
-            title = project_name,
-            items = items,
-        }
+        return { title = project_name, items = items }
     end,
 })
