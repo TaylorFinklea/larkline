@@ -1,0 +1,42 @@
+[plugin]
+name = "AI Projects"
+description = "Cross-project AI handoff dashboard"
+version = "0.1.0"
+author = "taylor"
+icon = "🧠"
+icon_nerd = "󱙺"
+category = "dev"
+
+[[commands]]
+name = "Dashboard"
+description = "All projects with handoff docs — status, recency, next steps"
+entry = "dashboard.lua"
+quickkey = "ai"
+timeout_seconds = 10
+prefetch = true
+widget = true
+widget_refresh_secs = 120
+
+[[commands]]
+name = "Current State"
+description = "View a project's current state — branch, progress, blockers"
+entry = "current-state.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Next Steps"
+description = "View a project's next steps checklist"
+entry = "next-steps.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Roadmap"
+description = "View a project's roadmap — vision, milestones, backlog"
+entry = "roadmap.lua"
+timeout_seconds = 10
+
+[[commands]]
+name = "Decisions"
+description = "View a project's architecture decision records"
+entry = "decisions.lua"
+timeout_seconds = 10

@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-04-03
+> Updated: 2026-04-04
 
 ## Active Branch
 
@@ -8,14 +8,14 @@
 
 ## Recent Progress (this session)
 
-- **Handoff migration**: moved `docs/ai/` → `.docs/ai/` to match global Claude Code standard
-  - Updated CLAUDE.md to defer handoff workflow to global instructions
-  - Updated AGENTS.md references
-  - Updated internal cross-references in handoff-template.md and next-steps.md
-- **Roadmap v3 restructure**: split into themed releases (expensive model phases) + backlog (smaller model parallel work)
-  - v0.6.0 = Plugin Deep-Dives (k8s, GitHub, SSH, Weather) + 4 required UX items
-  - v0.7.0 = New Plugins (Obsidian, Tailscale, Linear)
-  - Backlog has guardrails: no core Rust, no new deps, tests must pass
+- **AI Projects plugin**: new multi-command Lua plugin (`examples/plugins/ai-projects/`)
+  - Dashboard: auto-scans `~/git` for `.docs/ai/` or `docs/ai/`, shows recency dots, branch, next-step counts
+  - Sub-commands: Current State, Next Steps, Roadmap, Decisions — each parses the markdown into structured items
+  - Widget-enabled with 2-minute refresh
+  - Shared `lib.lua` helper: project discovery, markdown parsing, recency calculation
+  - 7 files: manifest.toml, lib.lua, dashboard.lua, current-state.lua, next-steps.lua, roadmap.lua, decisions.lua
+- **Handoff migration**: moved `docs/ai/` → `.docs/ai/` to match global standard
+- **Roadmap v3**: themed releases + backlog tiers for smaller AI models
 
 ## Current Version
 
@@ -25,4 +25,4 @@ v0.5.0 (released on GitHub, Homebrew tap auto-updated)
 
 - `cargo test` — 141 tests passing
 - `cargo clippy -- -D warnings` — clean
-- `cargo fmt` — applied (pre-existing fmt nit in input.rs)
+- Lua syntax — all 6 plugin files pass `luac -p`
