@@ -1,11 +1,32 @@
 [plugin]
 name = "Weather"
-description = "Current conditions from wttr.in (no API key needed)"
-version = "0.1.0"
-author = "taylor"
+description = "Current conditions, forecast, and saved locations"
+version = "0.2.0"
+author = "larkline"
 icon = "☁"
 icon_nerd = "󰖐"
-entry = "init.lua"
-timeout_seconds = 10
-
 category = "info"
+
+[[commands]]
+name = "Current"
+description = "Current conditions from wttr.in"
+entry = "current.lua"
+quickkey = "wc"
+timeout_seconds = 10
+prefetch = true
+widget = true
+widget_refresh_secs = 300
+
+[[commands]]
+name = "Forecast"
+description = "3-day forecast with hourly breakdowns"
+entry = "forecast.lua"
+quickkey = "wf"
+timeout_seconds = 15
+
+[[commands]]
+name = "Locations"
+description = "Manage saved weather locations"
+entry = "locations.lua"
+quickkey = "wl"
+timeout_seconds = 5

@@ -1,10 +1,40 @@
 [plugin]
 name = "SSH"
-description = "Quick-connect to SSH hosts from ~/.ssh/config"
-version = "0.1.0"
+description = "Host management, connections, and key inventory"
+version = "0.2.0"
 author = "larkline"
 icon = "🔑"
 icon_nerd = "󰣀"
-entry = "init.lua"
-timeout_seconds = 5
 category = "dev"
+
+[[commands]]
+name = "Hosts"
+description = "Quick-connect to SSH hosts from ~/.ssh/config"
+entry = "hosts.lua"
+quickkey = "sh"
+timeout_seconds = 10
+prefetch = true
+widget = true
+widget_refresh_secs = 120
+
+[[commands]]
+name = "Connections"
+description = "Active SSH connections on this machine"
+entry = "connections.lua"
+quickkey = "sc"
+timeout_seconds = 5
+widget = true
+widget_refresh_secs = 30
+
+[[commands]]
+name = "Recent"
+description = "Recently connected SSH hosts from shell history"
+entry = "recent.lua"
+timeout_seconds = 5
+
+[[commands]]
+name = "Keys"
+description = "SSH keys in ~/.ssh with fingerprints"
+entry = "keys.lua"
+quickkey = "sk"
+timeout_seconds = 5

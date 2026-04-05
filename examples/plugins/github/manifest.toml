@@ -1,7 +1,7 @@
 [plugin]
 name = "GitHub"
-description = "PRs, reviews, and CI/CD workflow runs"
-version = "0.2.0"
+description = "PRs, reviews, CI/CD, issues, and notifications"
+version = "0.3.0"
 author = "larkline"
 icon = "🐙"
 icon_nerd = "󰊤"
@@ -23,20 +23,41 @@ default = "false"
 
 [[commands]]
 name = "My PRs"
-description = "Open pull requests you authored"
+description = "Open pull requests you authored with merge/close actions"
 entry = "my-prs.lua"
 quickkey = "gp"
 timeout_seconds = 15
+prefetch = true
 widget = true
 widget_refresh_secs = 60
 
 [[commands]]
 name = "Review Requests"
-description = "PRs requesting your review"
+description = "PRs requesting your review with approve/comment actions"
 entry = "reviews.lua"
+quickkey = "gr"
 timeout_seconds = 15
+prefetch = true
 widget = true
 widget_refresh_secs = 60
+
+[[commands]]
+name = "Notifications"
+description = "Unread GitHub notifications"
+entry = "notifications.lua"
+quickkey = "gn"
+timeout_seconds = 15
+widget = true
+widget_refresh_secs = 120
+
+[[commands]]
+name = "Issues"
+description = "Open issues assigned to you"
+entry = "issues.lua"
+quickkey = "gi"
+timeout_seconds = 15
+widget = true
+widget_refresh_secs = 120
 
 [[commands]]
 name = "Workflow Runs"
