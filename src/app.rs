@@ -347,8 +347,42 @@ pub struct WidgetPickerEntry {
 pub struct WidgetPickerState {
     /// All widget-eligible commands.
     pub entries: Vec<WidgetPickerEntry>,
-    /// Currently highlighted entry.
+    /// Currently highlighted entry (index into `filtered_indices` if filtering, else `entries`).
     pub selected: usize,
+    /// Active search query for filtering widget entries.
+    pub query: String,
+    /// Indices into `entries` matching the current query. Empty = show all.
+    pub filtered_indices: Vec<usize>,
+}
+
+impl WidgetPickerState {
+    /// Rebuild `filtered_indices` based on the current `query`.
+    pub fn rebuild_filter(&mut self) {
+        if self.query.is_empty() {
+            self.filtered_indices.clear();
+        } else {
+            let q = self.query.to_lowercase();
+            self.filtered_indices = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.label.to_lowercase().contains(&q))
+                .map(|(i, _)| i)
+                .collect();
+        }
+    }
+
+    /// Get the visible entries (filtered or all).
+    pub fn visible_entries(&self) -> Vec<(usize, &WidgetPickerEntry)> {
+        if self.filtered_indices.is_empty() && self.query.is_empty() {
+            self.entries.iter().enumerate().collect()
+        } else {
+            self.filtered_indices
+                .iter()
+                .filter_map(|&i| self.entries.get(i).map(|e| (i, e)))
+                .collect()
+        }
+    }
 }
 
 /// Overlay state for the theme preset picker.
@@ -660,6 +694,7 @@ impl App {
                                 .as_ref()
                                 .map(|m| m.categories.as_slice()),
                             self.state.pending_g,
+                            self.state.widget_focused,
                         ) {
                             // Clear pending_g for any action except PendingG itself.
                             if !matches!(action, Action::PendingG) {
@@ -1085,8 +1120,20 @@ impl App {
                 self.rebuild_unified_list();
             }
 
+            Action::WidgetCardOpen => {
+                // Enter on a focused widget card: drill into full output.
+                if self.state.widget_focused {
+                    if let Some(&plugin_index) =
+                        self.state.widget_indices.get(self.state.widget_selected)
+                    {
+                        self.state.widget_focused = false;
+                        self.open_plugin_in_view_output(plugin_index);
+                    }
+                }
+            }
+
             Action::Select => {
-                // Widget focused: l/Enter → next card.
+                // Widget focused: l/Right → next card.
                 if self.state.widget_focused {
                     let max = self.state.widget_indices.len().saturating_sub(1);
                     if self.state.widget_selected < max {
@@ -2098,6 +2145,8 @@ impl App {
                     self.state.widget_picker = Some(WidgetPickerState {
                         entries,
                         selected: 0,
+                        query: String::new(),
+                        filtered_indices: Vec::new(),
                     });
                 }
             }
@@ -2116,7 +2165,8 @@ impl App {
 
             Action::WidgetPickerDown => {
                 if let Some(ref mut picker) = self.state.widget_picker {
-                    if picker.selected + 1 < picker.entries.len() {
+                    let count = picker.visible_entries().len();
+                    if picker.selected + 1 < count {
                         picker.selected += 1;
                     }
                 }
@@ -2124,7 +2174,17 @@ impl App {
 
             Action::WidgetPickerToggle => {
                 if let Some(ref mut picker) = self.state.widget_picker {
-                    if let Some(entry) = picker.entries.get_mut(picker.selected) {
+                    // Resolve actual entry index through filter.
+                    let actual_idx = if picker.query.is_empty() {
+                        picker.selected
+                    } else {
+                        picker
+                            .filtered_indices
+                            .get(picker.selected)
+                            .copied()
+                            .unwrap_or(picker.selected)
+                    };
+                    if let Some(entry) = picker.entries.get_mut(actual_idx) {
                         // Parse group_key and command_name from the key.
                         if let Some((gk, cmd)) = entry.key.split_once(':') {
                             self.pm_config.toggle_widget(gk, cmd);
@@ -2138,6 +2198,41 @@ impl App {
                             self.state.widgets_visible = !self.state.widget_indices.is_empty();
                         }
                     }
+                }
+            }
+
+            Action::WidgetPickerSearch(c) => {
+                if let Some(ref mut picker) = self.state.widget_picker {
+                    picker.query.push(c);
+                    picker.rebuild_filter();
+                    picker.selected = 0;
+                }
+            }
+
+            Action::WidgetPickerBackspace => {
+                if let Some(ref mut picker) = self.state.widget_picker {
+                    picker.query.pop();
+                    picker.rebuild_filter();
+                    picker.selected = 0;
+                }
+            }
+
+            Action::RunUpgrade => {
+                if let Some(ref hint) = self.state.update_hint {
+                    let (cmd, args) = match self.state.install_method {
+                        crate::update::InstallMethod::Cargo => {
+                            ("cargo", vec!["install".to_string(), "larkline".to_string()])
+                        }
+                        crate::update::InstallMethod::Homebrew
+                        | crate::update::InstallMethod::Unknown => {
+                            ("brew", vec!["upgrade".to_string(), "larkline".to_string()])
+                        }
+                    };
+                    self.state.pending_confirmation = Some(PendingConfirmation {
+                        description: format!("Upgrade to v{hint}?"),
+                        command: cmd.to_string(),
+                        args,
+                    });
                 }
             }
 
@@ -2383,20 +2478,29 @@ impl App {
                     },
                     PowerMenuCategory {
                         name: "App".to_string(),
-                        items: vec![
-                            PowerMenuItem {
+                        items: {
+                            let mut items = vec![PowerMenuItem {
                                 key: 'P',
                                 key_hint: "P".to_string(),
                                 label: "Plugins".to_string(),
                                 action: Action::PluginManagerOpen,
-                            },
-                            PowerMenuItem {
+                            }];
+                            if self.state.update_hint.is_some() {
+                                items.push(PowerMenuItem {
+                                    key: 'U',
+                                    key_hint: "U".to_string(),
+                                    label: "Upgrade lark".to_string(),
+                                    action: Action::RunUpgrade,
+                                });
+                            }
+                            items.push(PowerMenuItem {
                                 key: 'q',
                                 key_hint: "q".to_string(),
                                 label: "Quit".to_string(),
                                 action: Action::Quit,
-                            },
-                        ],
+                            });
+                            items
+                        },
                     },
                 ]
             }
@@ -2483,20 +2587,29 @@ impl App {
                     },
                     PowerMenuCategory {
                         name: "App".to_string(),
-                        items: vec![
-                            PowerMenuItem {
+                        items: {
+                            let mut items = vec![PowerMenuItem {
                                 key: 'P',
                                 key_hint: "P".to_string(),
                                 label: "Plugins".to_string(),
                                 action: Action::PluginManagerOpen,
-                            },
-                            PowerMenuItem {
+                            }];
+                            if self.state.update_hint.is_some() {
+                                items.push(PowerMenuItem {
+                                    key: 'U',
+                                    key_hint: "U".to_string(),
+                                    label: "Upgrade lark".to_string(),
+                                    action: Action::RunUpgrade,
+                                });
+                            }
+                            items.push(PowerMenuItem {
                                 key: 'q',
                                 key_hint: "q".to_string(),
                                 label: "Quit".to_string(),
                                 action: Action::Quit,
-                            },
-                        ],
+                            });
+                            items
+                        },
                     },
                 ]
             }

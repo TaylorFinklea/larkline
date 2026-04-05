@@ -516,19 +516,63 @@ fn render_output_pane(
         return;
     }
 
-    // Error state
+    // Error state — show type, message, and recovery hints.
     if let Some(ref error) = state.plugin_error {
-        let lines = vec![
+        let (icon, label) = if error.contains("timed out") {
+            ("⏱", "Plugin timed out")
+        } else if error.contains("invalid") || error.contains("syntax") {
+            ("⚠", "Invalid plugin output")
+        } else {
+            ("✖", "Plugin failed")
+        };
+
+        // Word-wrap the error message for the available width.
+        let inner_width = area.width.saturating_sub(4) as usize;
+        let mut error_lines = Vec::new();
+        for raw_line in error.lines() {
+            if raw_line.len() <= inner_width {
+                error_lines.push(Line::from(Span::styled(
+                    raw_line.to_string(),
+                    Style::default().fg(theme.error),
+                )));
+            } else {
+                // Simple word wrap.
+                let mut current = String::new();
+                for word in raw_line.split_whitespace() {
+                    if current.len() + word.len() + 1 > inner_width && !current.is_empty() {
+                        error_lines.push(Line::from(Span::styled(
+                            current.clone(),
+                            Style::default().fg(theme.error),
+                        )));
+                        current.clear();
+                    }
+                    if !current.is_empty() {
+                        current.push(' ');
+                    }
+                    current.push_str(word);
+                }
+                if !current.is_empty() {
+                    error_lines.push(Line::from(Span::styled(
+                        current,
+                        Style::default().fg(theme.error),
+                    )));
+                }
+            }
+        }
+
+        let mut lines = vec![
             Line::from(Span::styled(
-                "✖ Plugin failed",
+                format!("{icon} {label}"),
                 Style::default().fg(theme.error).bold(),
             )),
             Line::from(""),
-            Line::from(Span::styled(
-                error.as_str(),
-                Style::default().fg(theme.error),
-            )),
         ];
+        lines.extend(error_lines);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Press r to retry · h or Esc to go back",
+            Style::default().fg(theme.text_dimmed),
+        )));
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, area);
         return;
@@ -1466,8 +1510,11 @@ fn render_widget_picker(
     theme: &Theme,
     area: Rect,
 ) {
+    let visible = picker.visible_entries();
+    let has_query = !picker.query.is_empty();
+    let extra_rows = if has_query { 5 } else { 4 }; // +1 for search line
     #[allow(clippy::cast_possible_truncation)]
-    let popup_height = (picker.entries.len() as u16 + 4).min(area.height.saturating_sub(2));
+    let popup_height = (visible.len() as u16 + extra_rows).min(area.height.saturating_sub(2));
     let popup_width: u16 = 45_u16.min(area.width.saturating_sub(4));
 
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
@@ -1476,23 +1523,27 @@ fn render_widget_picker(
 
     frame.render_widget(Clear, popup_area);
 
+    let title = if has_query {
+        format!(" Widgets [{}/{}] ", visible.len(), picker.entries.len())
+    } else {
+        " Widgets ".to_string()
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(theme.accent))
         .title(Span::styled(
-            " Widgets ",
+            title,
             Style::default().fg(theme.accent).bold(),
         ));
 
-    let items: Vec<ListItem> = picker
-        .entries
+    let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
+        .map(|(vi, (_orig_idx, entry))| {
             let check = if entry.enabled { "[x]" } else { "[ ]" };
             let text = format!(" {check} {} {}", entry.icon, entry.label);
-            let style = if i == picker.selected {
+            let style = if vi == picker.selected {
                 Style::default()
                     .fg(theme.highlight_fg)
                     .bg(theme.highlight_bg)
@@ -1511,18 +1562,46 @@ fn render_widget_picker(
 
     let inner = block.inner(popup_area);
 
+    let constraints = if has_query {
+        vec![
+            Constraint::Length(1), // search line
+            Constraint::Min(1),    // list
+            Constraint::Length(1), // hints
+        ]
+    } else {
+        vec![
+            Constraint::Min(1),    // list
+            Constraint::Length(1), // hints
+        ]
+    };
     let inner_chunks = ratatui::layout::Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints(constraints)
         .split(inner);
 
-    let list = List::new(items);
-    frame.render_stateful_widget(list, inner_chunks[0], &mut list_state);
+    let (list_area, hint_area) = if has_query {
+        let search_line = Paragraph::new(Span::styled(
+            format!(" / {}", picker.query),
+            Style::default().fg(theme.accent),
+        ));
+        frame.render_widget(search_line, inner_chunks[0]);
+        (inner_chunks[1], inner_chunks[2])
+    } else {
+        (inner_chunks[0], inner_chunks[1])
+    };
 
+    let list = List::new(items);
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    let hint_text = if has_query {
+        " Space toggle · ⌫ clear · Esc close"
+    } else {
+        " Space toggle · type to filter · Esc close"
+    };
     let hint = Paragraph::new(Span::styled(
-        " Space toggle · Esc close",
+        hint_text,
         Style::default().fg(theme.text_dimmed),
     ));
-    frame.render_widget(hint, inner_chunks[1]);
+    frame.render_widget(hint, hint_area);
     frame.render_widget(block, popup_area);
 }

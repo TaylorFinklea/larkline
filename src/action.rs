@@ -157,4 +157,12 @@ pub enum Action {
     WidgetPickerUp,
     /// Navigate down in the widget picker.
     WidgetPickerDown,
+    /// Search within the widget picker (filter entries).
+    WidgetPickerSearch(char),
+    /// Delete the last character from the widget picker search query.
+    WidgetPickerBackspace,
+    /// Open the focused widget card's full output (Enter on widget).
+    WidgetCardOpen,
+    /// Run the system upgrade command shown in the update hint.
+    RunUpgrade,
 }

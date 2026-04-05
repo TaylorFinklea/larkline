@@ -30,6 +30,7 @@ pub fn handle_key(
     has_widget_picker: bool,
     power_menu: Option<&[PowerMenuCategory]>,
     pending_g: bool,
+    widget_focused: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -85,7 +86,7 @@ pub fn handle_key(
         VimMode::Command => handle_command(event),
         VimMode::Insert => handle_insert(event, keybindings),
         VimMode::Normal => match mode {
-            Mode::Unified => handle_browse_normal(event, keybindings),
+            Mode::Unified => handle_browse_normal(event, keybindings, widget_focused),
             Mode::ViewOutput => handle_view_output(event, keybindings),
             Mode::PluginManager => handle_plugin_manager(event),
         },
@@ -103,7 +104,11 @@ fn handle_confirmation(event: KeyEvent) -> Option<Action> {
 }
 
 /// Normal-mode browse handler: navigation keys active, no quickkeys or char search.
-fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
+fn handle_browse_normal(
+    event: KeyEvent,
+    keybindings: &ResolvedKeybindings,
+    widget_focused: bool,
+) -> Option<Action> {
     // Check configurable browse map (j/k/q/R/Enter).
     if let Some(action) = keybindings.browse_map.get(&event) {
         return Some(match action {
@@ -115,6 +120,14 @@ fn handle_browse_normal(event: KeyEvent, keybindings: &ResolvedKeybindings) -> O
             BrowseAction::ScrollHalfPageDown => Action::ScrollHalfPageDown,
             BrowseAction::ScrollHalfPageUp => Action::ScrollHalfPageUp,
         });
+    }
+
+    // Widget-focused Enter: drill into widget card output.
+    if widget_focused
+        && matches!(event.code, KeyCode::Enter)
+        && event.modifiers == KeyModifiers::NONE
+    {
+        return Some(Action::WidgetCardOpen);
     }
 
     match event.code {
@@ -335,14 +348,16 @@ fn handle_output_search(event: KeyEvent) -> Option<Action> {
     }
 }
 
-/// Widget picker handler: j/k navigate, Space toggles, Esc/q closes.
+/// Widget picker handler: j/k navigate, Space toggles, type to filter, Esc/q closes.
 fn handle_widget_picker(event: KeyEvent) -> Option<Action> {
     match event.code {
         KeyCode::Char('j') | KeyCode::Down => Some(Action::WidgetPickerDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Action::WidgetPickerUp),
         KeyCode::Char(' ') | KeyCode::Enter => Some(Action::WidgetPickerToggle),
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::WidgetPickerClose),
+        KeyCode::Backspace | KeyCode::Delete => Some(Action::WidgetPickerBackspace),
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        KeyCode::Char(c) if !c.is_control() => Some(Action::WidgetPickerSearch(c)),
         _ => None,
     }
 }
