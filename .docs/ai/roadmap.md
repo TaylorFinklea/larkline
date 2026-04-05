@@ -49,10 +49,10 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 Bring four plugins to Raycast quality and fix the top UX pain points.
 
 **Plugin deep-dives:**
-- [ ] Kubernetes: log streaming, describe pod, context switching, namespace picker
-- [ ] GitHub: review request count, workflow status icons, PR quick-actions
-- [ ] SSH: connection status, recent connections, quick-connect
-- [ ] Weather: forecast view, location settings, hourly/daily toggle
+- [x] Kubernetes: 6 commands — pods (describe/exec/logs), deployments (scale/restart/rollout), services, namespaces (resource counts), logs (per-container), contexts
+- [x] GitHub: 5 commands — my-prs (merge/squash/close), reviews (approve/request-changes), notifications (mark-read), issues (close), workflows
+- [x] SSH: 4 commands — hosts (nc reachability), connections (active from ps), recent (shell history), keys (fingerprints/agent)
+- [x] Weather: 3 commands — current (weather icons, astronomy), forecast (3-day hourly), locations (saved via lark.store)
 
 **UX (required for release):**
 - [x] Widget card Enter → drill into full command output

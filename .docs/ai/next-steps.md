@@ -2,21 +2,25 @@
 
 > Updated: 2026-04-05
 
-## v0.6.0 — Plugin Deep-Dives (phase work — remaining)
+## v0.6.0 — Ready to Release
 
-### Plugin Deep-Dives
-- [x] Git: richer status, branches, log, stash (v0.4.0)
-- [x] Docker: full Portainer-style — 6 commands with stats, logs, exec, compose, networks, system (v0.5.0)
-- [ ] Kubernetes: log streaming, describe pod, context switching, namespace picker
-- [ ] GitHub: review request count, workflow status icons, PR quick-actions
-- [ ] SSH: connection status, recent connections, quick-connect
-- [ ] Weather: forecast view, location settings, hourly/daily toggle
+All items complete:
+- [x] GitHub deep-dive (5 commands)
+- [x] SSH deep-dive (4 commands)
+- [x] Weather deep-dive (3 commands)
+- [x] Kubernetes deep-dive (6 commands)
+- [x] Widget card Enter drill-in
+- [x] Update checker → power menu upgrade action
+- [x] Widget picker search/filter
+- [x] Better plugin error display
 
-### UX (all complete)
-- [x] Widget card Enter → drill into full command output
-- [x] Update checker → power menu action (U key) with confirmation dialog
-- [x] Widget picker search/filter with match count
-- [x] Better plugin error display: categorized icons, word wrap, recovery hints
+**To release:** Bump `Cargo.toml` version to 0.6.0, tag, push.
+
+## v0.7.0 — New Plugins
+
+- [ ] Obsidian/Notes: quick note search, recent notes, vault browser
+- [ ] Tailscale/VPN: device status, exit nodes, network overview
+- [ ] Linear/Jira: assigned issues, sprint board, quick status changes
 
 ## Backlog (can be done by smaller models in parallel)
 
@@ -35,3 +39,4 @@ See `.docs/ai/roadmap.md` → Backlog section for full list and guardrails.
 - AI Projects plugin (cross-project handoff dashboard)
 - Git Sync command (repos needing push/pull)
 - v0.6.0 UX: widget drill-in, upgrade menu, picker search, error display
+- Plugin deep-dives: GitHub (5 cmd), SSH (4 cmd), Weather (3 cmd), Kubernetes (6 cmd)
