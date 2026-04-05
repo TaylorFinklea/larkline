@@ -1,4 +1,5 @@
 -- Claude Usage: Sessions — token and cost breakdown by conversation.
+-- SHARED: fmt_tokens(), fmt_cost(), get_since() — shared across daily, sessions, monthly, weekly, blocks
 
 local function fmt_tokens(n)
     if type(n) ~= "number" then return "0" end
