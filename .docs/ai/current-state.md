@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-04-04
+> Updated: 2026-04-05
 
 ## Active Branch
 
@@ -8,14 +8,12 @@
 
 ## Recent Progress (this session)
 
-- **AI Projects plugin**: new multi-command Lua plugin (`examples/plugins/ai-projects/`)
-  - Dashboard: auto-scans `~/git` for `.docs/ai/` or `docs/ai/`, shows recency dots, branch, next-step counts
-  - Sub-commands: Current State, Next Steps, Roadmap, Decisions — each parses the markdown into structured items
-  - Widget-enabled with 2-minute refresh
-  - Shared `lib.lua` helper: project discovery, markdown parsing, recency calculation
-  - 7 files: manifest.toml, lib.lua, dashboard.lua, current-state.lua, next-steps.lua, roadmap.lua, decisions.lua
-- **Handoff migration**: moved `docs/ai/` → `.docs/ai/` to match global standard
-- **Roadmap v3**: themed releases + backlog tiers for smaller AI models
+- **v0.6.0 UX polish (all 4 items complete):**
+  - Widget card Enter → drill into full command output (`WidgetCardOpen` action, `open_plugin_in_view_output`)
+  - Power menu "Upgrade lark" (U key) — shows confirmation with brew/cargo command when update available
+  - Widget picker search/filter — type to filter entries, Backspace to clear, title shows match count
+  - Better plugin error display — categorized icons (timeout/invalid/failed), word-wrapped message, recovery hints
+- Previous session: roadmap restructure, handoff migration, AI Projects plugin, Git Sync command, backlog audit
 
 ## Current Version
 
@@ -25,4 +23,4 @@ v0.5.0 (released on GitHub, Homebrew tap auto-updated)
 
 - `cargo test` — 141 tests passing
 - `cargo clippy -- -D warnings` — clean
-- Lua syntax — all 6 plugin files pass `luac -p`
+- `cargo fmt -- --check` — clean

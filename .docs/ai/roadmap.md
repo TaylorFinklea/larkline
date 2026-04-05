@@ -55,10 +55,10 @@ Bring four plugins to Raycast quality and fix the top UX pain points.
 - [ ] Weather: forecast view, location settings, hourly/daily toggle
 
 **UX (required for release):**
-- [ ] Widget card Enter → drill into full command output
-- [ ] Update checker → power menu action (run upgrade command)
-- [ ] Widget picker search/filter for large plugin lists
-- [ ] Better plugin error display: user-friendly messages + retry hints
+- [x] Widget card Enter → drill into full command output
+- [x] Update checker → power menu action (run upgrade command)
+- [x] Widget picker search/filter for large plugin lists
+- [x] Better plugin error display: user-friendly messages + retry hints
 
 ### v0.7.0 — New Plugins
 
