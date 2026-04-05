@@ -1,6 +1,8 @@
 -- AI Projects Dashboard — one row per project with status summary.
 -- Helpers are inlined because the Lark sandbox has no require/dofile.
+-- Canonical source: lib.lua — copy updated helpers from there when editing.
 
+-- Helpers (copied from lib.lua):
 local function discover_projects()
     local home = lark.env("HOME") or "/tmp"
     local git_dir = home .. "/git"

@@ -3,6 +3,23 @@
 -- copies the helpers it needs inline, since the Lark sandbox does not
 -- expose require/dofile/loadfile. This file serves as the canonical
 -- source — edit here, then sync to the command files.
+--
+-- SYNC INSTRUCTIONS:
+-- When editing helpers here, copy the updated helper functions to each
+-- command file that uses them: dashboard.lua, roadmap.lua, next-steps.lua,
+-- current-state.lua, decisions.lua.
+--
+-- Helpers provided:
+--   discover_projects()  - scan ~/git for AI project directories
+--   read_file(path)     - read file contents
+--   extract_date(c)     - extract YYYY-MM-DD date from content
+--   extract_branch(c)    - extract active git branch from content
+--   count_open(c)       - count unchecked todo items
+--   count_done(c)       - count checked todo items
+--   count_decisions(c)  - count architecture decision records
+--   recency(date_str)   - return (icon, tier) for date freshness
+--   short_date(ds)      - format date as "Mon DD"
+--   extract_active_milestone(c) - extract current milestone header
 
 -- Scan ~/git for directories containing .docs/ai/ or docs/ai/.
 local function discover_projects()
