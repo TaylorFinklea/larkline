@@ -110,6 +110,21 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [ ] Example plugin READMEs
 - [ ] Keybinding reference accuracy check vs actual defaults in code
 
+### Haiku Tier (trivial — smallest models)
+
+- [ ] AI Projects plugin: deduplicate inlined `discover_projects()` + helpers across 5 Lua files — extract canonical copy in lib.lua with instructions for manual paste (sandbox has no require)
+- [ ] Docker plugin: deduplicate Docker availability check across 6 command files (`containers.lua`, `compose.lua`, `images.lua`, `volumes.lua`, `networks.lua`, `system.lua`)
+- [ ] Fix `ip-addresses/run.sh`: raw `$var` interpolation in JSON on lines 13, 40 — use jq instead
+- [ ] Remove commented-out dead code in plugin Lua files (scan all `examples/plugins/` for orphan comments)
+- [ ] Add `icon_nerd` field to any plugin manifest missing it (audit all 40 manifests)
+
+### Sonnet Tier (moderate — mid-tier models)
+
+- [ ] Docker plugin: extract shared helpers (availability check, result parsing, action builders) into pattern matching AI Projects' approach
+- [ ] Git plugin: `status.lua`, `branches.lua`, `log.lua`, `stash.lua` all duplicate `repo_name()` and repo validation — extract shared pattern
+- [ ] AI Projects plugin: dashboard `on_action` drill-in sub-commands render file content via `shell:cat` — convert to structured parsed output (like the sub-command files already do)
+- [ ] Add integration test: verify all 40 plugin manifests parse correctly and have valid `entry` files pointing to existing Lua/shell scripts
+
 ### New Simple Plugins (follow existing patterns)
 
 - [ ] Additional shell snippet sets
