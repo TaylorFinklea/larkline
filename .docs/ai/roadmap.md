@@ -116,7 +116,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [ ] Docker plugin: deduplicate Docker availability check across 6 command files (`containers.lua`, `compose.lua`, `images.lua`, `volumes.lua`, `networks.lua`, `system.lua`)
 - [x] Fix `ip-addresses/run.sh`: raw `$var` interpolation in JSON on lines 13, 40 — use jq instead
 - [x] Remove commented-out dead code in plugin Lua files (scan all `examples/plugins/` for orphan comments) <!-- no orphan comments found -->
-- [ ] Add `icon_nerd` field to any plugin manifest missing it (audit all 40 manifests)
+- [x] Add `icon_nerd` field to any plugin manifest missing it (audit all 40 manifests) <!-- all 39 manifests already have icon_nerd -->
 
 ### Sonnet Tier (moderate — mid-tier models)
 
