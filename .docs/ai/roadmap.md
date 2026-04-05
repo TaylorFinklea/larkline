@@ -117,7 +117,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [x] Fix `ip-addresses/run.sh`: raw `$var` interpolation in JSON on lines 13, 40 — use jq instead
 - [x] Remove commented-out dead code in plugin Lua files (scan all `examples/plugins/` for orphan comments) <!-- no orphan comments found -->
 - [x] Add `icon_nerd` field to any plugin manifest missing it (audit all 40 manifests) <!-- all 39 manifests already have icon_nerd -->
-- [ ] Fix `examples/plugins/system-info/run.sh` lines 36, 40, 45, 50: `$host`, `$mem_detail`, `$disk_info`, and `$load` are interpolated raw into a heredoc JSON — rewrite using `jq --arg` to prevent corruption if values contain quotes or special characters
+- [x] Fix `examples/plugins/system-info/run.sh` lines 36, 40, 45, 50: `$host`, `$mem_detail`, `$disk_info`, and `$load` are interpolated raw into a heredoc JSON — rewrite using `jq --arg` to prevent corruption if values contain quotes or special characters
 - [ ] Fix `src/tui/ui.rs:983-984`: label truncation uses byte-index `&item.label[..n]` which panics on multi-byte UTF-8 — replace with `.chars().take(n).collect::<String>()`
 - [ ] Fix `src/tui/ui.rs:417-418`: same byte-index truncation pattern (`&value[..40]`) in copy-menu preview — replace with `.chars().take(40).collect::<String>()`
 - [ ] ccusage plugin: `fmt_tokens()`, `fmt_cost()`, and `get_since()` are copy-pasted identically across `daily.lua`, `sessions.lua`, `monthly.lua`, `weekly.lua`, `blocks.lua` (lines 3-25 in each) — add a comment block at the top of each file with a `-- SHARED:` marker so a future lib.lua extraction is trivially diff-able

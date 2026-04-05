@@ -31,25 +31,18 @@ fi
 # Hostname
 host=$(hostname -s 2>/dev/null || echo "unknown")
 
-cat <<EOF
-{
-  "title": "System Info — $host",
-  "items": [
-    {
-      "label": "Memory",
-      "detail": "$mem_detail",
-      "icon": "🧠"
-    },
-    {
-      "label": "Disk (root)",
-      "detail": "$disk_info",
-      "icon": "💾"
-    },
-    {
-      "label": "Load Average",
-      "detail": "$load",
-      "icon": "📈"
-    }
-  ]
-}
-EOF
+items=$(jq -n \
+  --arg title "System Info — $host" \
+  --arg mem "$mem_detail" \
+  --arg disk "$disk_info" \
+  --arg load_avg "$load" \
+  '{
+    title: $title,
+    items: [
+      { label: "Memory", detail: $mem, icon: "🧠" },
+      { label: "Disk (root)", detail: $disk, icon: "💾" },
+      { label: "Load Average", detail: $load_avg, icon: "📈" }
+    ]
+  }')
+
+printf '%s\n' "$items"
