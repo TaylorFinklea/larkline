@@ -1,14 +1,20 @@
 -- Docker: Containers — full container management with logs, exec, stats, lifecycle.
 
+local function check_docker(plugin_name)
+    local which = lark.exec("which", { "docker" })
+    if not which or not which:match("docker") then
+        return {
+            title = plugin_name,
+            items = { { label = "Docker not installed", icon = "!" } },
+        }
+    end
+    return nil
+end
+
 lark.register({
     on_run = function()
-        local which = lark.exec("which", { "docker" })
-        if not which or not which:match("docker") then
-            return {
-                title = "Containers",
-                items = { { label = "Docker not installed", icon = "!" } },
-            }
-        end
+        local err = check_docker("Containers")
+        if err then return err end
 
         -- Get container list with all details.
         local raw = lark.exec("docker", {

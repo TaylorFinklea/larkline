@@ -1,14 +1,20 @@
 -- Docker: Volumes — list volumes with inspect, remove, and prune actions.
 
+local function check_docker(plugin_name)
+    local which = lark.exec("which", { "docker" })
+    if not which or not which:match("docker") then
+        return {
+            title = plugin_name,
+            items = { { label = "Docker not installed", icon = "!" } },
+        }
+    end
+    return nil
+end
+
 lark.register({
     on_run = function()
-        local which = lark.exec("which", { "docker" })
-        if not which or not which:match("docker") then
-            return {
-                title = "Volumes",
-                items = { { label = "Docker not installed", icon = "!" } },
-            }
-        end
+        local err = check_docker("Volumes")
+        if err then return err end
 
         local raw = lark.exec("docker", {
             "volume", "ls", "--format",

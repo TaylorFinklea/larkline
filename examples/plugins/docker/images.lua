@@ -1,14 +1,20 @@
 -- Docker: Images — list local images with pull, remove, prune, and inspect.
 
+local function check_docker(plugin_name)
+    local which = lark.exec("which", { "docker" })
+    if not which or not which:match("docker") then
+        return {
+            title = plugin_name,
+            items = { { label = "Docker not installed", icon = "!" } },
+        }
+    end
+    return nil
+end
+
 lark.register({
     on_run = function()
-        local which = lark.exec("which", { "docker" })
-        if not which or not which:match("docker") then
-            return {
-                title = "Images",
-                items = { { label = "Docker not installed", icon = "!" } },
-            }
-        end
+        local err = check_docker("Images")
+        if err then return err end
 
         local raw = lark.exec("docker", {
             "images", "--format",

@@ -1,14 +1,20 @@
 -- Docker: Networks — list networks with inspect, remove, and prune.
 
+local function check_docker(plugin_name)
+    local which = lark.exec("which", { "docker" })
+    if not which or not which:match("docker") then
+        return {
+            title = plugin_name,
+            items = { { label = "Docker not installed", icon = "!" } },
+        }
+    end
+    return nil
+end
+
 lark.register({
     on_run = function()
-        local which = lark.exec("which", { "docker" })
-        if not which or not which:match("docker") then
-            return {
-                title = "Networks",
-                items = { { label = "Docker not installed", icon = "!" } },
-            }
-        end
+        local err = check_docker("Networks")
+        if err then return err end
 
         local raw = lark.exec("docker", {
             "network", "ls", "--format",
