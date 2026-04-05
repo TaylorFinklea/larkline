@@ -1,4 +1,5 @@
 -- GitHub: Review Requests — PRs requesting your review with approve/comment actions.
+-- SHARED: gh_headers() — shared across my-prs, reviews, issues, notifications
 
 local function gh_headers(token)
     return {

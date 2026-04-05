@@ -1,4 +1,5 @@
 -- GitHub: My PRs — open pull requests you authored with quick-actions.
+-- SHARED: gh_headers() — shared across my-prs, reviews, issues, notifications
 
 local function gh_headers(token)
     return {

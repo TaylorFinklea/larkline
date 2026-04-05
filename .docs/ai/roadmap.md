@@ -121,7 +121,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [ ] Fix `src/tui/ui.rs:983-984`: label truncation uses byte-index `&item.label[..n]` which panics on multi-byte UTF-8 — replace with `.chars().take(n).collect::<String>()`
 - [ ] Fix `src/tui/ui.rs:417-418`: same byte-index truncation pattern (`&value[..40]`) in copy-menu preview — replace with `.chars().take(40).collect::<String>()`
 - [x] ccusage plugin: `fmt_tokens()`, `fmt_cost()`, and `get_since()` are copy-pasted identically across `daily.lua`, `sessions.lua`, `monthly.lua`, `weekly.lua`, `blocks.lua` (lines 3-25 in each) — add a comment block at the top of each file with a `-- SHARED:` marker so a future lib.lua extraction is trivially diff-able
-- [ ] github plugin: `gh_headers()` is copy-pasted identically across `my-prs.lua:3`, `reviews.lua:3`, `issues.lua:3`, `notifications.lua:3` — add a `-- SHARED: gh_headers` comment marker in each file for the same future extraction
+- [x] github plugin: `gh_headers()` is copy-pasted identically across `my-prs.lua:3`, `reviews.lua:3`, `issues.lua:3`, `notifications.lua:3` — add a `-- SHARED: gh_headers` comment marker in each file for the same future extraction
 
 ### Sonnet Tier (moderate — mid-tier models)
 

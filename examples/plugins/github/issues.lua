@@ -1,4 +1,5 @@
 -- GitHub: Issues — open issues assigned to you.
+-- SHARED: gh_headers() — shared across my-prs, reviews, issues, notifications
 
 local function gh_headers(token)
     return {

@@ -1,4 +1,5 @@
 -- GitHub: Notifications — unread notifications with mark-read actions.
+-- SHARED: gh_headers() — shared across my-prs, reviews, issues, notifications
 
 local function gh_headers(token)
     return {
