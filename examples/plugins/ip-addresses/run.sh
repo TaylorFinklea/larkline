@@ -10,7 +10,12 @@ items=()
 public_ip=$(curl -4 -s --connect-timeout 3 --max-time 5 ip.me 2>/dev/null | tr -d '[:space:]')
 if [[ "$public_ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
     items+=(
-        "{\"label\":\"${public_ip}\",\"detail\":\"public\",\"icon\":\"🌍\",\"actions\":[{\"id\":\"copy\",\"label\":\"Copy\",\"command\":\"clipboard\",\"args\":[\"${public_ip}\"]}]}"
+        "$(jq -n \
+            --arg label "$public_ip" \
+            --arg detail "public" \
+            --arg icon "🌍" \
+            --argjson actions "[{\"id\":\"copy\",\"label\":\"Copy\",\"command\":\"clipboard\",\"args\":[\"$public_ip\"]}]" \
+            '{label: $label, detail: $detail, icon: $icon, actions: $actions}')"
     )
 fi
 
@@ -37,7 +42,12 @@ while IFS= read -r line; do
     [[ "$ip" == 127.* || "$ip" == 169.254.* ]] && continue
 
     items+=(
-        "{\"label\":\"${ip}\",\"detail\":\"${current_iface}\",\"icon\":\"🖥\",\"actions\":[{\"id\":\"copy\",\"label\":\"Copy\",\"command\":\"clipboard\",\"args\":[\"${ip}\"]}]}"
+        "$(jq -n \
+            --arg label "$ip" \
+            --arg detail "$current_iface" \
+            --arg icon "🖥" \
+            --argjson actions "[{\"id\":\"copy\",\"label\":\"Copy\",\"command\":\"clipboard\",\"args\":[\"$ip\"]}]" \
+            '{label: $label, detail: $detail, icon: $icon, actions: $actions}')"
     )
 done < <(ifconfig 2>/dev/null)
 

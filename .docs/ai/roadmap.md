@@ -114,7 +114,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 
 - [ ] AI Projects plugin: deduplicate inlined `discover_projects()` + helpers across 5 Lua files — extract canonical copy in lib.lua with instructions for manual paste (sandbox has no require)
 - [ ] Docker plugin: deduplicate Docker availability check across 6 command files (`containers.lua`, `compose.lua`, `images.lua`, `volumes.lua`, `networks.lua`, `system.lua`)
-- [ ] Fix `ip-addresses/run.sh`: raw `$var` interpolation in JSON on lines 13, 40 — use jq instead
+- [x] Fix `ip-addresses/run.sh`: raw `$var` interpolation in JSON on lines 13, 40 — use jq instead
 - [ ] Remove commented-out dead code in plugin Lua files (scan all `examples/plugins/` for orphan comments)
 - [ ] Add `icon_nerd` field to any plugin manifest missing it (audit all 40 manifests)
 
