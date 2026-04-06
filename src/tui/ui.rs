@@ -981,7 +981,13 @@ fn render_widget_row(
                 let max_lines = (area.height as usize).saturating_sub(2); // border eats 2
                 for item in output.items.iter().take(max_lines) {
                     let label = if item.label.len() > card_areas[i].width as usize - 3 {
-                        format!("{}…", &item.label[..card_areas[i].width as usize - 4])
+                        format!(
+                            "{}…",
+                            item.label
+                                .chars()
+                                .take(card_areas[i].width as usize - 4)
+                                .collect::<String>()
+                        )
                     } else {
                         item.label.clone()
                     };
