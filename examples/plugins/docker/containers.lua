@@ -1,4 +1,5 @@
 -- Docker: Containers — full container management with logs, exec, stats, lifecycle.
+-- Shared helpers copied from lib.lua.
 
 local function check_docker(plugin_name)
     local which = lark.exec("which", { "docker" })
@@ -9,6 +10,43 @@ local function check_docker(plugin_name)
         }
     end
     return nil
+end
+
+local function split_lines(raw)
+    local lines = {}
+    if not raw or raw == "" then return lines end
+    for line in raw:gmatch("[^\n]+") do
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+local function shell_action(label, args, confirm_flag)
+    local action = {
+        label = label,
+        kind = "shell",
+        args = args,
+    }
+    if confirm_flag then
+        action.confirm = true
+    end
+    return action
+end
+
+local function clipboard_action(label, value)
+    return {
+        label = label,
+        kind = "clipboard",
+        args = { value },
+    }
+end
+
+local function docker_action(label, docker_args, confirm_flag)
+    local args = { "docker" }
+    for _, arg in ipairs(docker_args) do
+        args[#args + 1] = arg
+    end
+    return shell_action(label, args, confirm_flag)
 end
 
 lark.register({
@@ -36,7 +74,7 @@ lark.register({
             "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
         })
         if stats_raw and stats_raw ~= "" then
-            for line in stats_raw:gmatch("[^\n]+") do
+            for _, line in ipairs(split_lines(stats_raw)) do
                 local sname, cpu, mem, net = line:match("^(.-)%\t(.-)%\t(.-)%\t(.-)$")
                 if sname then
                     stats_map[sname] = { cpu = cpu, mem = mem, net = net }
@@ -48,7 +86,7 @@ lark.register({
         local stopped = 0
         local items = {}
 
-        for line in raw:gmatch("[^\n]+") do
+        for _, line in ipairs(split_lines(raw)) do
             local id, name, image, status, state, ports, size =
                 line:match("^(.-)%\t(.-)%\t(.-)%\t(.-)%\t(.-)%\t(.-)%\t(.*)$")
             if not id or type(id) ~= "string" or id == "" then goto next_container end
@@ -100,111 +138,33 @@ lark.register({
 
             if is_running then
                 -- Logs
-                actions[#actions + 1] = {
-                    label = "Logs (last 100)",
-                    kind = "shell",
-                    args = { "docker", "logs", "--tail", "100", id },
-                }
-                actions[#actions + 1] = {
-                    label = "Follow Logs",
-                    kind = "shell",
-                    args = { "docker", "logs", "-f", "--tail", "30", id },
-                }
+                actions[#actions + 1] = docker_action("Logs (last 100)", { "logs", "--tail", "100", id })
+                actions[#actions + 1] = docker_action("Follow Logs", { "logs", "-f", "--tail", "30", id })
                 -- Exec
-                actions[#actions + 1] = {
-                    label = "Exec: bash",
-                    kind = "shell",
-                    args = { "docker", "exec", "-it", id, "bash" },
-                }
-                actions[#actions + 1] = {
-                    label = "Exec: sh",
-                    kind = "shell",
-                    args = { "docker", "exec", "-it", id, "sh" },
-                }
+                actions[#actions + 1] = docker_action("Exec: bash", { "exec", "-it", id, "bash" })
+                actions[#actions + 1] = docker_action("Exec: sh", { "exec", "-it", id, "sh" })
                 -- Stats
-                actions[#actions + 1] = {
-                    label = "Live Stats",
-                    kind = "shell",
-                    args = { "docker", "stats", id },
-                }
+                actions[#actions + 1] = docker_action("Live Stats", { "stats", id })
                 -- Top (processes)
-                actions[#actions + 1] = {
-                    label = "Top (processes)",
-                    kind = "shell",
-                    args = { "docker", "top", id },
-                }
+                actions[#actions + 1] = docker_action("Top (processes)", { "top", id })
                 -- Lifecycle
-                actions[#actions + 1] = {
-                    label = "Stop",
-                    kind = "shell",
-                    args = { "docker", "stop", id },
-                    confirm = true,
-                }
-                actions[#actions + 1] = {
-                    label = "Restart",
-                    kind = "shell",
-                    args = { "docker", "restart", id },
-                    confirm = true,
-                }
-                actions[#actions + 1] = {
-                    label = "Kill",
-                    kind = "shell",
-                    args = { "docker", "kill", id },
-                    confirm = true,
-                }
-                actions[#actions + 1] = {
-                    label = "Pause",
-                    kind = "shell",
-                    args = { "docker", "pause", id },
-                    confirm = true,
-                }
+                actions[#actions + 1] = docker_action("Stop", { "stop", id }, true)
+                actions[#actions + 1] = docker_action("Restart", { "restart", id }, true)
+                actions[#actions + 1] = docker_action("Kill", { "kill", id }, true)
+                actions[#actions + 1] = docker_action("Pause", { "pause", id }, true)
             else
                 -- Stopped container actions
-                actions[#actions + 1] = {
-                    label = "Logs (last 100)",
-                    kind = "shell",
-                    args = { "docker", "logs", "--tail", "100", id },
-                }
-                actions[#actions + 1] = {
-                    label = "Start",
-                    kind = "shell",
-                    args = { "docker", "start", id },
-                }
-                actions[#actions + 1] = {
-                    label = "Remove",
-                    kind = "shell",
-                    args = { "docker", "rm", id },
-                    confirm = true,
-                }
-                actions[#actions + 1] = {
-                    label = "Remove + Volumes",
-                    kind = "shell",
-                    args = { "docker", "rm", "-v", id },
-                    confirm = true,
-                }
+                actions[#actions + 1] = docker_action("Logs (last 100)", { "logs", "--tail", "100", id })
+                actions[#actions + 1] = docker_action("Start", { "start", id })
+                actions[#actions + 1] = docker_action("Remove", { "rm", id }, true)
+                actions[#actions + 1] = docker_action("Remove + Volumes", { "rm", "-v", id }, true)
             end
 
             -- Common actions
-            actions[#actions + 1] = {
-                label = "Inspect (JSON)",
-                kind = "shell",
-                args = { "docker", "inspect", id },
-            }
-            actions[#actions + 1] = {
-                label = "Copy ID",
-                kind = "clipboard",
-                args = { short_id },
-            }
-            actions[#actions + 1] = {
-                label = "Copy Name",
-                kind = "clipboard",
-                args = { name },
-            }
-            actions[#actions + 1] = {
-                label = "Copy Image",
-                kind = "clipboard",
-                args = { image },
-            }
+            actions[#actions + 1] = docker_action("Inspect (JSON)", { "inspect", id })
+            actions[#actions + 1] = clipboard_action("Copy ID", short_id)
+            actions[#actions + 1] = clipboard_action("Copy Name", name)
+            actions[#actions + 1] = clipboard_action("Copy Image", image)
 
             items[#items + 1] = {
                 label = name,

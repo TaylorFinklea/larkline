@@ -1,4 +1,59 @@
 -- Docker: Compose — manage Compose stacks with logs, services, lifecycle.
+-- Shared helpers copied from lib.lua.
+
+local function trim(text)
+    if not text then return nil end
+    return text:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function split_lines(raw)
+    local lines = {}
+    if not raw or raw == "" then return lines end
+    for line in raw:gmatch("[^\n]+") do
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+local function shell_action(label, args, confirm_flag)
+    local action = {
+        label = label,
+        kind = "shell",
+        args = args,
+    }
+    if confirm_flag then
+        action.confirm = true
+    end
+    return action
+end
+
+local function clipboard_action(label, value)
+    return {
+        label = label,
+        kind = "clipboard",
+        args = { value },
+    }
+end
+
+local function compose_action(label, use_v2, project, subcmd, extra, confirm_flag)
+    if use_v2 then
+        local args = { "docker", "compose", "-p", project, subcmd }
+        if extra then
+            for _, arg in ipairs(extra) do
+                args[#args + 1] = arg
+            end
+        end
+        return shell_action(label, args, confirm_flag)
+    end
+
+    local args = { "docker-compose", "-p", project, subcmd }
+    if extra then
+        for _, arg in ipairs(extra) do
+            args[#args + 1] = arg
+        end
+    end
+    return shell_action(label, args, confirm_flag)
+end
 
 lark.register({
     on_run = function()
@@ -13,23 +68,6 @@ lark.register({
                     title = "Compose",
                     items = { { label = "Docker Compose not installed", icon = "!" } },
                 }
-            end
-        end
-
-        -- Helper: build a shell action for a compose command.
-        local function action(label, project, subcmd, extra, confirm_flag)
-            if use_v2 then
-                local args = { "compose", "-p", project, subcmd }
-                if extra then
-                    for _, e in ipairs(extra) do args[#args + 1] = e end
-                end
-                return { label = label, kind = "shell", args = { "docker", args }, confirm = confirm_flag }
-            else
-                local args = { "-p", project, subcmd }
-                if extra then
-                    for _, e in ipairs(extra) do args[#args + 1] = e end
-                end
-                return { label = label, kind = "shell", args = { "docker-compose", args }, confirm = confirm_flag }
             end
         end
 
@@ -50,7 +88,7 @@ lark.register({
 
         local items = {}
         local first = true
-        for line in raw:gmatch("[^\n]+") do
+        for _, line in ipairs(split_lines(raw)) do
             if first then first = false goto next end
 
             local name, status, config = line:match("^(%S+)%s+(%S+)%s+(.+)$")
@@ -66,7 +104,7 @@ lark.register({
                     "compose", "-p", name, "ps", "--format", "{{.Name}}"
                 })
                 if ps then
-                    for _ in ps:gmatch("[^\n]+") do svc_count = svc_count + 1 end
+                    for _ in ipairs(split_lines(ps)) do svc_count = svc_count + 1 end
                 end
             end
 
@@ -75,7 +113,7 @@ lark.register({
                 detail = detail .. "  " .. svc_count .. " services"
             end
             if config then
-                local short = config:gsub("^%s+", ""):gsub("%s+$", "")
+                local short = trim(config)
                 if #short > 50 then short = "…" .. short:sub(-49) end
                 detail = detail .. "  " .. short
             end
@@ -83,24 +121,20 @@ lark.register({
             local actions = {}
 
             if is_running then
-                actions[#actions + 1] = action("Logs (last 100)", name, "logs", { "--tail", "100" })
-                actions[#actions + 1] = action("Follow Logs", name, "logs", { "-f", "--tail", "30" })
-                actions[#actions + 1] = action("Services (ps)", name, "ps")
-                actions[#actions + 1] = action("Stop", name, "stop", nil, true)
-                actions[#actions + 1] = action("Restart", name, "restart", nil, true)
-                actions[#actions + 1] = action("Down", name, "down", nil, true)
-                actions[#actions + 1] = action("Down + Remove Volumes", name, "down", { "-v" }, true)
-                actions[#actions + 1] = action("Pull Latest Images", name, "pull")
+                actions[#actions + 1] = compose_action("Logs (last 100)", use_v2, name, "logs", { "--tail", "100" })
+                actions[#actions + 1] = compose_action("Follow Logs", use_v2, name, "logs", { "-f", "--tail", "30" })
+                actions[#actions + 1] = compose_action("Services (ps)", use_v2, name, "ps")
+                actions[#actions + 1] = compose_action("Stop", use_v2, name, "stop", nil, true)
+                actions[#actions + 1] = compose_action("Restart", use_v2, name, "restart", nil, true)
+                actions[#actions + 1] = compose_action("Down", use_v2, name, "down", nil, true)
+                actions[#actions + 1] = compose_action("Down + Remove Volumes", use_v2, name, "down", { "-v" }, true)
+                actions[#actions + 1] = compose_action("Pull Latest Images", use_v2, name, "pull")
             else
-                actions[#actions + 1] = action("Up (detached)", name, "up", { "-d" })
-                actions[#actions + 1] = action("Pull Latest Images", name, "pull")
+                actions[#actions + 1] = compose_action("Up (detached)", use_v2, name, "up", { "-d" })
+                actions[#actions + 1] = compose_action("Pull Latest Images", use_v2, name, "pull")
             end
 
-            actions[#actions + 1] = {
-                label = "Copy Name",
-                kind = "clipboard",
-                args = { name },
-            }
+            actions[#actions + 1] = clipboard_action("Copy Name", name)
 
             items[#items + 1] = {
                 label = name,

@@ -1,4 +1,5 @@
 -- Docker: Volumes — list volumes with inspect, remove, and prune actions.
+-- Shared helpers copied from lib.lua.
 
 local function check_docker(plugin_name)
     local which = lark.exec("which", { "docker" })
@@ -9,6 +10,43 @@ local function check_docker(plugin_name)
         }
     end
     return nil
+end
+
+local function split_lines(raw)
+    local lines = {}
+    if not raw or raw == "" then return lines end
+    for line in raw:gmatch("[^\n]+") do
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+local function shell_action(label, args, confirm_flag)
+    local action = {
+        label = label,
+        kind = "shell",
+        args = args,
+    }
+    if confirm_flag then
+        action.confirm = true
+    end
+    return action
+end
+
+local function clipboard_action(label, value)
+    return {
+        label = label,
+        kind = "clipboard",
+        args = { value },
+    }
+end
+
+local function docker_action(label, docker_args, confirm_flag)
+    local args = { "docker" }
+    for _, arg in ipairs(docker_args) do
+        args[#args + 1] = arg
+    end
+    return shell_action(label, args, confirm_flag)
 end
 
 lark.register({
@@ -30,7 +68,7 @@ lark.register({
 
         local items = {}
 
-        for line in raw:gmatch("[^\n]+") do
+        for _, line in ipairs(split_lines(raw)) do
             local name, driver, mount = line:match("^(.-)%\t(.-)%\t(.-)$")
             if name and type(name) == "string" and name ~= "" then
                 -- Truncate long volume names (compose generates hashes).
@@ -45,22 +83,9 @@ lark.register({
                     icon = "💾",
                     copy_text = name,
                     actions = {
-                        {
-                            label = "Inspect",
-                            kind = "shell",
-                            args = { "docker", "volume", "inspect", name },
-                        },
-                        {
-                            label = "Remove",
-                            kind = "shell",
-                            args = { "docker", "volume", "rm", name },
-                            confirm = true,
-                        },
-                        {
-                            label = "Copy Name",
-                            kind = "clipboard",
-                            args = { name },
-                        },
+                        docker_action("Inspect", { "volume", "inspect", name }),
+                        docker_action("Remove", { "volume", "rm", name }, true),
+                        clipboard_action("Copy Name", name),
                     },
                 }
             end
@@ -72,12 +97,7 @@ lark.register({
             detail = "Remove all volumes not used by any container",
             icon = "🗑",
             actions = {
-                {
-                    label = "Prune",
-                    kind = "shell",
-                    args = { "docker", "volume", "prune", "-f" },
-                    confirm = true,
-                },
+                docker_action("Prune", { "volume", "prune", "-f" }, true),
             },
         }
 

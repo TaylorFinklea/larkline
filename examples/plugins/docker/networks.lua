@@ -1,4 +1,5 @@
 -- Docker: Networks — list networks with inspect, remove, and prune.
+-- Shared helpers copied from lib.lua.
 
 local function check_docker(plugin_name)
     local which = lark.exec("which", { "docker" })
@@ -9,6 +10,43 @@ local function check_docker(plugin_name)
         }
     end
     return nil
+end
+
+local function split_lines(raw)
+    local lines = {}
+    if not raw or raw == "" then return lines end
+    for line in raw:gmatch("[^\n]+") do
+        lines[#lines + 1] = line
+    end
+    return lines
+end
+
+local function shell_action(label, args, confirm_flag)
+    local action = {
+        label = label,
+        kind = "shell",
+        args = args,
+    }
+    if confirm_flag then
+        action.confirm = true
+    end
+    return action
+end
+
+local function clipboard_action(label, value)
+    return {
+        label = label,
+        kind = "clipboard",
+        args = { value },
+    }
+end
+
+local function docker_action(label, docker_args, confirm_flag)
+    local args = { "docker" }
+    for _, arg in ipairs(docker_args) do
+        args[#args + 1] = arg
+    end
+    return shell_action(label, args, confirm_flag)
 end
 
 lark.register({
@@ -31,7 +69,7 @@ lark.register({
         local items = {}
         local builtin = { bridge = true, host = true, none = true }
 
-        for line in raw:gmatch("[^\n]+") do
+        for _, line in ipairs(split_lines(raw)) do
             local id, name, driver, scope = line:match("^(.-)%\t(.-)%\t(.-)%\t(.-)$")
             if not id or type(id) ~= "string" or id == "" then goto next_net end
 
@@ -54,43 +92,20 @@ lark.register({
                 detail = detail .. "  " .. #connected .. " containers"
             end
 
-            local actions = {
-                {
-                    label = "Inspect (JSON)",
-                    kind = "shell",
-                    args = { "docker", "network", "inspect", id },
-                },
-            }
+            local actions = { docker_action("Inspect (JSON)", { "network", "inspect", id }) }
 
             if #connected > 0 then
                 local list = table.concat(connected, ", ")
                 if #list > 60 then list = list:sub(1, 57) .. "..." end
-                actions[#actions + 1] = {
-                    label = "Connected: " .. list,
-                    kind = "clipboard",
-                    args = { table.concat(connected, "\n") },
-                }
+                actions[#actions + 1] = clipboard_action("Connected: " .. list, table.concat(connected, "\n"))
             end
 
             if not is_builtin then
-                actions[#actions + 1] = {
-                    label = "Remove",
-                    kind = "shell",
-                    args = { "docker", "network", "rm", id },
-                    confirm = true,
-                }
+                actions[#actions + 1] = docker_action("Remove", { "network", "rm", id }, true)
             end
 
-            actions[#actions + 1] = {
-                label = "Copy Name",
-                kind = "clipboard",
-                args = { name },
-            }
-            actions[#actions + 1] = {
-                label = "Copy ID",
-                kind = "clipboard",
-                args = { short_id },
-            }
+            actions[#actions + 1] = clipboard_action("Copy Name", name)
+            actions[#actions + 1] = clipboard_action("Copy ID", short_id)
 
             items[#items + 1] = {
                 label = name,
@@ -109,12 +124,7 @@ lark.register({
             detail = "Remove all networks not used by any container",
             icon = "🗑",
             actions = {
-                {
-                    label = "Prune",
-                    kind = "shell",
-                    args = { "docker", "network", "prune", "-f" },
-                    confirm = true,
-                },
+                docker_action("Prune", { "network", "prune", "-f" }, true),
             },
         }
 
