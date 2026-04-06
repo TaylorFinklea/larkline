@@ -109,12 +109,28 @@ All keys except search mode and `Ctrl+C` are configurable in `config.toml`.
 
 ## Release Process
 
-1. Ensure `cargo test && cargo clippy -- -D warnings` pass
-2. Bump `version` in `Cargo.toml`
-3. `git tag v<VERSION> && git push origin v<VERSION>`
-4. Release workflow (`.github/workflows/release.yml`) builds 3 tarballs and creates a GitHub Release
-5. Download each tarball, run `shasum -a 256`, update SHA256 values in `Formula/lark.rb`
-6. Copy updated `Formula/lark.rb` to `github.com/tfinklea/homebrew-tap`
+Fully automated via `scripts/release.sh`. The script validates, bumps, commits, tags, and pushes — CI handles builds and Homebrew tap updates.
+
+```bash
+# Patch release (0.5.0 → 0.5.1)
+bash scripts/release.sh patch
+
+# Minor release (0.5.0 → 0.6.0)
+bash scripts/release.sh minor
+```
+
+**What happens:**
+1. Script runs `cargo test`, `clippy`, and `fmt --check`
+2. Bumps version in `Cargo.toml` and `Formula/larkline.rb`
+3. Commits, tags `v<VERSION>`, pushes to origin
+4. CI builds binaries (macOS ARM + x86, Linux), creates GitHub Release
+5. CI auto-updates Homebrew tap with SHA256 values
+
+**Automated release (Haiku agent):**
+- A PostToolUse hook (`.claude/hooks/check-milestone-release.sh`) detects milestone commits matching `feat(m<digit>)` in Bash output
+- When `AUTO_RELEASE` fires, dispatch the release agent in background: it runs the script and reports the version
+- Manual release: dispatch the release agent directly or run `bash scripts/release.sh <patch|minor>`
+- Release agent definition: `.claude/agents/release.md`
 
 ## Plugin Development
 
