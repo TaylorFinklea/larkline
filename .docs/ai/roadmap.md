@@ -127,7 +127,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 ### Sonnet Tier (moderate — mid-tier models)
 
 - [x] Docker plugin: extract shared helpers (availability check, result parsing, action builders) into pattern matching AI Projects' approach
-- [~] Git plugin: `status.lua`, `branches.lua`, `log.lua`, `stash.lua` all duplicate `repo_name()` and repo validation — extract shared pattern
+- [x] Git plugin: `status.lua`, `branches.lua`, `log.lua`, `stash.lua` all duplicate `repo_name()` and repo validation — extract shared pattern
 - [ ] AI Projects plugin: dashboard `on_action` drill-in sub-commands render file content via `shell:cat` — convert to structured parsed output (like the sub-command files already do)
 - [ ] Add integration test: verify all 40 plugin manifests parse correctly and have valid `entry` files pointing to existing Lua/shell scripts
 - [ ] weather plugin: `weather_icon()` (lines 3-14) and `get_location()` (lines 16-19) are duplicated in `current.lua` and `forecast.lua` — extract into `examples/plugins/weather/lib.lua` following the AI Projects pattern (comment-paste approach, since sandbox has no require)

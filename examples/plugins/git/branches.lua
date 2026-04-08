@@ -1,7 +1,13 @@
 -- Git Branches — branches across all tracked repos with checkout action.
+-- Shared helpers copied from lib.lua.
 
 local function repo_name(path)
     return path:match("([^/]+)$") or path
+end
+
+local function is_git_repo(path)
+    local check = lark.exec("git", { "-C", path, "rev-parse", "--git-dir" })
+    return check and check ~= ""
 end
 
 lark.register({
@@ -21,8 +27,7 @@ lark.register({
         for _, path in ipairs(repos) do
             local name = repo_name(path)
 
-            local check = lark.exec("git", { "-C", path, "rev-parse", "--git-dir" })
-            if not check or check == "" then
+            if not is_git_repo(path) then
                 items[#items + 1] = {
                     label = name,
                     detail = "Not a git repo: " .. path,

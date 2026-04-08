@@ -1,7 +1,13 @@
 -- Git Stash — view and manage stashes across all tracked repos.
+-- Shared helpers copied from lib.lua.
 
 local function repo_name(path)
     return path:match("([^/]+)$") or path
+end
+
+local function is_git_repo(path)
+    local check = lark.exec("git", { "-C", path, "rev-parse", "--git-dir" })
+    return check and check ~= ""
 end
 
 lark.register({
@@ -19,8 +25,7 @@ lark.register({
         for _, path in ipairs(repos) do
             local name = repo_name(path)
 
-            local check = lark.exec("git", { "-C", path, "rev-parse", "--git-dir" })
-            if not check or check == "" then goto next_repo end
+            if not is_git_repo(path) then goto next_repo end
 
             local raw = lark.exec("git", { "-C", path, "stash", "list",
                 "--format=%gd|%ar|%gs" })
