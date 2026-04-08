@@ -132,7 +132,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [x] Add integration test: verify all 40 plugin manifests parse correctly and have valid `entry` files pointing to existing Lua/shell scripts
 - [x] weather plugin: `weather_icon()` (lines 3-14) and `get_location()` (lines 16-19) are duplicated in `current.lua` and `forecast.lua` — extract into `examples/plugins/weather/lib.lua` following the AI Projects pattern (comment-paste approach, since sandbox has no require)
 - [x] github plugin: extract `gh_headers()` and the common GITHUB_TOKEN fetch+error-return pattern into `examples/plugins/github/lib.lua` — 4 files (`my-prs.lua`, `reviews.lua`, `issues.lua`, `notifications.lua`) repeat the same 7-line preamble
-- [~] ccusage plugin: extract `fmt_tokens()`, `fmt_cost()`, `get_since()` into `examples/plugins/ccusage/lib.lua` — 5 files repeat these ~20 lines verbatim; reduces the surface area for divergence when cost display logic changes
+- [x] ccusage plugin: extract `fmt_tokens()`, `fmt_cost()`, `get_since()` into `examples/plugins/ccusage/lib.lua` — 5 files repeat these ~20 lines verbatim; reduces the surface area for divergence when cost display logic changes
 
 ### New Simple Plugins (follow existing patterns)
 
