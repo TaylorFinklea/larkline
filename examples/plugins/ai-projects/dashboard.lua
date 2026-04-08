@@ -87,6 +87,172 @@ local function extract_active_milestone(c)
         or c:match("###%s+(Phase%s+%d[^\n]*)")
 end
 
+local function project_title(path, suffix)
+    local proj_name = path:match("/git/([^/]+)/")
+    return (proj_name or "Project") .. " — " .. suffix
+end
+
+local function view_current_state(path)
+    local content = read_file(path)
+    if not content then
+        return { title = "Current State", items = {
+            { label = "File not found", detail = path, icon = "⚠" },
+        }}
+    end
+
+    local items = {}
+    local section = nil
+    for line in content:gmatch("[^\n]*") do
+        if line:match("^##%s+") then
+            section = line:gsub("^##%s+", "")
+        elseif line:match("^%s*$") or line:match("^>") or line:match("^#%s+") then
+            -- skip
+        else
+            local cleaned = line:gsub("^%s*%-%s*", ""):gsub("^%*%*(.-)%*%*", "%1")
+            if cleaned ~= "" then
+                local icon = "📄"
+                if section and section:match("[Bb]ranch") then icon = "🌿"
+                elseif section and section:match("[Pp]rogress") then icon = "📈"
+                elseif section and section:match("[Vv]alidation") then icon = "✅"
+                elseif section and section:match("[Bb]locker") then icon = "🚧"
+                elseif section and section:match("[Vv]ersion") then icon = "🏷️"
+                end
+                items[#items + 1] = { label = cleaned, detail = section or "", icon = icon }
+            end
+        end
+    end
+
+    return { title = project_title(path, "Current State"), items = items }
+end
+
+local function view_next_steps(path)
+    local content = read_file(path)
+    if not content then
+        return { title = "Next Steps", items = {
+            { label = "File not found", detail = path, icon = "⚠" },
+        }}
+    end
+
+    local items = {}
+    local section = nil
+    for line in content:gmatch("[^\n]*") do
+        if line:match("^##%s+") or line:match("^###%s+") then
+            section = line:gsub("^##+%s+", "")
+        elseif line:match("^%s*%-%s*%[x%]") then
+            local text = line:gsub("^%s*%-%s*%[x%]%s*", "")
+            items[#items + 1] = {
+                label = text,
+                detail = (section or "") .. "  ·  done",
+                icon = "☑️",
+            }
+        elseif line:match("^%s*%-%s*%[%s%]") then
+            local text = line:gsub("^%s*%-%s*%[%s%]%s*", "")
+            items[#items + 1] = {
+                label = text,
+                detail = section or "",
+                icon = "⬜",
+            }
+        end
+    end
+
+    return { title = project_title(path, "Next Steps"), items = items }
+end
+
+local function view_roadmap(path)
+    local content = read_file(path)
+    if not content then
+        return { title = "Roadmap", items = {
+            { label = "File not found", detail = path, icon = "⚠" },
+        }}
+    end
+
+    local items = {}
+    local h2, h3 = nil, nil
+    for line in content:gmatch("[^\n]*") do
+        if line:match("^##%s+") and not line:match("^###") then
+            h2 = line:gsub("^##%s+", "")
+            h3 = nil
+            if not h2:match("^Constraints") and not h2:match("^Non%-Goals") then
+                items[#items + 1] = { label = h2, detail = "", icon = "📋" }
+            end
+        elseif line:match("^###%s+") then
+            h3 = line:gsub("^###%s+", "")
+            items[#items + 1] = { label = h3, detail = h2 or "", icon = "📌" }
+        elseif line:match("^%s*%-%s*%[x%]") then
+            local text = line:gsub("^%s*%-%s*%[x%]%s*", "")
+            items[#items + 1] = { label = text, detail = (h3 or h2 or "") .. "  ·  done", icon = "☑️" }
+        elseif line:match("^%s*%-%s*%[%s%]") then
+            local text = line:gsub("^%s*%-%s*%[%s%]%s*", "")
+            items[#items + 1] = { label = text, detail = h3 or h2 or "", icon = "⬜" }
+        elseif line:match("^%s*%-%s*%*%*") then
+            local text = line:gsub("^%s*%-%s*", ""):gsub("%*%*", "")
+            items[#items + 1] = { label = text, detail = h3 or h2 or "", icon = "📎" }
+        end
+    end
+
+    return { title = project_title(path, "Roadmap"), items = items }
+end
+
+local function view_decisions(path)
+    local content = read_file(path)
+    if not content then
+        return { title = "Decisions", items = {
+            { label = "File not found", detail = path, icon = "⚠" },
+        }}
+    end
+
+    local items = {}
+    local in_entry = false
+    local entry_title = nil
+    local entry_lines = {}
+
+    for line in content:gmatch("[^\n]*") do
+        if line:match("^##%s+") then
+            if in_entry and entry_title then
+                local summary = ""
+                for _, el in ipairs(entry_lines) do
+                    local decision = el:match("^%*%*Decision%*%*:%s*(.+)")
+                        or el:match("^%*%*Decision:%*%*%s*(.+)")
+                    if decision then summary = decision; break end
+                end
+                if summary == "" then
+                    for _, el in ipairs(entry_lines) do
+                        local stripped = el:gsub("^%s*", ""):gsub("^%*%*Context%*%*:%s*", "")
+                        if stripped ~= "" and not stripped:match("^<!%-%-") then
+                            summary = stripped
+                            break
+                        end
+                    end
+                end
+                if #summary > 100 then summary = summary:sub(1, 97) .. "..." end
+                items[#items + 1] = { label = entry_title, detail = summary, icon = "📝" }
+            end
+            entry_title = line:gsub("^##%s+", "")
+            entry_lines = {}
+            in_entry = true
+        elseif in_entry and line ~= "" then
+            entry_lines[#entry_lines + 1] = line
+        end
+    end
+
+    if in_entry and entry_title then
+        local summary = ""
+        for _, el in ipairs(entry_lines) do
+            local decision = el:match("^%*%*Decision%*%*:%s*(.+)")
+                or el:match("^%*%*Decision:%*%*%s*(.+)")
+            if decision then summary = decision; break end
+        end
+        if #summary > 100 then summary = summary:sub(1, 97) .. "..." end
+        items[#items + 1] = { label = entry_title, detail = summary, icon = "📝" }
+    end
+
+    if #items == 0 then
+        items[#items + 1] = { label = "No decisions recorded", detail = "Add ## entries", icon = "📭" }
+    end
+
+    return { title = project_title(path, "Decisions"), items = items }
+end
+
 -- Dashboard logic.
 
 lark.register({
@@ -143,6 +309,19 @@ lark.register({
 
     on_action = function(action)
         if not action then return end
+        local view_kind, view_path = action:match("^view:([^:]+):(.+)$")
+        if view_kind and view_path then
+            if view_kind == "current-state" then
+                return view_current_state(view_path)
+            elseif view_kind == "next-steps" then
+                return view_next_steps(view_path)
+            elseif view_kind == "roadmap" then
+                return view_roadmap(view_path)
+            elseif view_kind == "decisions" then
+                return view_decisions(view_path)
+            end
+        end
+
         local project_name = action:match("^open:(.+)$")
         if not project_name then return end
 
@@ -175,7 +354,7 @@ lark.register({
             label = "Current State",
             detail = branch .. "  ·  " .. short_date(date),
             icon = "📊",
-            action = "shell:cat " .. proj.ai_dir .. "/current-state.md",
+            action = "view:current-state:" .. proj.ai_dir .. "/current-state.md",
         }
 
         local steps_detail = open .. " open"
@@ -184,14 +363,14 @@ lark.register({
             label = "Next Steps",
             detail = steps_detail,
             icon = "✅",
-            action = "shell:cat " .. proj.ai_dir .. "/next-steps.md",
+            action = "view:next-steps:" .. proj.ai_dir .. "/next-steps.md",
         }
 
         items[#items + 1] = {
             label = "Roadmap",
             detail = milestone or "no active milestone",
             icon = "🗺️",
-            action = "shell:cat " .. proj.ai_dir .. "/roadmap.md",
+            action = "view:roadmap:" .. proj.ai_dir .. "/roadmap.md",
         }
 
         local dec_detail = num_decs .. " ADR" .. (num_decs ~= 1 and "s" or "")
@@ -199,7 +378,7 @@ lark.register({
             label = "Decisions",
             detail = dec_detail,
             icon = "📝",
-            action = "shell:cat " .. proj.ai_dir .. "/decisions.md",
+            action = "view:decisions:" .. proj.ai_dir .. "/decisions.md",
         }
 
         items[#items + 1] = {
