@@ -1,4 +1,5 @@
 -- Weather: Forecast — 3-day forecast with hourly breakdowns.
+-- Shared helpers copied from lib.lua.
 
 local function weather_icon(code)
     local c = tonumber(code) or 0

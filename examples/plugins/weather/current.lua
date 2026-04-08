@@ -1,22 +1,23 @@
 -- Weather: Current — current conditions from wttr.in with location support.
+-- Shared helpers copied from lib.lua.
 
 local function weather_icon(code)
     local c = tonumber(code) or 0
-    if c == 113 then return "☀" end   -- sunny
-    if c == 116 then return "⛅" end  -- partly cloudy
-    if c == 119 or c == 122 then return "☁" end  -- cloudy/overcast
-    if c >= 176 and c <= 185 then return "🌧" end -- light rain/drizzle
-    if c >= 200 and c <= 232 then return "⛈" end  -- thunder
-    if c >= 263 and c <= 302 then return "🌦" end -- drizzle
-    if c >= 308 and c <= 359 then return "🌧" end -- rain
-    if c >= 368 and c <= 395 then return "🌨" end -- snow
+    if c == 113 then return "☀" end
+    if c == 116 then return "⛅" end
+    if c == 119 or c == 122 then return "☁" end
+    if c >= 176 and c <= 185 then return "🌧" end
+    if c >= 200 and c <= 232 then return "⛈" end
+    if c >= 263 and c <= 302 then return "🌦" end
+    if c >= 308 and c <= 359 then return "🌧" end
+    if c >= 368 and c <= 395 then return "🌨" end
     return "🌤"
 end
 
 local function get_location()
     local saved = lark.store.get("weather_location")
     if saved and saved ~= "" then return saved end
-    return nil -- auto-detect
+    return nil
 end
 
 local function fetch_weather(location)
