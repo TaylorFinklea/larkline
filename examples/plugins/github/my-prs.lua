@@ -1,10 +1,19 @@
 -- GitHub: My PRs — open pull requests you authored with quick-actions.
--- SHARED: gh_headers() — shared across my-prs, reviews, issues, notifications
+-- Shared helpers copied from lib.lua.
 
 local function gh_headers(token)
     return {
         Authorization = "Bearer " .. token,
         Accept = "application/vnd.github+json",
+    }
+end
+
+local function github_token_or_error(title)
+    local token = lark.env("GITHUB_TOKEN")
+    if token then return token end
+    return nil, {
+        title = title,
+        items = { { label = "GITHUB_TOKEN not set", detail = "Add it to ~/.config/larkline/.env", icon = "!" } },
     }
 end
 
@@ -27,13 +36,8 @@ end
 
 lark.register({
     on_run = function()
-        local token = lark.env("GITHUB_TOKEN")
-        if not token then
-            return {
-                title = "My PRs",
-                items = { { label = "GITHUB_TOKEN not set", detail = "Add it to ~/.config/larkline/.env", icon = "!" } },
-            }
-        end
+        local token, err = github_token_or_error("My PRs")
+        if err then return err end
 
         local resp = lark.http.get(
             "https://api.github.com/search/issues?q=is:pr+is:open+author:@me&sort=updated&per_page=25",
