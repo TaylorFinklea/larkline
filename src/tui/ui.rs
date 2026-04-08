@@ -414,8 +414,8 @@ fn render_output_pane(
             .iter()
             .enumerate()
             .map(|(i, (label, value))| {
-                let preview = if value.len() > 40 {
-                    format!("{}…", &value[..40])
+                let preview = if value.chars().count() > 40 {
+                    format!("{}…", value.chars().take(40).collect::<String>())
                 } else {
                     value.clone()
                 };
