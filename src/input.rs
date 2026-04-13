@@ -130,6 +130,14 @@ fn handle_browse_normal(
         return Some(Action::WidgetCardOpen);
     }
 
+    // Widget-focused h/Left: navigate to previous widget card.
+    if widget_focused
+        && matches!(event.code, KeyCode::Char('h') | KeyCode::Left)
+        && event.modifiers == KeyModifiers::NONE
+    {
+        return Some(Action::Back);
+    }
+
     match event.code {
         // Ctrl+C is always quit — non-configurable.
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
