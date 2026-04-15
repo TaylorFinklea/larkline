@@ -1,0 +1,32 @@
+[plugin]
+name = "Tailscale"
+description = "Device status, exit nodes, and network overview"
+version = "0.1.0"
+author = "larkline"
+icon = "🔗"
+icon_nerd = "󰖟"
+category = "dev"
+
+[[commands]]
+name = "Devices"
+description = "All devices in your tailnet with status"
+entry = "devices.lua"
+quickkey = "td"
+timeout_seconds = 10
+prefetch = true
+widget = true
+widget_refresh_secs = 60
+
+[[commands]]
+name = "Exit Nodes"
+description = "Available exit nodes and current selection"
+entry = "exit-nodes.lua"
+quickkey = "te"
+timeout_seconds = 10
+
+[[commands]]
+name = "Network"
+description = "Tailnet overview: self, DNS, MagicDNS"
+entry = "network.lua"
+quickkey = "tn"
+timeout_seconds = 10

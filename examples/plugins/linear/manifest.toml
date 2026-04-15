@@ -1,0 +1,35 @@
+[plugin]
+name = "Linear"
+description = "Issues, current cycle, and quick status changes"
+version = "0.1.0"
+author = "larkline"
+icon = "📊"
+icon_nerd = "󰘦"
+category = "productivity"
+secrets = ["LINEAR_API_KEY"]
+
+[[commands]]
+name = "My Issues"
+description = "Issues assigned to you"
+entry = "my-issues.lua"
+quickkey = "li"
+timeout_seconds = 15
+prefetch = true
+widget = true
+widget_refresh_secs = 120
+
+[[commands]]
+name = "Current Cycle"
+description = "Active cycle with progress"
+entry = "cycle.lua"
+quickkey = "lc"
+timeout_seconds = 15
+widget = true
+widget_refresh_secs = 180
+
+[[commands]]
+name = "Triage"
+description = "Issues in your team's triage queue"
+entry = "triage.lua"
+quickkey = "lt"
+timeout_seconds = 15

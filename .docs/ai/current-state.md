@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-04-05
+> Updated: 2026-04-14
 
 ## Active Branch
 
@@ -8,23 +8,22 @@
 
 ## Recent Progress (this session)
 
-- **v0.6.0 complete:** all plugin deep-dives + UX items done
-  - GitHub deep-dive: 5 commands — my-prs (merge/squash/close), reviews (approve/request-changes), notifications (mark-read), issues (close), workflows
-  - SSH deep-dive: 4 commands — hosts (nc reachability), connections (active), recent (shell history), keys (fingerprints/agent)
-  - Weather deep-dive: 3 commands — current (weather icons, astronomy), forecast (3-day hourly), locations (saved via lark.store)
-  - Kubernetes deep-dive: 6 commands — enhanced pods, deployments (scale/restart/rollout), namespaces (resource counts), logs (per-container), contexts
-  - UX: widget drill-in, upgrade menu, picker search, error display
+- **v0.7.0 complete:** three new plugins fully implemented
+  - Notes/Obsidian: 4 commands — search (full-text grep), recent (mtime-sorted), browse (folder nav), settings (vault path)
+  - Tailscale: 3 commands — devices (peer listing + SSH/ping), exit nodes (select/disable), network (tailnet overview)
+  - Linear: 3 commands — my issues (assigned, GraphQL), current cycle (progress/issues), triage (triage queue)
+- **Bug fix:** h/Left arrow now navigates between widget cards (was missing symmetric handler)
 
 ## Current Version
 
 v0.5.0 (released on GitHub, Homebrew tap auto-updated)
-v0.6.0 ready to release (all deep-dives + UX complete, committed on main)
+v0.6.0 ready to release (all deep-dives + UX complete)
+v0.7.0 ready to release (3 new plugins: Notes, Tailscale, Linear)
 
 ## Validation
 
-- `cargo test` — 141 tests passing
+- `cargo test` — passing
 - `cargo clippy -- -D warnings` — clean
-- `cargo fmt -- --check` — clean
 
 ## Plugin Command Counts
 
@@ -36,3 +35,6 @@ v0.6.0 ready to release (all deep-dives + UX complete, committed on main)
 | SSH | 4 | 2 |
 | Weather | 3 | 1 |
 | Kubernetes | 6 | 2 |
+| Notes | 4 | 1 |
+| Tailscale | 3 | 1 |
+| Linear | 3 | 2 |

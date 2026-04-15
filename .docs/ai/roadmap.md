@@ -63,9 +63,9 @@ Bring four plugins to Raycast quality and fix the top UX pain points.
 ### v0.7.0 — New Plugins
 
 Expand the plugin library with three new integrations:
-- [ ] Obsidian/Notes: quick note search, recent notes, vault browser
-- [ ] Tailscale/VPN: device status, exit nodes, network overview
-- [ ] Linear/Jira: assigned issues, sprint board, quick status changes
+- [x] Obsidian/Notes: quick note search, recent notes, vault browser (4 commands)
+- [x] Tailscale/VPN: device status, exit nodes, network overview (3 commands)
+- [x] Linear: assigned issues, current cycle, triage queue (3 commands, GraphQL API)
 
 ### Future (unordered — pick theme per release)
 
