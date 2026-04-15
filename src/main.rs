@@ -13,6 +13,7 @@ mod app;
 mod config;
 mod history;
 mod input;
+mod mini_app;
 mod plugin;
 mod tui;
 mod update;

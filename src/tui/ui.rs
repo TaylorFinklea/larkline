@@ -17,9 +17,11 @@ use ratatui::{
 use ansi_to_tui::IntoText;
 
 use crate::app::{
-    AppState, Mode, OutputMode, PowerMenuState, ThemePickerState, UnifiedRow, VimMode,
+    AppState, MiniAppState, Mode, OutputMode, PaneState, PowerMenuState, ThemePickerState,
+    UnifiedRow, VimMode,
 };
 use crate::config::Theme;
+use crate::plugin::traits::{MiniAppLayout, SplitDirection};
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
@@ -66,8 +68,13 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
             && state.preview_plugin_index.is_some()
             && content_area.width >= 80);
 
+    // Mini app mode: full content area for split panes.
+    if state.mode == Mode::MiniApp {
+        if let Some(ref mini) = state.mini_app {
+            render_mini_app(frame, mini, theme, content_area);
+        }
     // Plugin Manager takes full content area.
-    if state.mode == Mode::PluginManager {
+    } else if state.mode == Mode::PluginManager {
         if let Some(ref pm) = state.plugin_manager {
             render_plugin_manager(frame, pm, theme, content_area);
         }
@@ -347,6 +354,164 @@ fn render_preview_pane(
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }
+
+// ---------------------------------------------------------------------------
+// Mini app rendering
+// ---------------------------------------------------------------------------
+
+/// Render the mini app layout tree into the given area.
+fn render_mini_app(
+    frame: &mut Frame,
+    mini: &MiniAppState,
+    theme: &Theme,
+    area: Rect,
+) {
+    render_layout_node(frame, mini, theme, &mini.layout, area);
+}
+
+/// Recursively render a layout node — either a leaf pane or a split container.
+fn render_layout_node(
+    frame: &mut Frame,
+    mini: &MiniAppState,
+    theme: &Theme,
+    node: &MiniAppLayout,
+    area: Rect,
+) {
+    match node {
+        MiniAppLayout::Pane { id, .. } => {
+            if let Some(pane_state) = mini.panes.get(id) {
+                let is_focused = mini.focused_pane == *id;
+                render_pane(frame, pane_state, theme, area, is_focused);
+            }
+        }
+        MiniAppLayout::Split {
+            direction,
+            children,
+        } => {
+            let dir = match direction {
+                SplitDirection::Horizontal => Direction::Horizontal,
+                SplitDirection::Vertical => Direction::Vertical,
+            };
+            let constraints: Vec<Constraint> = children
+                .iter()
+                .map(|c| Constraint::Percentage(c.size))
+                .collect();
+            let chunks = Layout::default()
+                .direction(dir)
+                .constraints(constraints)
+                .split(area);
+            for (i, child) in children.iter().enumerate() {
+                if let Some(&chunk) = chunks.get(i) {
+                    render_layout_node(frame, mini, theme, &child.layout, chunk);
+                }
+            }
+        }
+    }
+}
+
+/// Render a single pane with its content and border.
+fn render_pane(
+    frame: &mut Frame,
+    pane: &PaneState,
+    theme: &Theme,
+    area: Rect,
+    is_focused: bool,
+) {
+    let border_color = if is_focused {
+        theme.accent
+    } else {
+        theme.text_dimmed
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title(Span::styled(
+            format!(" {} ", pane.content.title),
+            Style::default().fg(border_color).bold(),
+        ));
+
+    let content = &pane.content;
+
+    // Form takes priority.
+    if content.form.is_some() {
+        let paragraph = Paragraph::new("Form (not yet interactive)")
+            .block(block)
+            .style(Style::default().fg(theme.text_dimmed));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    // Items list.
+    if !content.items.is_empty() {
+        let items: Vec<ListItem> = content
+            .items
+            .iter()
+            .map(|item| {
+                let mut spans = Vec::new();
+                if let Some(ref icon) = item.icon {
+                    spans.push(Span::styled(format!("{icon} "), Style::default().bold()));
+                }
+                spans.push(Span::styled(
+                    item.label.as_str(),
+                    Style::default().fg(theme.text).bold(),
+                ));
+                if let Some(ref detail) = item.detail {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        detail.as_str(),
+                        Style::default().fg(theme.text_dimmed),
+                    ));
+                }
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        let highlight_style = Style::default()
+            .bg(theme.highlight_bg)
+            .fg(theme.highlight_fg)
+            .add_modifier(Modifier::BOLD);
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(highlight_style)
+            .highlight_symbol("▶ ");
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(pane.selected));
+        frame.render_stateful_widget(list, area, &mut list_state);
+        return;
+    }
+
+    // Raw text / markdown.
+    if let Some(ref raw) = content.raw_text {
+        use ansi_to_tui::IntoText as _;
+        let text = if content.output_format.as_deref() == Some("markdown") {
+            crate::tui::markdown::markdown_to_text(raw, theme)
+        } else {
+            raw.as_bytes()
+                .into_text()
+                .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()))
+        };
+        #[allow(clippy::cast_possible_truncation)]
+        let scroll = pane.scroll_offset as u16;
+        let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    // Empty pane.
+    let paragraph = Paragraph::new(Span::styled(
+        "No content",
+        Style::default().fg(theme.text_dimmed),
+    ))
+    .block(block);
+    frame.render_widget(paragraph, area);
+}
+
+// ---------------------------------------------------------------------------
+// ViewOutput rendering
+// ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_lines)]
 fn render_output_pane(
