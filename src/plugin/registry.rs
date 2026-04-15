@@ -97,6 +97,8 @@ struct ManifestPlugin {
     widget: Option<bool>,
     /// Widget auto-refresh interval in seconds.
     widget_refresh_secs: Option<u64>,
+    /// Whether this plugin supports mini app mode (full-screen split panes).
+    mini_app: Option<bool>,
 }
 
 /// A single command within a multi-command plugin manifest.
@@ -116,6 +118,8 @@ struct ManifestCommand {
     cache: Option<bool>,
     widget: Option<bool>,
     widget_refresh_secs: Option<u64>,
+    /// Whether this command supports mini app mode.
+    mini_app: Option<bool>,
 }
 
 /// Which backend should execute this plugin.
@@ -222,6 +226,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                     .collect(),
                 widget: p.widget.unwrap_or(false),
                 widget_refresh_secs: p.widget_refresh_secs.unwrap_or(60),
+                mini_app: p.mini_app.unwrap_or(false),
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -276,6 +281,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                         widget_refresh_secs: cmd
                             .widget_refresh_secs
                             .unwrap_or(p.widget_refresh_secs.unwrap_or(60)),
+                        mini_app: cmd.mini_app.unwrap_or(p.mini_app.unwrap_or(false)),
                     },
                     plugin_dir: plugin_dir_buf.clone(),
                     entry: cmd.entry,

@@ -1299,7 +1299,7 @@ fn render_status_bar(
                         spans.extend(key_hint("x", "del secret", theme));
                         spans.extend(key_hint("q", "back", theme));
                     }
-                    Mode::ViewOutput => {
+                    Mode::ViewOutput | Mode::MiniApp => {
                         if state.is_loading {
                             let spinner = SPINNER_CHARS[state.spinner_tick as usize % 8];
                             let elapsed = state

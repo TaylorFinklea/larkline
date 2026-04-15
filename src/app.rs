@@ -15,7 +15,9 @@ use crate::config::{Config, KeybindingsConfig, ResolvedKeybindings, Theme};
 use crate::input;
 use crate::plugin::engine::{EngineEvent, ExecutionSource, PluginEngine};
 use crate::plugin::registry;
-use crate::plugin::traits::{ActionKind, ItemAction, PluginOutput};
+use crate::plugin::traits::{
+    ActionKind, ItemAction, MiniAppLayout, PaneContent, PaneId, PluginOutput,
+};
 use crate::plugin::{Plugin, PluginMetadata};
 use crate::tui::ui;
 
@@ -43,6 +45,7 @@ pub enum OutputMode {
 
 /// The current UI mode — describes *which pane is active*.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Mode {
     /// Unified launcher view — plugin sections + items, filterable by query.
     #[default]
@@ -51,6 +54,8 @@ pub enum Mode {
     ViewOutput,
     /// Plugin management screen — enable/disable, settings, secrets.
     PluginManager,
+    /// Mini app mode — full-screen split-pane layout controlled by a plugin.
+    MiniApp,
 }
 
 /// A row in the unified launcher list.
@@ -243,6 +248,41 @@ pub struct AppState {
     pub update_hint: Option<String>,
     /// How larkline was installed (for upgrade instructions).
     pub install_method: crate::update::InstallMethod,
+    /// Mini app state (active when `mode == Mode::MiniApp`).
+    #[allow(dead_code)]
+    pub mini_app: Option<MiniAppState>,
+}
+
+/// State for mini app mode — full-screen split-pane layout.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MiniAppState {
+    /// Plugin index that owns this mini app.
+    pub plugin_index: usize,
+    /// The layout tree (may be mutated by user splits).
+    pub layout: MiniAppLayout,
+    /// Per-pane runtime state, keyed by pane ID.
+    pub panes: std::collections::HashMap<PaneId, PaneState>,
+    /// ID of the currently focused pane.
+    pub focused_pane: PaneId,
+    /// Ordered list of pane IDs for focus cycling (depth-first leaf order).
+    pub pane_order: Vec<PaneId>,
+}
+
+/// Runtime state for a single pane in mini app mode.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct PaneState {
+    /// The content currently displayed in this pane.
+    pub content: PaneContent,
+    /// How the pane's content is rendered.
+    pub output_mode: OutputMode,
+    /// Selected item index within the pane's items list.
+    pub selected: usize,
+    /// Scroll offset for markdown/raw text modes.
+    pub scroll_offset: usize,
+    /// Whether this pane is loading.
+    pub is_loading: bool,
 }
 
 /// A shell action awaiting user confirmation before execution.
@@ -1815,7 +1855,7 @@ impl App {
                         self.sync_preview_index();
                     }
                 }
-                Mode::ViewOutput => {
+                Mode::ViewOutput | Mode::MiniApp => {
                     if matches!(
                         self.state.output_mode,
                         OutputMode::Markdown | OutputMode::RawText
@@ -1848,7 +1888,7 @@ impl App {
                             self.sync_preview_index();
                         }
                     }
-                    Mode::ViewOutput => {
+                    Mode::ViewOutput | Mode::MiniApp => {
                         if matches!(
                             self.state.output_mode,
                             OutputMode::Markdown | OutputMode::RawText
@@ -2790,6 +2830,7 @@ impl App {
                     ],
                 },
             ],
+            Mode::MiniApp => vec![], // TODO(Phase D): mini app power menu
         }
     }
 
@@ -3484,6 +3525,7 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 settings_spec: vec![],
                 widget: false,
                 widget_refresh_secs: 0,
+                mini_app: false,
             })) as Arc<dyn Plugin>
         }};
     }

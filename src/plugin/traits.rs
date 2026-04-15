@@ -62,6 +62,8 @@ pub struct PluginMetadata {
     pub widget: bool,
     /// Widget auto-refresh interval in seconds (0 = no auto-refresh, default 60).
     pub widget_refresh_secs: u64,
+    /// Whether this plugin supports mini app mode (full-screen split panes).
+    pub mini_app: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +94,83 @@ pub struct PluginOutput {
     pub form: Option<FormSpec>,
     /// Output format hint: `"markdown"`, `"plain"`, or `None` (auto-detect).
     /// When `"markdown"`, `raw_text` is rendered as markdown with syntax highlighting.
+    #[serde(default)]
+    pub output_format: Option<String>,
+    /// Optional mini app layout tree. When present, the TUI renders split panes
+    /// instead of a single output view.
+    #[serde(default)]
+    pub layout: Option<MiniAppLayout>,
+}
+
+// ---------------------------------------------------------------------------
+// Mini app layout types
+// ---------------------------------------------------------------------------
+
+/// Unique identifier for a pane within a mini app layout.
+pub type PaneId = String;
+
+/// Layout specification for mini app mode.
+///
+/// A recursive tree: leaf nodes are panes that render content, split nodes
+/// divide space between children (like neovim splits).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum MiniAppLayout {
+    /// A leaf pane that renders content.
+    Pane {
+        /// Unique identifier for this pane.
+        id: PaneId,
+        /// Initial content to display.
+        #[serde(default)]
+        content: PaneContent,
+    },
+    /// A split that divides space between children.
+    Split {
+        /// Horizontal = side-by-side (left|right), Vertical = stacked (top|bottom).
+        direction: SplitDirection,
+        /// Children in order, each with a proportional size.
+        children: Vec<LayoutChild>,
+    },
+}
+
+/// A child node in a split layout, with a proportional size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutChild {
+    /// Percentage of parent space (children should sum to 100).
+    pub size: u16,
+    /// The nested layout node.
+    pub layout: MiniAppLayout,
+}
+
+/// Direction of a split.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDirection {
+    /// Side-by-side (left | right).
+    Horizontal,
+    /// Stacked (top / bottom).
+    Vertical,
+}
+
+/// Content rendered within a single pane. Reuses the same primitives as `PluginOutput`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PaneContent {
+    /// Title shown in the pane's border.
+    #[serde(default)]
+    pub title: String,
+    /// Navigable list of items.
+    #[serde(default)]
+    pub items: Vec<OutputItem>,
+    /// Raw text or markdown content.
+    #[serde(default)]
+    pub raw_text: Option<String>,
+    /// Column definitions for table rendering.
+    #[serde(default)]
+    pub columns: Vec<ColumnDef>,
+    /// Optional interactive form.
+    #[serde(default)]
+    pub form: Option<FormSpec>,
+    /// Output format hint.
     #[serde(default)]
     pub output_format: Option<String>,
 }
@@ -459,7 +538,112 @@ mod tests {
             settings_spec: vec![],
             widget: false,
             widget_refresh_secs: 0,
+            mini_app: false,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
+    }
+
+    #[test]
+    fn mini_app_layout_deserializes_single_pane() {
+        let json = r#"{"kind": "pane", "id": "main", "content": {"title": "Hello"}}"#;
+        let layout: MiniAppLayout = serde_json::from_str(json).expect("parse failed");
+        match layout {
+            MiniAppLayout::Pane { id, content } => {
+                assert_eq!(id, "main");
+                assert_eq!(content.title, "Hello");
+            }
+            MiniAppLayout::Split { .. } => panic!("expected Pane"),
+        }
+    }
+
+    #[test]
+    fn mini_app_layout_deserializes_horizontal_split() {
+        let json = r#"{
+            "kind": "split",
+            "direction": "horizontal",
+            "children": [
+                {"size": 30, "layout": {"kind": "pane", "id": "left", "content": {"title": "List"}}},
+                {"size": 70, "layout": {"kind": "pane", "id": "right", "content": {"title": "Detail"}}}
+            ]
+        }"#;
+        let layout: MiniAppLayout = serde_json::from_str(json).expect("parse failed");
+        match layout {
+            MiniAppLayout::Split {
+                direction,
+                children,
+            } => {
+                assert!(matches!(direction, SplitDirection::Horizontal));
+                assert_eq!(children.len(), 2);
+                assert_eq!(children[0].size, 30);
+                assert_eq!(children[1].size, 70);
+            }
+            MiniAppLayout::Pane { .. } => panic!("expected Split"),
+        }
+    }
+
+    #[test]
+    fn mini_app_layout_deserializes_nested_splits() {
+        let json = r#"{
+            "kind": "split",
+            "direction": "horizontal",
+            "children": [
+                {"size": 30, "layout": {"kind": "pane", "id": "nav", "content": {"title": "Nav"}}},
+                {"size": 70, "layout": {
+                    "kind": "split",
+                    "direction": "vertical",
+                    "children": [
+                        {"size": 60, "layout": {"kind": "pane", "id": "detail", "content": {"title": "Detail"}}},
+                        {"size": 40, "layout": {"kind": "pane", "id": "actions", "content": {"title": "Actions"}}}
+                    ]
+                }}
+            ]
+        }"#;
+        let layout: MiniAppLayout = serde_json::from_str(json).expect("parse failed");
+        match layout {
+            MiniAppLayout::Split { children, .. } => {
+                assert_eq!(children.len(), 2);
+                match &children[1].layout {
+                    MiniAppLayout::Split {
+                        direction,
+                        children: inner,
+                    } => {
+                        assert!(matches!(direction, SplitDirection::Vertical));
+                        assert_eq!(inner.len(), 2);
+                    }
+                    _ => panic!("expected nested Split"),
+                }
+            }
+            _ => panic!("expected Split"),
+        }
+    }
+
+    #[test]
+    fn plugin_output_with_layout_field() {
+        let json = r#"{
+            "title": "Dashboard",
+            "layout": {
+                "kind": "pane",
+                "id": "main",
+                "content": {"title": "Main", "items": [{"label": "Item 1"}]}
+            }
+        }"#;
+        let output: PluginOutput = serde_json::from_str(json).expect("parse failed");
+        assert_eq!(output.title, "Dashboard");
+        assert!(output.layout.is_some());
+        match output.layout.unwrap() {
+            MiniAppLayout::Pane { id, content } => {
+                assert_eq!(id, "main");
+                assert_eq!(content.items.len(), 1);
+            }
+            _ => panic!("expected Pane"),
+        }
+    }
+
+    #[test]
+    fn plugin_output_without_layout_is_backward_compatible() {
+        let json = r#"{"title": "Old Plugin", "items": [{"label": "hello"}]}"#;
+        let output: PluginOutput = serde_json::from_str(json).expect("parse failed");
+        assert!(output.layout.is_none());
+        assert_eq!(output.items.len(), 1);
     }
 }

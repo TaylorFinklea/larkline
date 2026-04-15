@@ -87,7 +87,8 @@ pub fn handle_key(
         VimMode::Insert => handle_insert(event, keybindings),
         VimMode::Normal => match mode {
             Mode::Unified => handle_browse_normal(event, keybindings, widget_focused),
-            Mode::ViewOutput => handle_view_output(event, keybindings),
+            // Mini app mode reuses ViewOutput bindings until Phase D adds a dedicated handler.
+            Mode::ViewOutput | Mode::MiniApp => handle_view_output(event, keybindings),
             Mode::PluginManager => handle_plugin_manager(event),
         },
     }

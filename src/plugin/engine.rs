@@ -411,6 +411,7 @@ mod tests {
             settings_spec: vec![],
             widget: false,
             widget_refresh_secs: 0,
+            mini_app: false,
         }
     }
 
