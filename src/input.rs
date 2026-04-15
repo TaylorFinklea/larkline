@@ -357,6 +357,20 @@ fn handle_mini_app(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option
         }
         // Space for power menu.
         KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => Some(Action::PowerMenuOpen),
+        // Split panes: Ctrl+\ horizontal, Ctrl+- vertical (like tmux).
+        KeyCode::Char('\\') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::MiniAppSplitH)
+        }
+        KeyCode::Char('-') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::MiniAppSplitV)
+        }
+        // Close focused pane.
+        KeyCode::Char('x') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::MiniAppClosePane)
+        }
+        // Resize: +/- to grow/shrink focused pane.
+        KeyCode::Char('+') => Some(Action::MiniAppResizeGrow),
+        KeyCode::Char('_') => Some(Action::MiniAppResizeShrink),
         // G / gg for jump.
         KeyCode::Char('G') => Some(Action::GoToLast),
         KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),

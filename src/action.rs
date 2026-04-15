@@ -173,4 +173,14 @@ pub enum Action {
     MiniAppClose,
     /// Expand current `ViewOutput` into mini app mode (single-pane wrapper).
     MiniAppExpand,
+    /// Split the focused pane horizontally (side-by-side).
+    MiniAppSplitH,
+    /// Split the focused pane vertically (stacked).
+    MiniAppSplitV,
+    /// Close the focused pane (sibling takes its place).
+    MiniAppClosePane,
+    /// Grow the focused pane by 5%.
+    MiniAppResizeGrow,
+    /// Shrink the focused pane by 5%.
+    MiniAppResizeShrink,
 }

@@ -2435,7 +2435,6 @@ impl App {
                 if self.state.mode == Mode::ViewOutput {
                     if let Some(ref output) = self.state.plugin_output {
                         if let Some(ref layout) = output.layout {
-                            // Plugin returned a layout — use it.
                             let plugin_index = self.state.viewing_plugin_index.unwrap_or(0);
                             self.state.mini_app = Some(
                                 crate::mini_app::build_mini_app_state(plugin_index, layout.clone()),
@@ -2443,6 +2442,42 @@ impl App {
                             self.state.mode = Mode::MiniApp;
                         }
                     }
+                }
+            }
+
+            Action::MiniAppSplitH => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    crate::mini_app::split_pane(
+                        mini,
+                        crate::plugin::traits::SplitDirection::Horizontal,
+                    );
+                }
+            }
+
+            Action::MiniAppSplitV => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    crate::mini_app::split_pane(
+                        mini,
+                        crate::plugin::traits::SplitDirection::Vertical,
+                    );
+                }
+            }
+
+            Action::MiniAppClosePane => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    crate::mini_app::close_pane(mini);
+                }
+            }
+
+            Action::MiniAppResizeGrow => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    crate::mini_app::resize_pane(mini, 5);
+                }
+            }
+
+            Action::MiniAppResizeShrink => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    crate::mini_app::resize_pane(mini, -5);
                 }
             }
 
