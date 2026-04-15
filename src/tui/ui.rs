@@ -457,6 +457,7 @@ fn render_output_pane(
                     ActionKind::Open => "↗",
                     ActionKind::Clipboard => "⎘",
                     ActionKind::Shell => "▶",
+                    ActionKind::Chain | ActionKind::UpdatePane => "⟳",
                 };
                 let style = if vis_idx == palette.selected {
                     Style::default()

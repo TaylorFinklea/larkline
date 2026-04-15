@@ -55,6 +55,13 @@ pub enum EngineEvent {
         /// Whether this is a user-triggered or prefetch execution.
         source: ExecutionSource,
     },
+    /// Result of an `on_action` callback (action chaining).
+    ActionResult {
+        /// Index into the engine's plugin list.
+        plugin_index: usize,
+        /// The updated output from the action callback.
+        result: Result<PluginOutput, PluginError>,
+    },
 }
 
 /// Manages a set of plugins and dispatches them as async Tokio tasks.
@@ -124,6 +131,46 @@ impl PluginEngine {
         } else {
             self.execute_normal(plugin_index, source);
         }
+    }
+
+    /// Execute a plugin's `on_action` callback for action chaining.
+    ///
+    /// Spawns a Tokio task that calls `Plugin::execute_action()` and sends
+    /// an `EngineEvent::ActionResult` when complete.
+    pub fn execute_action(
+        &self,
+        plugin_index: usize,
+        callback_id: String,
+        context: String,
+    ) {
+        let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let all_plugins = Arc::new(self.plugins.clone());
+        let secrets = self.secrets.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let handle = tokio::spawn(SECRETS.scope(
+                secrets,
+                PLUGIN_LIST.scope(
+                    all_plugins,
+                    INVOKE_DEPTH.scope(
+                        0,
+                        async move { plugin.execute_action(&callback_id, &context).await },
+                    ),
+                ),
+            ));
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(join_err) => Err(PluginError::ExecutionFailed(format!(
+                    "action task failed: {join_err}"
+                ))),
+            };
+            let _ = tx
+                .send(EngineEvent::ActionResult {
+                    plugin_index,
+                    result,
+                })
+                .await;
+        });
     }
 
     /// Execute a plugin with form values. The plugin's `execute_with_form()` receives

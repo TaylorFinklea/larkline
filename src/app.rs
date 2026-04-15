@@ -965,6 +965,43 @@ impl App {
                     }
                 }
             },
+
+            EngineEvent::ActionResult {
+                plugin_index,
+                result,
+            } => {
+                self.state.is_loading = false;
+                match result {
+                    Ok(output) => {
+                        // Replace the current plugin output with the action result.
+                        if self.state.viewing_plugin_index == Some(plugin_index) {
+                            self.state.output_selected = 0;
+                            self.state.scroll_offset = 0;
+                            self.state.plugin_output = Some(output);
+                            self.state.output_mode = if self
+                                .state
+                                .plugin_output
+                                .as_ref()
+                                .is_some_and(|o| !o.columns.is_empty())
+                            {
+                                OutputMode::Table
+                            } else {
+                                OutputMode::List
+                            };
+                            self.state.status_message = Some((
+                                "Action completed".to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        self.state.status_message = Some((
+                            format!("Action failed: {e}"),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
+            },
         }
     }
 
@@ -2790,6 +2827,27 @@ impl App {
                 } else {
                     // Execute immediately without confirmation.
                     run_shell_action(&mut self.state, &cmd, &args);
+                }
+            }
+            ActionKind::Chain => {
+                // Chain: call the plugin's on_action callback.
+                // args[0] = callback_id, args[1..] = context (joined with space).
+                let callback_id = action.args.first().cloned().unwrap_or_default();
+                let context = action.args.iter().skip(1).cloned().collect::<Vec<_>>().join(" ");
+                if let Some(plugin_index) = self.state.viewing_plugin_index {
+                    self.state.is_loading = true;
+                    self.engine.execute_action(plugin_index, callback_id, context);
+                }
+            }
+            ActionKind::UpdatePane => {
+                // UpdatePane: call on_action to update a specific pane (mini app mode).
+                // args[0] = pane_id, args[1] = callback_id, args[2..] = context.
+                let _pane_id = action.args.first().cloned().unwrap_or_default();
+                let callback_id = action.args.get(1).cloned().unwrap_or_default();
+                let context = action.args.iter().skip(2).cloned().collect::<Vec<_>>().join(" ");
+                if let Some(plugin_index) = self.state.viewing_plugin_index {
+                    self.state.is_loading = true;
+                    self.engine.execute_action(plugin_index, callback_id, context);
                 }
             }
         }

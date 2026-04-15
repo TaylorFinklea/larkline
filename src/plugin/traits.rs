@@ -152,6 +152,13 @@ pub enum ActionKind {
     Clipboard,
     /// Run a shell command.
     Shell,
+    /// Chain: call the plugin's `on_action` callback with context.
+    /// `args[0]` = callback ID, `args[1..]` = context passed to `on_action`.
+    Chain,
+    /// Update a specific pane in mini app mode.
+    /// `args[0]` = target pane ID, `args[1]` = callback ID, `args[2..]` = context.
+    #[serde(rename = "update_pane")]
+    UpdatePane,
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +292,21 @@ pub trait Plugin: Send + Sync {
         _form_values: std::collections::HashMap<String, String>,
     ) -> Result<PluginOutput, PluginError> {
         self.execute().await
+    }
+
+    /// Execute the plugin's `on_action` callback for action chaining.
+    ///
+    /// Called when a `Chain` or `UpdatePane` action is triggered. The plugin
+    /// re-executes with the callback ID and context, returning updated output.
+    /// The default implementation returns [`PluginError::ActionNotSupported`].
+    async fn execute_action(
+        &self,
+        callback_id: &str,
+        _context: &str,
+    ) -> Result<PluginOutput, PluginError> {
+        Err(PluginError::ActionNotSupported {
+            action_id: callback_id.to_string(),
+        })
     }
 }
 

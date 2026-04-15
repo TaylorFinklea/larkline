@@ -342,6 +342,14 @@ impl Plugin for LuaPlugin {
     ) -> Result<PluginOutput, PluginError> {
         self.execute_inner(Some(form_values)).await
     }
+
+    async fn execute_action(
+        &self,
+        callback_id: &str,
+        context: &str,
+    ) -> Result<PluginOutput, PluginError> {
+        self.execute_action_inner(callback_id, context).await
+    }
 }
 
 impl LuaPlugin {
@@ -441,6 +449,92 @@ impl LuaPlugin {
             let output: PluginOutput = lua
                 .from_value(result)
                 .map_err(|e| PluginError::InvalidOutput(format!("invalid plugin output: {e}")))?;
+
+            Ok(output)
+        })
+        .await
+        .map_err(|_| PluginError::Timeout(timeout))?
+    }
+
+    /// Execute the plugin's `on_action` callback.
+    ///
+    /// Creates a fresh Lua VM, loads the script, and calls `on_action(callback_id, context)`.
+    /// Returns the resulting `PluginOutput` which replaces the current view.
+    async fn execute_action_inner(
+        &self,
+        callback_id: &str,
+        context: &str,
+    ) -> Result<PluginOutput, PluginError> {
+        if !self.script_path.exists() {
+            return Err(PluginError::ExecutionFailed(format!(
+                "Lua script not found: {}",
+                self.script_path.display()
+            )));
+        }
+
+        let script = std::fs::read_to_string(&self.script_path)
+            .map_err(|e| PluginError::ExecutionFailed(format!("failed to read Lua script: {e}")))?;
+
+        let plugin_name = self.metadata.name.clone();
+        let plugin_name_for_save = self.metadata.name.clone();
+        let timeout = self.metadata.timeout;
+        let callback_id = callback_id.to_string();
+        let context = context.to_string();
+
+        let store_path = crate::plugin::store::store_path_for(
+            &self.metadata.name,
+            self.metadata.plugin_group.as_deref(),
+        );
+        let store = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::plugin::store::PluginStore::load(store_path),
+        ));
+        let store_for_save = store.clone();
+
+        tokio::time::timeout(timeout, async move {
+            let lua = Self::create_vm()?;
+            Self::register_api(&lua, plugin_name, store)?;
+
+            // Load the plugin script.
+            lua.load(&script)
+                .exec()
+                .map_err(|e| PluginError::InvalidOutput(format!("Lua syntax/load error: {e}")))?;
+
+            // Retrieve the registered config table.
+            let config: LuaTable =
+                lua.named_registry_value("_lark_plugin_config")
+                    .map_err(|_| {
+                        PluginError::InvalidOutput(
+                            "plugin did not call lark.register()".to_string(),
+                        )
+                    })?;
+
+            // Get the on_action function.
+            let on_action: LuaFunction = config.get("on_action").map_err(|_| {
+                PluginError::ActionNotSupported {
+                    action_id: callback_id.clone(),
+                }
+            })?;
+
+            // Call on_action(callback_id, context).
+            let thread = lua
+                .create_thread(on_action)
+                .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+            let run_result: Result<LuaValue, _> = thread
+                .into_async::<LuaValue>((callback_id.as_str(), context.as_str()))
+                .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?
+                .await
+                .map_err(|e| PluginError::ExecutionFailed(format!("on_action error: {e}")));
+
+            // Always save the store.
+            if let Err(e) = store_for_save.lock().expect("store lock").save() {
+                tracing::warn!(plugin = %plugin_name_for_save, error = %e, "failed to save plugin store");
+            }
+
+            let result = run_result?;
+
+            let output: PluginOutput = lua
+                .from_value(result)
+                .map_err(|e| PluginError::InvalidOutput(format!("invalid action output: {e}")))?;
 
             Ok(output)
         })
