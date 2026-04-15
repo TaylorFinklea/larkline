@@ -1,25 +1,22 @@
 # Next Steps
 
-> Updated: 2026-04-14
+> Updated: 2026-04-15
 
-## v0.7.0 — Complete
+## v0.8.0 — Complete
 
 All items complete:
-- [x] Obsidian/Notes: search, recent, browse, settings (4 commands)
-- [x] Tailscale/VPN: devices, exit nodes, network (3 commands)
-- [x] Linear: my issues, current cycle, triage (3 commands, GraphQL API)
+- [x] Action chaining (on_action callback)
+- [x] Mini app layout data model + manifest
+- [x] Split-pane rendering
+- [x] Mini app input + pane updates
+- [x] User splits, resize, close
+- [x] Clipboard history + Docker Dashboard mini app
 
-**To release:** Bump `Cargo.toml` version to 0.7.0, tag, push.
+**To release:** Bump `Cargo.toml` version to 0.8.0, tag, push.
 
 ## Backlog (can be done by smaller models in parallel)
 
 See `.docs/ai/roadmap.md` → Backlog section for full list and guardrails.
-
-**Quick wins to start with:**
-- [ ] HA plugin dedup: shared Lua module for 21 files of duplicated get_config/headers/filters
-- [ ] Audit all plugins for missing icons
-- [ ] Audit shell plugins for jq safety
-- [ ] Manifest validation tests for all 42 plugins
 
 ## Release Notes (unpushed since v0.5.0)
 
@@ -30,4 +27,11 @@ See `.docs/ai/roadmap.md` → Backlog section for full list and guardrails.
 - v0.6.0 UX: widget drill-in, upgrade menu, picker search, error display
 - Plugin deep-dives: GitHub (5 cmd), SSH (4 cmd), Weather (3 cmd), Kubernetes (6 cmd)
 - v0.7.0 New plugins: Notes/Obsidian (4 cmd), Tailscale (3 cmd), Linear (3 cmd)
-- Fix: h/Left arrow widget navigation
+- Fix: h/Left arrow widget navigation, UTF-8 safe truncation
+- v0.8.0 Mini App Mode:
+  - Action chaining via `on_action` Lua callback
+  - Full-screen split-pane UI (neovim-style)
+  - User-initiated split/close/resize
+  - `lark.clipboard_read()` host API
+  - Clipboard history plugin (no Maccy dependency)
+  - Docker Dashboard mini app reference plugin

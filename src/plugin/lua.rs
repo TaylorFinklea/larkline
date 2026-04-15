@@ -317,6 +317,18 @@ impl LuaPlugin {
         lark.set("register", register_fn)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.clipboard_read() -> string — read current system clipboard text.
+        let clipboard_read_fn = lua
+            .create_function(|_, ()| {
+                let text = arboard::Clipboard::new()
+                    .and_then(|mut cb| cb.get_text())
+                    .unwrap_or_default();
+                Ok(text)
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        lark.set("clipboard_read", clipboard_read_fn)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // Install `lark` as a global.
         lua.globals()
             .set("lark", lark)

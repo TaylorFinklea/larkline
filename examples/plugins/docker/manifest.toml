@@ -51,3 +51,11 @@ description = "Disk usage, system info, prune all unused resources"
 entry = "system.lua"
 quickkey = "ds"
 timeout_seconds = 15
+
+[[commands]]
+name = "Dashboard"
+description = "Split-pane container overview (mini app)"
+entry = "dashboard.lua"
+quickkey = "db"
+timeout_seconds = 15
+mini_app = true

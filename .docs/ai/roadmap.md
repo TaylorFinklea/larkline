@@ -67,12 +67,23 @@ Expand the plugin library with three new integrations:
 - [x] Tailscale/VPN: device status, exit nodes, network overview (3 commands)
 - [x] Linear: assigned issues, current cycle, triage queue (3 commands, GraphQL API)
 
+### v0.8.0 — Mini App Mode
+
+Full-screen split-pane UI controlled by plugins — neovim-style.
+- [x] Action chaining: `on_action` callback, `ActionKind::Chain` + `UpdatePane`
+- [x] Layout data model: `MiniAppLayout` recursive tree, `PaneContent`, manifest `mini_app` field
+- [x] Split-pane rendering: recursive `render_layout_node()`, focused pane accent border
+- [x] Mini app input: Tab/Ctrl+h/l pane focus, j/k per-pane nav, Enter per-pane actions
+- [x] User splits: Ctrl+\/- split, Ctrl+x close, +/_ resize, tree mutation helpers
+- [x] `lark.clipboard_read()` host API, clipboard history plugin (no Maccy dependency)
+- [x] Docker Dashboard mini app reference plugin (two-pane: container list + detail)
+
 ### Future (unordered — pick theme per release)
 
 - **Distribution:** crates.io publish, AUR package, Nix flake, `lark plugin sync` update-in-place
 - **lark.nvim v2:** Telescope integration, action dispatch back to Neovim, bidirectional comms
 - **Performance:** prefetch tuning, slow-plugin profiling, widget refresh optimization (skip when not visible)
-- **app.rs refactor:** split 3600+ line god-object into submodules (state, execution, widgets) — phase work only
+- **app.rs refactor:** split god-object into submodules (state, execution, widgets, mini_app) — phase work only
 
 ---
 

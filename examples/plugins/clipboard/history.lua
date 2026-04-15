@@ -1,104 +1,83 @@
--- Clipboard: History — reads clipboard history from Maccy's local database.
+-- Clipboard: History — persistent clipboard history using lark.clipboard_read + lark.store.
+-- No external dependencies (Maccy/Flycut not required).
 
-local DB_PATH_SUFFIX = "/Library/Containers/org.p0deje.Maccy/Data/Library/Application Support/Maccy/Storage.sqlite"
+local MAX_ENTRIES = 50
 
 lark.register({
     on_run = function()
-        local home = lark.env("HOME")
-        local db = home .. DB_PATH_SUFFIX
+        -- Read current clipboard.
+        local current = lark.clipboard_read()
 
-        -- Use Python to query Maccy's CoreData SQLite store and return JSON.
-        local script = string.format([[
-import sqlite3, json, os, sys
-db = %q
-if not os.path.exists(db):
-    print(json.dumps({"error": "not_found"}))
-    sys.exit(0)
-try:
-    conn = sqlite3.connect(db)
-    rows = conn.execute("""
-        SELECT hi.ZTITLE, hc.ZVALUE, hi.ZAPPLICATION
-        FROM ZHISTORYITEM hi
-        JOIN ZHISTORYITEMCONTENT hc ON hc.ZITEM = hi.Z_PK
-        WHERE hc.ZTYPE = 'public.utf8-plain-text'
-        ORDER BY hi.ZLASTCOPIEDAT DESC LIMIT 25
-    """).fetchall()
-    result = []
-    for title, value, app in rows:
-        if isinstance(value, bytes):
-            value = value.decode("utf-8", errors="replace")
-        result.append({"title": title or "", "value": value or title or "", "app": app or ""})
-    print(json.dumps({"items": result}))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-]], db)
-
-        local raw = lark.exec("python3", { "-c", script })
-
-        if not raw or raw == "" then
-            return {
-                title = "Clipboard History",
-                items = { { label = "Failed to read Maccy history", icon = "⚠" } },
-            }
-        end
-
-        local ok, data = pcall(lark.json.decode, raw)
-        if not ok or not data then
-            return {
-                title = "Clipboard History",
-                items = { { label = "Failed to parse Maccy data", icon = "⚠" } },
-            }
-        end
-
-        if data.error then
-            if data.error == "not_found" then
-                return {
-                    title = "Clipboard History",
-                    items = { {
-                        label  = "Maccy not installed",
-                        icon   = "⚠",
-                        detail = "Install from maccy.app, then copy some text",
-                    } },
-                }
+        -- Load history from persistent store.
+        local raw = lark.store.get("history")
+        local history = {}
+        if raw then
+            local ok, decoded = pcall(lark.json.decode, raw)
+            if ok and type(decoded) == "table" then
+                history = decoded
             end
-            return {
-                title = "Clipboard History",
-                items = { { label = "Error: " .. tostring(data.error), icon = "⚠" } },
-            }
         end
 
-        if not data.items or #data.items == 0 then
+        -- If clipboard has new content, prepend it (dedup by value).
+        if current and current ~= "" then
+            local dominated = false
+            for i, entry in ipairs(history) do
+                if entry.value == current then
+                    dominated = true
+                    -- Move to front.
+                    table.remove(history, i)
+                    break
+                end
+            end
+            table.insert(history, 1, {
+                value = current,
+                time = os.time and os.time() or 0,
+            })
+        end
+
+        -- Trim to max.
+        while #history > MAX_ENTRIES do
+            table.remove(history)
+        end
+
+        -- Persist.
+        lark.store.set("history", lark.json.encode(history))
+
+        -- Build output items.
+        if #history == 0 then
             return {
                 title = "Clipboard History",
-                items = { { label = "No clipboard history in Maccy", icon = "📭" } },
+                items = { { label = "No clipboard history yet", icon = "📭" } },
             }
         end
 
         local items = {}
-        for i, entry in ipairs(data.items) do
-            -- Use title (Maccy's preview) for the label; fall back to first line of value.
-            local label = entry.title ~= "" and entry.title or (entry.value:match("^([^\n]+)") or entry.value)
-            if #label > 70 then label = label:sub(1, 67) .. "..." end
+        for i, entry in ipairs(history) do
+            local value = entry.value or ""
+            local label = value:match("^([^\n]+)") or value
+            if #label > 80 then
+                label = label:sub(1, 77) .. "..."
+            end
 
-            -- Show app name (last bundle-ID component, capitalised).
+            local line_count = select(2, value:gsub("\n", "")) + 1
             local detail = ""
-            if entry.app ~= "" then
-                local short = entry.app:match("%.([^.]+)$") or entry.app
-                detail = short:sub(1, 1):upper() .. short:sub(2)
+            if line_count > 1 then
+                detail = line_count .. " lines"
+            elseif #value > 80 then
+                detail = #value .. " chars"
             end
 
             items[#items + 1] = {
-                label     = label,
-                detail    = detail,
-                icon      = i == 1 and "●" or "◈",
-                copy_text = entry.value,
-                actions   = {
-                    { label = "Restore to Clipboard", kind = "clipboard", args = { entry.value } },
-                    { label = "Copy",                 kind = "clipboard", args = { entry.value } },
+                label = label,
+                detail = detail,
+                icon = i == 1 and "●" or "○",
+                copy_text = value,
+                actions = {
+                    { label = "Paste to clipboard", kind = "clipboard", args = { value } },
                 },
             }
         end
 
-        return { title = "Clipboard — " .. #items, items = items }
+        return { title = "Clipboard — " .. #history .. " entries", items = items }
     end,
 })
