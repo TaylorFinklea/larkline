@@ -987,21 +987,46 @@ impl App {
                     }
 
                     if !was_revalidating {
-                        if self.state.mode != Mode::ViewOutput {
-                            self.state.mode = Mode::ViewOutput;
-                        }
-                        self.state.output_selected = 0;
-                        // Auto-select Table mode when columns are defined.
-                        self.state.output_mode = if self
+                        // Check if this plugin declares mini_app and returned a layout.
+                        let has_layout = self
                             .state
                             .plugin_output
                             .as_ref()
-                            .is_some_and(|o| !o.columns.is_empty())
-                        {
-                            OutputMode::Table
+                            .is_some_and(|o| o.layout.is_some());
+                        let is_mini_app = self
+                            .state
+                            .plugins
+                            .get(plugin_index)
+                            .is_some_and(|p| p.mini_app);
+
+                        if is_mini_app && has_layout {
+                            let layout = self
+                                .state
+                                .plugin_output
+                                .as_ref()
+                                .and_then(|o| o.layout.clone())
+                                .expect("checked above");
+                            self.state.mini_app = Some(
+                                crate::mini_app::build_mini_app_state(plugin_index, layout),
+                            );
+                            self.state.mode = Mode::MiniApp;
                         } else {
-                            OutputMode::List
-                        };
+                            if self.state.mode != Mode::ViewOutput {
+                                self.state.mode = Mode::ViewOutput;
+                            }
+                            self.state.output_selected = 0;
+                            // Auto-select Table mode when columns are defined.
+                            self.state.output_mode = if self
+                                .state
+                                .plugin_output
+                                .as_ref()
+                                .is_some_and(|o| !o.columns.is_empty())
+                            {
+                                OutputMode::Table
+                            } else {
+                                OutputMode::List
+                            };
+                        }
                     }
                 }
             },
@@ -1013,8 +1038,36 @@ impl App {
                 self.state.is_loading = false;
                 match result {
                     Ok(output) => {
-                        // Replace the current plugin output with the action result.
-                        if self.state.viewing_plugin_index == Some(plugin_index) {
+                        if self.state.mode == Mode::MiniApp {
+                            // In mini app mode: if the result has a layout, rebuild the entire
+                            // mini app state. Otherwise use the title as a pane ID hint to
+                            // update a single pane's content.
+                            if let Some(ref layout) = output.layout {
+                                self.state.mini_app = Some(
+                                    crate::mini_app::build_mini_app_state(plugin_index, layout.clone()),
+                                );
+                            } else if let Some(ref mut mini) = self.state.mini_app {
+                                // Use the output title as target pane ID.
+                                let target = &output.title;
+                                if let Some(pane) = mini.panes.get_mut(target) {
+                                    pane.content = crate::plugin::traits::PaneContent {
+                                        title: output.title.clone(),
+                                        items: output.items,
+                                        raw_text: output.raw_text,
+                                        columns: output.columns,
+                                        form: output.form,
+                                        output_format: output.output_format,
+                                    };
+                                    pane.selected = 0;
+                                    pane.scroll_offset = 0;
+                                }
+                            }
+                            self.state.status_message = Some((
+                                "Action completed".to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        } else if self.state.viewing_plugin_index == Some(plugin_index) {
+                            // ViewOutput mode: replace entire output.
                             self.state.output_selected = 0;
                             self.state.scroll_offset = 0;
                             self.state.plugin_output = Some(output);
@@ -1090,6 +1143,14 @@ impl App {
                     self.theme = crate::config::ThemeConfig::resolve_preset(id);
                 } else if let Some(ref mut menu) = self.state.copy_menu {
                     menu.selected = menu.selected.saturating_sub(1);
+                } else if self.state.mode == Mode::MiniApp {
+                    if let Some(ref mut mini) = self.state.mini_app {
+                        if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
+                            if pane.selected > 0 {
+                                pane.selected -= 1;
+                            }
+                        }
+                    }
                 } else if self.state.mode == Mode::ViewOutput
                     && matches!(
                         self.state.output_mode,
@@ -1153,6 +1214,15 @@ impl App {
                     let max = menu.entries.len().saturating_sub(1);
                     if menu.selected < max {
                         menu.selected += 1;
+                    }
+                } else if self.state.mode == Mode::MiniApp {
+                    if let Some(ref mut mini) = self.state.mini_app {
+                        if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
+                            let max = pane.content.items.len().saturating_sub(1);
+                            if pane.selected < max {
+                                pane.selected += 1;
+                            }
+                        }
                     }
                 } else if self.state.mode == Mode::ViewOutput
                     && matches!(
@@ -1296,7 +1366,24 @@ impl App {
             }
 
             Action::Execute => {
-                if let Some(item) = self.selected_output_item().cloned() {
+                // Mini app mode: execute action on focused pane's selected item.
+                if self.state.mode == Mode::MiniApp {
+                    let item = self.state.mini_app.as_ref().and_then(|mini| {
+                        let pane = mini.panes.get(&mini.focused_pane)?;
+                        pane.content.items.get(pane.selected).cloned()
+                    });
+                    if let Some(item) = item {
+                        match item.actions.len() {
+                            0 => {
+                                if let Some(ref url) = item.url {
+                                    open_url(url);
+                                }
+                            }
+                            1 => self.execute_item_action(&item.actions[0]),
+                            _ => self.handle_action(Action::PaletteOpen),
+                        }
+                    }
+                } else if let Some(item) = self.selected_output_item().cloned() {
                     match item.actions.len() {
                         0 => {
                             if let Some(ref url) = item.url {
@@ -2310,6 +2397,52 @@ impl App {
                         command: cmd.to_string(),
                         args,
                     });
+                }
+            }
+
+            // ----- Mini app actions -----
+
+            Action::MiniAppFocusNext => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+                        let next = (pos + 1) % mini.pane_order.len();
+                        mini.focused_pane = mini.pane_order[next].clone();
+                    }
+                }
+            }
+
+            Action::MiniAppFocusPrev => {
+                if let Some(ref mut mini) = self.state.mini_app {
+                    if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+                        let prev = if pos == 0 {
+                            mini.pane_order.len().saturating_sub(1)
+                        } else {
+                            pos - 1
+                        };
+                        mini.focused_pane = mini.pane_order[prev].clone();
+                    }
+                }
+            }
+
+            Action::MiniAppClose => {
+                self.state.mini_app = None;
+                self.state.mode = Mode::Unified;
+                self.state.viewing_plugin_index = None;
+            }
+
+            Action::MiniAppExpand => {
+                // Expand current ViewOutput into a single-pane mini app.
+                if self.state.mode == Mode::ViewOutput {
+                    if let Some(ref output) = self.state.plugin_output {
+                        if let Some(ref layout) = output.layout {
+                            // Plugin returned a layout — use it.
+                            let plugin_index = self.state.viewing_plugin_index.unwrap_or(0);
+                            self.state.mini_app = Some(
+                                crate::mini_app::build_mini_app_state(plugin_index, layout.clone()),
+                            );
+                            self.state.mode = Mode::MiniApp;
+                        }
+                    }
                 }
             }
 

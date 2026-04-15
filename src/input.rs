@@ -87,8 +87,8 @@ pub fn handle_key(
         VimMode::Insert => handle_insert(event, keybindings),
         VimMode::Normal => match mode {
             Mode::Unified => handle_browse_normal(event, keybindings, widget_focused),
-            // Mini app mode reuses ViewOutput bindings until Phase D adds a dedicated handler.
-            Mode::ViewOutput | Mode::MiniApp => handle_view_output(event, keybindings),
+            Mode::ViewOutput => handle_view_output(event, keybindings),
+            Mode::MiniApp => handle_mini_app(event, keybindings),
             Mode::PluginManager => handle_plugin_manager(event),
         },
     }
@@ -314,6 +314,52 @@ fn handle_view_output(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Opt
         KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
         KeyCode::Char('s') if event.modifiers == KeyModifiers::NONE => Some(Action::ToggleSidebar),
         KeyCode::Char('r') if event.modifiers == KeyModifiers::NONE => Some(Action::RerunCommand),
+        // F → expand to mini app mode (single-pane wrapper).
+        KeyCode::Char('F') => Some(Action::MiniAppExpand),
+        _ => None,
+    }
+}
+
+/// Mini app mode handler: pane navigation, item actions, and exit.
+fn handle_mini_app(event: KeyEvent, keybindings: &ResolvedKeybindings) -> Option<Action> {
+    // Check configurable view_output map for item navigation (j/k/Enter/etc).
+    if let Some(action) = keybindings.view_output_map.get(&event) {
+        return Some(match action {
+            ViewOutputAction::MoveUp => Action::MoveUp,
+            ViewOutputAction::MoveDown => Action::MoveDown,
+            ViewOutputAction::Back => Action::MiniAppClose,
+            ViewOutputAction::Execute => Action::Execute,
+            ViewOutputAction::Quit => Action::Quit,
+            ViewOutputAction::ScrollHalfPageDown => Action::ScrollHalfPageDown,
+            ViewOutputAction::ScrollHalfPageUp => Action::ScrollHalfPageUp,
+            ViewOutputAction::ToggleOutputMode => Action::ToggleOutputMode,
+            ViewOutputAction::CopyLabel => Action::CopyLabel,
+            ViewOutputAction::CopyMenu => Action::CopyMenu,
+            ViewOutputAction::Search => Action::OutputEnterSearch,
+            ViewOutputAction::OpenUrl => Action::OpenUrl,
+            ViewOutputAction::ActionPalette => Action::PaletteOpen,
+        });
+    }
+
+    match event.code {
+        KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
+        // Tab / Shift+Tab to cycle pane focus.
+        KeyCode::Tab if event.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(Action::MiniAppFocusPrev)
+        }
+        KeyCode::Tab => Some(Action::MiniAppFocusNext),
+        // Ctrl+h / Ctrl+l to cycle pane focus (vim-style).
+        KeyCode::Char('h') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::MiniAppFocusPrev)
+        }
+        KeyCode::Char('l') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::MiniAppFocusNext)
+        }
+        // Space for power menu.
+        KeyCode::Char(' ') if event.modifiers == KeyModifiers::NONE => Some(Action::PowerMenuOpen),
+        // G / gg for jump.
+        KeyCode::Char('G') => Some(Action::GoToLast),
+        KeyCode::Char('g') if event.modifiers == KeyModifiers::NONE => Some(Action::PendingG),
         _ => None,
     }
 }

@@ -165,4 +165,12 @@ pub enum Action {
     WidgetCardOpen,
     /// Run the system upgrade command shown in the update hint.
     RunUpgrade,
+    /// Move focus to the next pane in mini app mode.
+    MiniAppFocusNext,
+    /// Move focus to the previous pane in mini app mode.
+    MiniAppFocusPrev,
+    /// Exit mini app mode and return to Unified.
+    MiniAppClose,
+    /// Expand current `ViewOutput` into mini app mode (single-pane wrapper).
+    MiniAppExpand,
 }
