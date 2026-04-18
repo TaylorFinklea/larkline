@@ -2097,6 +2097,38 @@ impl App {
                     self.engine.execute_action(plugin_index, callback_id, context);
                 }
             }
+            ActionKind::NvimEdit => {
+                // args[0] = file path, args[1] = split kind (optional, default "edit").
+                let Some(path) = action.args.first() else {
+                    return;
+                };
+                let split = action
+                    .args
+                    .get(1)
+                    .map_or("edit", String::as_str);
+                match nvim_open_file(path, split) {
+                    Ok(()) => {
+                        self.state.status_message =
+                            Some((format!("Opened in nvim: {path}"), std::time::Instant::now()));
+                    }
+                    Err(NvimOpenError::NotUnderNvim) => {
+                        // No $NVIM — fall back to open_url so plugins stay useful
+                        // outside Neovim sessions.
+                        open_url(path);
+                        self.state.status_message = Some((
+                            "Not running under Neovim; opened via system handler".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                    Err(NvimOpenError::CommandFailed(e)) => {
+                        tracing::warn!(error = %e, path = %path, "nvim remote-send failed");
+                        self.state.status_message = Some((
+                            format!("nvim open failed: {e}"),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -2412,6 +2444,60 @@ fn open_url(url: &str) {
     if let Err(e) = std::process::Command::new(cmd).arg(url).spawn() {
         tracing::warn!(error = %e, url = url, "failed to open URL");
     }
+}
+
+/// Error opening a file in the parent Neovim instance.
+pub(crate) enum NvimOpenError {
+    /// `$NVIM` env var is not set — not running as a child of nvim.
+    NotUnderNvim,
+    /// The nvim command spawned but exited non-zero, or could not be spawned.
+    CommandFailed(String),
+}
+
+impl std::fmt::Display for NvimOpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotUnderNvim => f.write_str("not running under Neovim"),
+            Self::CommandFailed(e) => write!(f, "nvim command failed: {e}"),
+        }
+    }
+}
+
+/// Open a file in the parent Neovim via `nvim --server $NVIM --remote-send`.
+///
+/// `split` is one of `edit`, `split`, `vsplit`, `tabedit`. Any other value
+/// falls back to `edit`.
+fn nvim_open_file(path: &str, split: &str) -> Result<(), NvimOpenError> {
+    let Ok(socket) = std::env::var("NVIM") else {
+        return Err(NvimOpenError::NotUnderNvim);
+    };
+    let cmd_verb = match split {
+        "split" | "vsplit" | "tabedit" => split,
+        _ => "edit",
+    };
+    // Build an ex sequence: <Esc>:<verb> <path><CR>. Escape backslashes and
+    // double quotes in the path; nvim's remote-send parses the string as
+    // key notation, so "<" and ">" embedded in the path would be misread.
+    let escaped = path
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('<', "\\<");
+    let keys = format!("<Esc>:{cmd_verb} {escaped}<CR>");
+
+    let output = std::process::Command::new("nvim")
+        .args(["--server", &socket, "--remote-send", &keys])
+        .output()
+        .map_err(|e| NvimOpenError::CommandFailed(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(NvimOpenError::CommandFailed(if stderr.is_empty() {
+            format!("exit status {}", output.status)
+        } else {
+            stderr
+        }));
+    }
+    Ok(())
 }
 
 fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {

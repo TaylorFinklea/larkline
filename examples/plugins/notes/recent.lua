@@ -62,15 +62,19 @@ lark.register({
             if folder ~= "" then detail_parts[#detail_parts + 1] = folder end
             detail_parts[#detail_parts + 1] = ago
 
+            local actions = {}
+            if lark.env("NVIM") then
+                actions[#actions + 1] = { label = "Open in Neovim", kind = "nvim_edit", args = { f.path } }
+            end
+            actions[#actions + 1] = { label = "Open in Obsidian", kind = "open", args = { "obsidian://open?vault=" .. vault:match("([^/]+)$") .. "&file=" .. rel } }
+            actions[#actions + 1] = { label = "Open in editor", kind = "shell", args = { "open", f.path } }
+            actions[#actions + 1] = { label = "Copy path", kind = "clipboard", args = { f.path } }
+
             items[#items + 1] = {
                 label = name,
                 detail = table.concat(detail_parts, " · "),
                 icon = "📄",
-                actions = {
-                    { label = "Open in Obsidian", kind = "open", args = { "obsidian://open?vault=" .. vault:match("([^/]+)$") .. "&file=" .. rel } },
-                    { label = "Open in editor", kind = "shell", args = { "open", f.path } },
-                    { label = "Copy path", kind = "clipboard", args = { f.path } },
-                },
+                actions = actions,
             }
         end
 

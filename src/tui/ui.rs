@@ -623,6 +623,7 @@ fn render_output_pane(
                     ActionKind::Clipboard => "⎘",
                     ActionKind::Shell => "▶",
                     ActionKind::Chain | ActionKind::UpdatePane => "⟳",
+                    ActionKind::NvimEdit => "",
                 };
                 let style = if vis_idx == palette.selected {
                     Style::default()

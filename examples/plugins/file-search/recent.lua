@@ -54,16 +54,21 @@ lark.register({
             if home ~= "" and dir:sub(1, #home) == home then
                 dir = "~" .. dir:sub(#home + 1)
             end
+            local actions = {}
+            if lark.env("NVIM") then
+                actions[#actions + 1] = { label = "Open in Neovim", kind = "nvim_edit", args = { path } }
+                actions[#actions + 1] = { label = "Open (vsplit)", kind = "nvim_edit", args = { path, "vsplit" } }
+            end
+            actions[#actions + 1] = { label = "Open in Finder", kind = "shell", args = { "open", "-R", path } }
+            actions[#actions + 1] = { label = "Open in $EDITOR", kind = "shell", args = { os.getenv("EDITOR") or "vim", path } }
+            actions[#actions + 1] = { label = "Copy path", kind = "clipboard", args = { path } }
+
             items[#items + 1] = {
                 label = name,
                 detail = dir,
                 icon = "📄",
                 copy_text = path,
-                actions = {
-                    { label = "Open in Finder", kind = "shell", args = { "open", "-R", path } },
-                    { label = "Open in $EDITOR", kind = "shell", args = { os.getenv("EDITOR") or "vim", path } },
-                    { label = "Copy path", kind = "clipboard", args = { path } },
-                },
+                actions = actions,
             }
         end
 

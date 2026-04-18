@@ -329,6 +329,37 @@ impl LuaPlugin {
         lark.set("clipboard_read", clipboard_read_fn)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.nvim_exec(cmd) -> bool — send an ex command to the parent nvim
+        // via $NVIM socket. Returns false when not running under Neovim so
+        // plugins can feature-detect.
+        let nvim_exec_fn = lua
+            .create_function(|_, cmd: String| {
+                let Ok(socket) = std::env::var("NVIM") else {
+                    return Ok(false);
+                };
+                let keys = format!("<Esc>:{cmd}<CR>");
+                let result = std::process::Command::new("nvim")
+                    .args(["--server", &socket, "--remote-send", &keys])
+                    .output();
+                match result {
+                    Ok(output) if output.status.success() => Ok(true),
+                    Ok(output) => {
+                        tracing::warn!(
+                            stderr = %String::from_utf8_lossy(&output.stderr),
+                            "nvim_exec remote-send failed"
+                        );
+                        Ok(false)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "nvim_exec spawn failed");
+                        Ok(false)
+                    }
+                }
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        lark.set("nvim_exec", nvim_exec_fn)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // Install `lark` as a global.
         lua.globals()
             .set("lark", lark)

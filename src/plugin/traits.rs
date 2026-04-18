@@ -238,6 +238,11 @@ pub enum ActionKind {
     /// `args[0]` = target pane ID, `args[1]` = callback ID, `args[2..]` = context.
     #[serde(rename = "update_pane")]
     UpdatePane,
+    /// Open a file in the parent Neovim instance (requires `$NVIM` env var, nvim ≥ 0.9).
+    /// `args[0]` = file path, `args[1]` = split kind (optional: `edit|split|vsplit|tabedit`, default `edit`).
+    /// Falls back to `Open` behaviour when not running under Neovim.
+    #[serde(rename = "nvim_edit")]
+    NvimEdit,
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +447,22 @@ mod tests {
         let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(item.label, "Chrome");
         assert_eq!(item.copy_text.as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn action_kind_deserializes_nvim_edit() {
+        let json = r#"{"label": "Open in Neovim", "kind": "nvim_edit", "args": ["/path/to/file", "vsplit"]}"#;
+        let action: ItemAction = serde_json::from_str(json).expect("deserialization failed");
+        assert_eq!(action.kind, ActionKind::NvimEdit);
+        assert_eq!(action.args, vec!["/path/to/file", "vsplit"]);
+    }
+
+    #[test]
+    fn action_kind_nvim_edit_optional_split() {
+        let json = r#"{"label": "Open", "kind": "nvim_edit", "args": ["/path"]}"#;
+        let action: ItemAction = serde_json::from_str(json).expect("deserialization failed");
+        assert_eq!(action.kind, ActionKind::NvimEdit);
+        assert_eq!(action.args, vec!["/path"]);
     }
 
     #[test]
