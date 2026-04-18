@@ -767,16 +767,22 @@ impl App {
             }
 
             // Auto-refresh widget plugins on their configured interval.
-            if self.state.mode == Mode::Unified {
+            // Skip entirely when the dashboard isn't visible: widgets toggled off,
+            // a non-Unified mode active, or no enabled widgets exist. Iterate the
+            // pre-computed widget_indices instead of rescanning every plugin.
+            if self.state.mode == Mode::Unified
+                && self.state.widgets_visible
+                && !self.state.widget_indices.is_empty()
+            {
                 let now = std::time::Instant::now();
                 let due: Vec<usize> = self
                     .state
-                    .plugins
+                    .widget_indices
                     .iter()
-                    .enumerate()
-                    .filter(|(pidx, meta)| {
-                        meta.widget
-                            && meta.widget_refresh_secs > 0
+                    .copied()
+                    .filter(|pidx| {
+                        let meta = &self.state.plugins[*pidx];
+                        meta.widget_refresh_secs > 0
                             && now
                                 .duration_since(
                                     self.state
@@ -788,7 +794,6 @@ impl App {
                                 .as_secs()
                                 >= meta.widget_refresh_secs
                     })
-                    .map(|(pidx, _)| pidx)
                     .collect();
                 if !due.is_empty() {
                     for pidx in &due {

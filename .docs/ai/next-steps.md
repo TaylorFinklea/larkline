@@ -1,18 +1,18 @@
 # Next Steps
 
-> Updated: 2026-04-15
+> Updated: 2026-04-17
 
-## v0.8.0 — Complete
+## v0.9.0 — Complete
 
 All items complete:
-- [x] Action chaining (on_action callback)
-- [x] Mini app layout data model + manifest
-- [x] Split-pane rendering
-- [x] Mini app input + pane updates
-- [x] User splits, resize, close
-- [x] Clipboard history + Docker Dashboard mini app
+- [x] Phase A: Extract widget helpers
+- [x] Phase B: Extract power menu builder
+- [x] Phase C: Extract plugin manager state builder
+- [x] Phase D: Extract output/form helpers
+- [x] Phase E: Split handle_action into handler modules
+- [x] Phase F: Performance — prefetch cap, slow-plugin profiling, widget refresh skip
 
-**To release:** Bump `Cargo.toml` version to 0.8.0, tag, push.
+**To release:** Bump `Cargo.toml` version and tag.
 
 ## Backlog (can be done by smaller models in parallel)
 
@@ -35,3 +35,8 @@ See `.docs/ai/roadmap.md` → Backlog section for full list and guardrails.
   - `lark.clipboard_read()` host API
   - Clipboard history plugin (no Maccy dependency)
   - Docker Dashboard mini app reference plugin
+- v0.9.0 Internal Quality:
+  - Split 4027-line `app.rs` god-object into 8 focused modules (−29% to 2851 lines)
+  - Prefetch concurrency cap (8 parallel) so slow startup on machines with many plugins
+  - Slow-plugin profiling: plugins ≥500ms log a warn-level trace
+  - Widget auto-refresh skipped when dashboard hidden

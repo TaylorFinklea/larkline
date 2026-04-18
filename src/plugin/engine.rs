@@ -64,11 +64,39 @@ pub enum EngineEvent {
     },
 }
 
+/// Maximum concurrent prefetch plugin executions.
+///
+/// Startup fires `execute_all()` which enqueues every prefetch-eligible plugin.
+/// Without a cap, 40+ shell/HTTP/docker commands run in parallel and saturate
+/// the system on slow machines. User-triggered executions bypass this limit.
+const PREFETCH_CONCURRENCY: usize = 8;
+
+/// Plugins slower than this threshold log a warning for profiling.
+const SLOW_PLUGIN_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn log_execution_time(name: &str, elapsed: std::time::Duration) {
+    if elapsed >= SLOW_PLUGIN_THRESHOLD {
+        tracing::warn!(
+            plugin = %name,
+            elapsed_ms = elapsed.as_millis(),
+            "slow plugin execution"
+        );
+    } else {
+        tracing::debug!(
+            plugin = %name,
+            elapsed_ms = elapsed.as_millis(),
+            "plugin executed"
+        );
+    }
+}
+
 /// Manages a set of plugins and dispatches them as async Tokio tasks.
 pub struct PluginEngine {
     plugins: Vec<Arc<dyn Plugin>>,
     tx: mpsc::Sender<EngineEvent>,
     secrets: Arc<std::collections::HashMap<String, String>>,
+    /// Limits concurrent prefetch executions; user-selected runs bypass it.
+    prefetch_sem: Arc<tokio::sync::Semaphore>,
 }
 
 impl PluginEngine {
@@ -83,6 +111,7 @@ impl PluginEngine {
             plugins,
             tx,
             secrets: Arc::new(secrets),
+            prefetch_sem: Arc::new(tokio::sync::Semaphore::new(PREFETCH_CONCURRENCY)),
         }
     }
 
@@ -227,13 +256,21 @@ impl PluginEngine {
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
         let tx = self.tx.clone();
+        let prefetch_sem = Arc::clone(&self.prefetch_sem);
+        let plugin_name = plugin.metadata().name.clone();
         tokio::spawn(async move {
+            // Rate-limit background prefetch. User-selected runs bypass the cap.
+            let _permit = match source {
+                ExecutionSource::Prefetch => prefetch_sem.acquire_owned().await.ok(),
+                ExecutionSource::UserSelected => None,
+            };
             let _ = tx
                 .send(EngineEvent::PluginStarted {
                     plugin_index,
                     source: source.clone(),
                 })
                 .await;
+            let started = std::time::Instant::now();
             let handle = tokio::spawn(SECRETS.scope(
                 secrets,
                 PLUGIN_LIST.scope(
@@ -247,6 +284,7 @@ impl PluginEngine {
                     "plugin task failed: {join_err}"
                 ))),
             };
+            log_execution_time(&plugin_name, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
@@ -254,6 +292,7 @@ impl PluginEngine {
                     source,
                 })
                 .await;
+            // _permit drops here, releasing the prefetch slot.
         });
     }
 
@@ -277,14 +316,21 @@ impl PluginEngine {
         let store_path =
             crate::plugin::store::store_path_for(&meta.name, meta.plugin_group.as_deref());
         let tx = self.tx.clone();
+        let prefetch_sem = Arc::clone(&self.prefetch_sem);
 
         tokio::spawn(async move {
+            // Rate-limit background prefetch. User-selected runs bypass the cap.
+            let _permit = match source {
+                ExecutionSource::Prefetch => prefetch_sem.acquire_owned().await.ok(),
+                ExecutionSource::UserSelected => None,
+            };
             let _ = tx
                 .send(EngineEvent::PluginStarted {
                     plugin_index,
                     source: source.clone(),
                 })
                 .await;
+            let started = std::time::Instant::now();
 
             let result = tokio::time::timeout(timeout, async {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -370,6 +416,7 @@ impl PluginEngine {
                 Ok(r) => r,
                 Err(_) => Err(PluginError::Timeout(timeout)),
             };
+            log_execution_time(&meta.name, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
