@@ -610,7 +610,7 @@ impl App {
             pm_config: crate::config::load_plugin_manager_config(),
         };
         app.rebuild_unified_list();
-        app.rebuild_widget_indices();
+        crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
 
         // Apply default_plugin pre-selection: find the first Command row with the named plugin.
         if let Some(ref name) = config.general.default_plugin {
@@ -626,7 +626,7 @@ impl App {
                 .map(|(i, _)| i);
             if let Some(pos) = row_pos {
                 app.state.unified_selected = pos;
-                app.sync_preview_index();
+                crate::widgets::sync_preview_index(&mut app.state);
             } else {
                 tracing::warn!(
                     plugin_name = %name,
@@ -1173,7 +1173,7 @@ impl App {
                         .map(|(i, _)| i)
                     {
                         self.state.unified_selected = prev;
-                        self.sync_preview_index();
+                        crate::widgets::sync_preview_index(&mut self.state);
                     }
                 }
             }
@@ -1249,7 +1249,7 @@ impl App {
                         .map(|(i, _)| i)
                     {
                         self.state.unified_selected = next;
-                        self.sync_preview_index();
+                        crate::widgets::sync_preview_index(&mut self.state);
                     }
                 }
             }
@@ -1434,7 +1434,7 @@ impl App {
                         let next_pos = (pos + 10).min(selectable.len().saturating_sub(1));
                         if let Some(&next_row) = selectable.get(next_pos) {
                             self.state.unified_selected = next_row;
-                            self.sync_preview_index();
+                            crate::widgets::sync_preview_index(&mut self.state);
                         }
                     }
                 }
@@ -1465,7 +1465,7 @@ impl App {
                         let prev_pos = pos.saturating_sub(10);
                         if let Some(&prev_row) = selectable.get(prev_pos) {
                             self.state.unified_selected = prev_row;
-                            self.sync_preview_index();
+                            crate::widgets::sync_preview_index(&mut self.state);
                         }
                     }
                 }
@@ -1939,7 +1939,7 @@ impl App {
                         .position(UnifiedRow::is_selectable)
                     {
                         self.state.unified_selected = first;
-                        self.sync_preview_index();
+                        crate::widgets::sync_preview_index(&mut self.state);
                     }
                 }
                 Mode::ViewOutput | Mode::MiniApp => {
@@ -1972,7 +1972,7 @@ impl App {
                             .map(|(i, _)| i)
                         {
                             self.state.unified_selected = last;
-                            self.sync_preview_index();
+                            crate::widgets::sync_preview_index(&mut self.state);
                         }
                     }
                     Mode::ViewOutput | Mode::MiniApp => {
@@ -2226,7 +2226,7 @@ impl App {
                         if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
                             tracing::warn!(error = %e, "failed to save widget config");
                         }
-                        self.rebuild_widget_indices();
+                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                         self.state.status_message =
                             Some((format!("Hidden widget: {name}"), std::time::Instant::now()));
                     }
@@ -2236,7 +2236,7 @@ impl App {
             Action::WidgetMoveLeft => {
                 if self.state.widget_focused && self.state.widget_selected > 0 {
                     // Ensure widget_order has all current widgets.
-                    self.ensure_widget_order();
+                    crate::widgets::ensure_widget_order(&self.state, &mut self.pm_config);
                     if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
                         let meta = &self.state.plugins[pidx];
                         let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
@@ -2245,7 +2245,7 @@ impl App {
                             tracing::warn!(error = %e, "failed to save widget order");
                         }
                         self.state.widget_selected -= 1;
-                        self.rebuild_widget_indices();
+                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                     }
                 }
             }
@@ -2254,7 +2254,7 @@ impl App {
                 if self.state.widget_focused
                     && self.state.widget_selected + 1 < self.state.widget_indices.len()
                 {
-                    self.ensure_widget_order();
+                    crate::widgets::ensure_widget_order(&self.state, &mut self.pm_config);
                     if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
                         let meta = &self.state.plugins[pidx];
                         let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
@@ -2263,7 +2263,7 @@ impl App {
                             tracing::warn!(error = %e, "failed to save widget order");
                         }
                         self.state.widget_selected += 1;
-                        self.rebuild_widget_indices();
+                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                     }
                 }
             }
@@ -2358,7 +2358,7 @@ impl App {
                             {
                                 tracing::warn!(error = %e, "failed to save widget config");
                             }
-                            self.rebuild_widget_indices();
+                            crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                             self.state.widgets_visible = !self.state.widget_indices.is_empty();
                         }
                     }
@@ -3292,69 +3292,6 @@ impl App {
         });
     }
 
-    /// Ensure `widget_order` contains all current widget keys (for reordering).
-    fn ensure_widget_order(&mut self) {
-        let current: Vec<String> = self
-            .state
-            .widget_indices
-            .iter()
-            .map(|&i| {
-                let m = &self.state.plugins[i];
-                format!(
-                    "{}:{}",
-                    m.plugin_group.as_deref().unwrap_or(&m.name),
-                    m.name
-                )
-            })
-            .collect();
-        // Add any missing keys to the order.
-        for key in &current {
-            if !self.pm_config.widget_order.contains(key) {
-                self.pm_config.widget_order.push(key.clone());
-            }
-        }
-        // Remove stale keys.
-        self.pm_config.widget_order.retain(|k| current.contains(k));
-    }
-
-    /// Rebuild the list of widget plugin indices.
-    fn rebuild_widget_indices(&mut self) {
-        // Collect all widget-eligible indices, excluding disabled widgets.
-        let mut indices: Vec<usize> = self
-            .state
-            .plugins
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| {
-                m.widget && {
-                    let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
-                    !self.pm_config.is_widget_disabled(gk, &m.name)
-                }
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        // Sort by widget_order config: ordered widgets first, rest in discovery order.
-        if !self.pm_config.widget_order.is_empty() {
-            let order = &self.pm_config.widget_order;
-            indices.sort_by_key(|&i| {
-                let m = &self.state.plugins[i];
-                let key = format!(
-                    "{}:{}",
-                    m.plugin_group.as_deref().unwrap_or(&m.name),
-                    m.name
-                );
-                order.iter().position(|k| k == &key).unwrap_or(usize::MAX)
-            });
-        }
-
-        self.state.widget_indices = indices;
-        self.state.widgets_visible = !self.state.widget_indices.is_empty();
-        if self.state.widget_selected >= self.state.widget_indices.len() {
-            self.state.widget_selected = 0;
-        }
-    }
-
     /// Rebuild the unified launcher list from plugin metadata.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn rebuild_unified_list(&mut self) {
@@ -3521,7 +3458,7 @@ impl App {
         // During search, always start at the top result — no cursor preservation.
         if !query.is_empty() {
             self.state.unified_selected = 0;
-            self.sync_preview_index();
+            crate::widgets::sync_preview_index(&mut self.state);
             return;
         }
 
@@ -3540,7 +3477,7 @@ impl App {
                 .next_back(); // last occurrence = canonical position (not Recent duplicate)
             if let Some(pos) = match_pos {
                 self.state.unified_selected = pos;
-                self.sync_preview_index();
+                crate::widgets::sync_preview_index(&mut self.state);
                 return;
             }
         }
@@ -3555,19 +3492,9 @@ impl App {
             .filter(|(_, r)| r.is_selectable())
             .nth(target)
             .map_or(0, |(i, _)| i);
-        self.sync_preview_index();
+        crate::widgets::sync_preview_index(&mut self.state);
     }
 
-    /// Update `preview_plugin_index` to match the currently selected unified row.
-    fn sync_preview_index(&mut self) {
-        self.state.preview_plugin_index = self
-            .state
-            .unified_rows
-            .get(self.state.unified_selected)
-            .map(|r| match r {
-                UnifiedRow::Command { plugin_index, .. } => *plugin_index,
-            });
-    }
 }
 
 // ---------------------------------------------------------------------------
