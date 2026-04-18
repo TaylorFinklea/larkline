@@ -12,14 +12,17 @@ mod action;
 mod app;
 mod app_output;
 mod config;
+mod form_actions;
 mod history;
 mod input;
 mod mini_app;
 mod plugin;
+mod plugin_manager_actions;
 mod plugin_manager_state;
 mod power_menu;
 mod tui;
 mod update;
+mod widget_actions;
 mod widgets;
 
 /// Returns shell alias/function text that binds Ctrl+L to launch `lark`.

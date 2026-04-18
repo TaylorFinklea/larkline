@@ -1,6 +1,6 @@
 //! Mini app mode helpers — layout tree traversal and manipulation.
 
-use crate::app::{MiniAppState, PaneState};
+use crate::app::{AppState, MiniAppState, Mode, PaneState};
 use crate::plugin::traits::{LayoutChild, MiniAppLayout, PaneContent, PaneId, SplitDirection};
 use std::collections::HashMap;
 
@@ -263,6 +263,81 @@ fn pane_ids_contain(layout: &MiniAppLayout, target_id: &str) -> bool {
         MiniAppLayout::Split { children, .. } => {
             children.iter().any(|c| pane_ids_contain(&c.layout, target_id))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Action handlers (invoked from handle_action in src/app.rs)
+// ---------------------------------------------------------------------------
+
+pub fn focus_next(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+            let next = (pos + 1) % mini.pane_order.len();
+            mini.focused_pane = mini.pane_order[next].clone();
+        }
+    }
+}
+
+pub fn focus_prev(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+            let prev = if pos == 0 {
+                mini.pane_order.len().saturating_sub(1)
+            } else {
+                pos - 1
+            };
+            mini.focused_pane = mini.pane_order[prev].clone();
+        }
+    }
+}
+
+pub fn close(state: &mut AppState) {
+    state.mini_app = None;
+    state.mode = Mode::Unified;
+    state.viewing_plugin_index = None;
+}
+
+/// Expand current `ViewOutput` into a single-pane mini app.
+pub fn expand(state: &mut AppState) {
+    if state.mode == Mode::ViewOutput {
+        if let Some(ref output) = state.plugin_output {
+            if let Some(ref layout) = output.layout {
+                let plugin_index = state.viewing_plugin_index.unwrap_or(0);
+                state.mini_app = Some(build_mini_app_state(plugin_index, layout.clone()));
+                state.mode = Mode::MiniApp;
+            }
+        }
+    }
+}
+
+pub fn split_h(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        split_pane(mini, SplitDirection::Horizontal);
+    }
+}
+
+pub fn split_v(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        split_pane(mini, SplitDirection::Vertical);
+    }
+}
+
+pub fn close_focused_pane(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        close_pane(mini);
+    }
+}
+
+pub fn resize_grow(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        resize_pane(mini, 5);
+    }
+}
+
+pub fn resize_shrink(state: &mut AppState) {
+    if let Some(ref mut mini) = state.mini_app {
+        resize_pane(mini, -5);
     }
 }
 

@@ -544,23 +544,23 @@ pub struct NavigationEntry {
 
 /// The main application runner.
 pub struct App {
-    state: AppState,
-    theme: Theme,
-    keybindings: ResolvedKeybindings,
-    engine: PluginEngine,
-    rx: mpsc::Receiver<EngineEvent>,
+    pub(crate) state: AppState,
+    pub(crate) theme: Theme,
+    pub(crate) keybindings: ResolvedKeybindings,
+    pub(crate) engine: PluginEngine,
+    pub(crate) rx: mpsc::Receiver<EngineEvent>,
     /// Plugin directories for re-scanning on refresh.
-    plugin_dirs: Vec<PathBuf>,
+    pub(crate) plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
-    keybindings_config: KeybindingsConfig,
+    pub(crate) keybindings_config: KeybindingsConfig,
     /// Icon set preference for resolving Nerd Font vs emoji icons.
-    icon_set: crate::config::IconSet,
+    pub(crate) icon_set: crate::config::IconSet,
     /// Secrets loaded from `~/.config/larkline/.env`.
-    secrets: std::collections::HashMap<String, String>,
+    pub(crate) secrets: std::collections::HashMap<String, String>,
     /// Currently active theme preset name (e.g. `"nord"`). `None` = default.
-    current_preset: Option<String>,
+    pub(crate) current_preset: Option<String>,
     /// Plugin manager enable/disable config.
-    pm_config: crate::config::PluginManagerConfig,
+    pub(crate) pm_config: crate::config::PluginManagerConfig,
 }
 
 impl App {
@@ -1669,207 +1669,17 @@ impl App {
                 }
             }
 
-            Action::FormNextField => {
-                if let Some(ref mut form) = self.state.form_state {
-                    form.focused = (form.focused + 1) % form.fields.len();
-                }
-            }
-
-            Action::FormPrevField => {
-                if let Some(ref mut form) = self.state.form_state {
-                    form.focused = if form.focused == 0 {
-                        form.fields.len().saturating_sub(1)
-                    } else {
-                        form.focused - 1
-                    };
-                }
-            }
-
-            Action::FormInput(c) => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if matches!(
-                            field.spec.field_type,
-                            crate::plugin::traits::FieldType::Text
-                        ) {
-                            field.value.insert(field.cursor, c);
-                            field.cursor += c.len_utf8();
-                        }
-                    }
-                }
-            }
-
-            Action::FormBackspace => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if matches!(
-                            field.spec.field_type,
-                            crate::plugin::traits::FieldType::Text
-                        ) && field.cursor > 0
-                        {
-                            // Find the previous char boundary.
-                            let prev = field.value[..field.cursor]
-                                .char_indices()
-                                .next_back()
-                                .map_or(0, |(i, _)| i);
-                            field.value.remove(prev);
-                            field.cursor = prev;
-                        }
-                    }
-                }
-            }
-
-            Action::FormCursorLeft => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if field.cursor > 0 {
-                            field.cursor = field.value[..field.cursor]
-                                .char_indices()
-                                .next_back()
-                                .map_or(0, |(i, _)| i);
-                        }
-                    }
-                }
-            }
-
-            Action::FormCursorRight => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if field.cursor < field.value.len() {
-                            field.cursor = field.value[field.cursor..]
-                                .char_indices()
-                                .nth(1)
-                                .map_or(field.value.len(), |(i, _)| field.cursor + i);
-                        }
-                    }
-                }
-            }
-
-            Action::FormSelectNext => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if let crate::plugin::traits::FieldType::Select { ref options } =
-                            field.spec.field_type
-                        {
-                            if !options.is_empty() {
-                                field.selected_option = (field.selected_option + 1) % options.len();
-                                field.value = options[field.selected_option].clone();
-                            }
-                        }
-                    }
-                }
-            }
-
-            Action::FormSelectPrev => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        if let crate::plugin::traits::FieldType::Select { ref options } =
-                            field.spec.field_type
-                        {
-                            if !options.is_empty() {
-                                field.selected_option = if field.selected_option == 0 {
-                                    options.len() - 1
-                                } else {
-                                    field.selected_option - 1
-                                };
-                                field.value = options[field.selected_option].clone();
-                            }
-                        }
-                    }
-                }
-            }
-
-            Action::FormToggle => {
-                if let Some(ref mut form) = self.state.form_state {
-                    if let Some(field) = form.fields.get_mut(form.focused) {
-                        match field.spec.field_type {
-                            crate::plugin::traits::FieldType::Toggle => {
-                                field.toggled = !field.toggled;
-                                field.value =
-                                    if field.toggled { "true" } else { "false" }.to_string();
-                            }
-                            crate::plugin::traits::FieldType::Select { .. } => {
-                                // Space cycles forward in Select fields too.
-                                self.handle_action(Action::FormSelectNext);
-                            }
-                            crate::plugin::traits::FieldType::Text => {
-                                // Space in a text field = insert a space character.
-                                self.handle_action(Action::FormInput(' '));
-                            }
-                        }
-                    }
-                }
-            }
-
-            Action::FormSubmit => {
-                if let Some(form) = self.state.form_state.take() {
-                    // Validate required fields.
-                    let all_valid = form
-                        .fields
-                        .iter()
-                        .all(|f| !f.spec.required || !f.value.trim().is_empty());
-
-                    if !all_valid {
-                        self.state.status_message = Some((
-                            "Required fields cannot be empty".to_string(),
-                            std::time::Instant::now(),
-                        ));
-                        self.state.form_state = Some(form);
-                    } else if form.is_settings {
-                        // Settings form: persist values to plugin store, then rerun.
-                        let plugin_index = form.plugin_index;
-                        if let Some(meta) = self.state.plugins.get(plugin_index) {
-                            let store_path = crate::plugin::store::store_path_for(
-                                &meta.name,
-                                meta.plugin_group.as_deref(),
-                            );
-                            let mut store = crate::plugin::store::PluginStore::load(store_path);
-                            for field in &form.fields {
-                                let value = match field.spec.field_type {
-                                    crate::plugin::traits::FieldType::Toggle => {
-                                        if field.toggled { "true" } else { "false" }.to_string()
-                                    }
-                                    crate::plugin::traits::FieldType::Select { ref options } => {
-                                        options
-                                            .get(field.selected_option)
-                                            .cloned()
-                                            .unwrap_or_default()
-                                    }
-                                    crate::plugin::traits::FieldType::Text => field.value.clone(),
-                                };
-                                let _ = store
-                                    .set(field.spec.id.clone(), serde_json::Value::String(value));
-                            }
-                            if let Err(e) = store.save() {
-                                tracing::warn!(error = %e, "failed to save plugin settings");
-                            }
-                        }
-                        // Rerun the plugin with fresh execution.
-                        self.state.result_cache.remove(&plugin_index);
-                        self.state.plugin_output = None;
-                        self.state.plugin_error = None;
-                        self.state.is_loading = true;
-                        self.state.loading_started = Some(std::time::Instant::now());
-                        self.state.scroll_offset = 0;
-                        self.engine.execute(plugin_index);
-                    } else {
-                        let mut values = std::collections::HashMap::new();
-                        for field in &form.fields {
-                            values.insert(field.spec.id.clone(), field.value.clone());
-                        }
-                        let plugin_index = form.plugin_index;
-                        self.state.is_loading = true;
-                        self.state.plugin_output = None;
-                        self.state.loading_started = Some(std::time::Instant::now());
-                        self.engine.execute_with_form(plugin_index, values);
-                    }
-                }
-            }
-
-            Action::FormCancel => {
-                self.state.form_state = None;
-                self.handle_action(Action::Back);
-            }
+            Action::FormNextField => crate::form_actions::next_field(self),
+            Action::FormPrevField => crate::form_actions::prev_field(self),
+            Action::FormInput(c) => crate::form_actions::input(self, c),
+            Action::FormBackspace => crate::form_actions::backspace(self),
+            Action::FormCursorLeft => crate::form_actions::cursor_left(self),
+            Action::FormCursorRight => crate::form_actions::cursor_right(self),
+            Action::FormSelectNext => crate::form_actions::select_next(self),
+            Action::FormSelectPrev => crate::form_actions::select_prev(self),
+            Action::FormToggle => crate::form_actions::toggle(self),
+            Action::FormSubmit => crate::form_actions::submit(self),
+            Action::FormCancel => crate::form_actions::cancel(self),
 
             Action::EnterInsertMode => {
                 self.state.vim_mode = VimMode::Insert;
@@ -2107,282 +1917,25 @@ impl App {
                 }
             }
 
-            Action::PluginManagerOpen => {
-                self.state.power_menu = None;
-                self.state.mode = Mode::PluginManager;
-                self.state.vim_mode = VimMode::Normal;
-                self.state.plugin_manager = Some(crate::plugin_manager_state::build(&self.plugin_dirs, &self.state.plugins, &self.pm_config));
-            }
+            Action::PluginManagerOpen => crate::plugin_manager_actions::open(self),
+            Action::PluginManagerClose => crate::plugin_manager_actions::close(self),
+            Action::PluginManagerToggle => crate::plugin_manager_actions::toggle(self),
+            Action::PluginManagerExpand => crate::plugin_manager_actions::expand(self),
+            Action::PluginManagerSetSecret => crate::plugin_manager_actions::set_secret(self),
+            Action::PluginManagerDeleteSecret => crate::plugin_manager_actions::delete_secret(self),
 
-            Action::PluginManagerClose => {
-                self.state.plugin_manager = None;
-                self.state.mode = Mode::Unified;
-                // Trigger full refresh so disabled plugins are filtered out.
-                self.handle_action(Action::RefreshPlugins);
-            }
-
-            Action::PluginManagerToggle => {
-                if let Some(ref mut pm) = self.state.plugin_manager {
-                    let changed = match pm.rows.get(pm.selected).cloned() {
-                        Some(PluginManagerRow::PluginHeader { group_key, .. }) => {
-                            self.pm_config.toggle_plugin(&group_key);
-                            true
-                        }
-                        Some(PluginManagerRow::Command {
-                            group_key, name, ..
-                        }) => {
-                            self.pm_config.toggle_command(&group_key, &name);
-                            true
-                        }
-                        _ => false,
-                    };
-                    if changed {
-                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
-                            tracing::warn!(error = %e, "failed to save plugin manager config");
-                        }
-                        // Rebuild rows to reflect toggle.
-                        self.state.plugin_manager = Some(crate::plugin_manager_state::build(&self.plugin_dirs, &self.state.plugins, &self.pm_config));
-                        // Restore selection position.
-                        if let Some(ref mut pm) = self.state.plugin_manager {
-                            pm.selected = pm.selected.min(pm.rows.len().saturating_sub(1));
-                        }
-                    }
-                }
-            }
-
-            Action::PluginManagerExpand => {
-                if let Some(ref mut pm) = self.state.plugin_manager {
-                    if let Some(PluginManagerRow::PluginHeader { group_key, .. }) =
-                        pm.rows.get(pm.selected)
-                    {
-                        let key = group_key.clone();
-                        if pm.expanded.contains(&key) {
-                            pm.expanded.remove(&key);
-                        } else {
-                            pm.expanded.insert(key);
-                        }
-                        let expanded = pm.expanded.clone();
-                        let sel = pm.selected;
-                        let mut new_pm = crate::plugin_manager_state::build_with_expanded(
-                            &self.plugin_dirs,
-                            &self.state.plugins,
-                            &self.pm_config,
-                            &expanded,
-                        );
-                        new_pm.selected = sel.min(new_pm.rows.len().saturating_sub(1));
-                        new_pm.expanded = expanded;
-                        self.state.plugin_manager = Some(new_pm);
-                    }
-                }
-            }
-
-            Action::PluginManagerSetSecret => {
-                if let Some(ref pm) = self.state.plugin_manager {
-                    if let Some(PluginManagerRow::Secret { key, .. }) = pm.rows.get(pm.selected) {
-                        self.state.status_message = Some((
-                            format!("Run: lark secret set {key}"),
-                            std::time::Instant::now(),
-                        ));
-                    }
-                }
-            }
-
-            Action::PluginManagerDeleteSecret => {
-                if let Some(ref pm) = self.state.plugin_manager {
-                    if let Some(PluginManagerRow::Secret { key, source, .. }) =
-                        pm.rows.get(pm.selected)
-                    {
-                        if *source != SecretSource::NotSet {
-                            let key = key.clone();
-                            // Delete from keychain.
-                            let _ = std::process::Command::new("security")
-                                .args(["delete-generic-password", "-s", &key])
-                                .stderr(std::process::Stdio::null())
-                                .status();
-                            // Refresh the manager state.
-                            self.state.plugin_manager = Some(crate::plugin_manager_state::build(&self.plugin_dirs, &self.state.plugins, &self.pm_config));
-                            self.state.status_message =
-                                Some((format!("Deleted {key}"), std::time::Instant::now()));
-                        }
-                    }
-                }
-            }
-
-            Action::WidgetFocusUp => {
-                if self.state.widgets_visible && !self.state.widget_indices.is_empty() {
-                    self.state.widget_focused = true;
-                    self.state.vim_mode = VimMode::Normal;
-                }
-            }
-
-            Action::WidgetDisable => {
-                if self.state.widget_focused {
-                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
-                        let meta = &self.state.plugins[pidx];
-                        let gk = meta
-                            .plugin_group
-                            .as_deref()
-                            .unwrap_or(&meta.name)
-                            .to_string();
-                        let name = meta.name.clone();
-                        self.pm_config.toggle_widget(&gk, &name);
-                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
-                            tracing::warn!(error = %e, "failed to save widget config");
-                        }
-                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
-                        self.state.status_message =
-                            Some((format!("Hidden widget: {name}"), std::time::Instant::now()));
-                    }
-                }
-            }
-
-            Action::WidgetMoveLeft => {
-                if self.state.widget_focused && self.state.widget_selected > 0 {
-                    // Ensure widget_order has all current widgets.
-                    crate::widgets::ensure_widget_order(&self.state, &mut self.pm_config);
-                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
-                        let meta = &self.state.plugins[pidx];
-                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
-                        self.pm_config.move_widget_up(gk, &meta.name);
-                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
-                            tracing::warn!(error = %e, "failed to save widget order");
-                        }
-                        self.state.widget_selected -= 1;
-                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
-                    }
-                }
-            }
-
-            Action::WidgetMoveRight => {
-                if self.state.widget_focused
-                    && self.state.widget_selected + 1 < self.state.widget_indices.len()
-                {
-                    crate::widgets::ensure_widget_order(&self.state, &mut self.pm_config);
-                    if let Some(&pidx) = self.state.widget_indices.get(self.state.widget_selected) {
-                        let meta = &self.state.plugins[pidx];
-                        let gk = meta.plugin_group.as_deref().unwrap_or(&meta.name);
-                        self.pm_config.move_widget_down(gk, &meta.name);
-                        if let Err(e) = crate::config::save_plugin_manager_config(&self.pm_config) {
-                            tracing::warn!(error = %e, "failed to save widget order");
-                        }
-                        self.state.widget_selected += 1;
-                        crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
-                    }
-                }
-            }
-
-            Action::WidgetToggleVisibility => {
-                if !self.state.widget_indices.is_empty() {
-                    self.state.widgets_visible = !self.state.widgets_visible;
-                    self.state.widget_focused = false;
-                }
-            }
-
-            Action::WidgetPickerOpen => {
-                // Build entries from all widget-eligible commands.
-                let entries: Vec<WidgetPickerEntry> = self
-                    .state
-                    .plugins
-                    .iter()
-                    .filter(|m| m.widget)
-                    .map(|m| {
-                        let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
-                        let key = format!("{gk}:{}", m.name);
-                        let label = if let Some(ref pg) = m.plugin_group {
-                            format!("{pg}: {}", m.name)
-                        } else {
-                            m.name.clone()
-                        };
-                        let enabled = !self.pm_config.is_widget_disabled(gk, &m.name);
-                        WidgetPickerEntry {
-                            label,
-                            icon: m.icon.clone(),
-                            key,
-                            enabled,
-                        }
-                    })
-                    .collect();
-
-                if entries.is_empty() {
-                    self.state.status_message = Some((
-                        "No widget-eligible plugins found".to_string(),
-                        std::time::Instant::now(),
-                    ));
-                } else {
-                    self.state.widget_picker = Some(WidgetPickerState {
-                        entries,
-                        selected: 0,
-                        query: String::new(),
-                        filtered_indices: Vec::new(),
-                    });
-                }
-            }
-
-            Action::WidgetPickerClose => {
-                self.state.widget_picker = None;
-            }
-
-            Action::WidgetPickerUp => {
-                if let Some(ref mut picker) = self.state.widget_picker {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                    }
-                }
-            }
-
-            Action::WidgetPickerDown => {
-                if let Some(ref mut picker) = self.state.widget_picker {
-                    let count = picker.visible_entries().len();
-                    if picker.selected + 1 < count {
-                        picker.selected += 1;
-                    }
-                }
-            }
-
-            Action::WidgetPickerToggle => {
-                if let Some(ref mut picker) = self.state.widget_picker {
-                    // Resolve actual entry index through filter.
-                    let actual_idx = if picker.query.is_empty() {
-                        picker.selected
-                    } else {
-                        picker
-                            .filtered_indices
-                            .get(picker.selected)
-                            .copied()
-                            .unwrap_or(picker.selected)
-                    };
-                    if let Some(entry) = picker.entries.get_mut(actual_idx) {
-                        // Parse group_key and command_name from the key.
-                        if let Some((gk, cmd)) = entry.key.split_once(':') {
-                            self.pm_config.toggle_widget(gk, cmd);
-                            entry.enabled = !self.pm_config.is_widget_disabled(gk, cmd);
-                            if let Err(e) =
-                                crate::config::save_plugin_manager_config(&self.pm_config)
-                            {
-                                tracing::warn!(error = %e, "failed to save widget config");
-                            }
-                            crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
-                            self.state.widgets_visible = !self.state.widget_indices.is_empty();
-                        }
-                    }
-                }
-            }
-
-            Action::WidgetPickerSearch(c) => {
-                if let Some(ref mut picker) = self.state.widget_picker {
-                    picker.query.push(c);
-                    picker.rebuild_filter();
-                    picker.selected = 0;
-                }
-            }
-
-            Action::WidgetPickerBackspace => {
-                if let Some(ref mut picker) = self.state.widget_picker {
-                    picker.query.pop();
-                    picker.rebuild_filter();
-                    picker.selected = 0;
-                }
-            }
+            Action::WidgetFocusUp => crate::widget_actions::widget_focus_up(self),
+            Action::WidgetDisable => crate::widget_actions::widget_disable(self),
+            Action::WidgetMoveLeft => crate::widget_actions::widget_move_left(self),
+            Action::WidgetMoveRight => crate::widget_actions::widget_move_right(self),
+            Action::WidgetToggleVisibility => crate::widget_actions::widget_toggle_visibility(self),
+            Action::WidgetPickerOpen => crate::widget_actions::widget_picker_open(self),
+            Action::WidgetPickerClose => crate::widget_actions::widget_picker_close(self),
+            Action::WidgetPickerUp => crate::widget_actions::widget_picker_up(self),
+            Action::WidgetPickerDown => crate::widget_actions::widget_picker_down(self),
+            Action::WidgetPickerToggle => crate::widget_actions::widget_picker_toggle(self),
+            Action::WidgetPickerSearch(c) => crate::widget_actions::widget_picker_search(self, c),
+            Action::WidgetPickerBackspace => crate::widget_actions::widget_picker_backspace(self),
 
             Action::RunUpgrade => {
                 if let Some(ref hint) = self.state.update_hint {
@@ -2405,84 +1958,15 @@ impl App {
 
             // ----- Mini app actions -----
 
-            Action::MiniAppFocusNext => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
-                        let next = (pos + 1) % mini.pane_order.len();
-                        mini.focused_pane = mini.pane_order[next].clone();
-                    }
-                }
-            }
-
-            Action::MiniAppFocusPrev => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
-                        let prev = if pos == 0 {
-                            mini.pane_order.len().saturating_sub(1)
-                        } else {
-                            pos - 1
-                        };
-                        mini.focused_pane = mini.pane_order[prev].clone();
-                    }
-                }
-            }
-
-            Action::MiniAppClose => {
-                self.state.mini_app = None;
-                self.state.mode = Mode::Unified;
-                self.state.viewing_plugin_index = None;
-            }
-
-            Action::MiniAppExpand => {
-                // Expand current ViewOutput into a single-pane mini app.
-                if self.state.mode == Mode::ViewOutput {
-                    if let Some(ref output) = self.state.plugin_output {
-                        if let Some(ref layout) = output.layout {
-                            let plugin_index = self.state.viewing_plugin_index.unwrap_or(0);
-                            self.state.mini_app = Some(
-                                crate::mini_app::build_mini_app_state(plugin_index, layout.clone()),
-                            );
-                            self.state.mode = Mode::MiniApp;
-                        }
-                    }
-                }
-            }
-
-            Action::MiniAppSplitH => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    crate::mini_app::split_pane(
-                        mini,
-                        crate::plugin::traits::SplitDirection::Horizontal,
-                    );
-                }
-            }
-
-            Action::MiniAppSplitV => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    crate::mini_app::split_pane(
-                        mini,
-                        crate::plugin::traits::SplitDirection::Vertical,
-                    );
-                }
-            }
-
-            Action::MiniAppClosePane => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    crate::mini_app::close_pane(mini);
-                }
-            }
-
-            Action::MiniAppResizeGrow => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    crate::mini_app::resize_pane(mini, 5);
-                }
-            }
-
-            Action::MiniAppResizeShrink => {
-                if let Some(ref mut mini) = self.state.mini_app {
-                    crate::mini_app::resize_pane(mini, -5);
-                }
-            }
+            Action::MiniAppFocusNext => crate::mini_app::focus_next(&mut self.state),
+            Action::MiniAppFocusPrev => crate::mini_app::focus_prev(&mut self.state),
+            Action::MiniAppClose => crate::mini_app::close(&mut self.state),
+            Action::MiniAppExpand => crate::mini_app::expand(&mut self.state),
+            Action::MiniAppSplitH => crate::mini_app::split_h(&mut self.state),
+            Action::MiniAppSplitV => crate::mini_app::split_v(&mut self.state),
+            Action::MiniAppClosePane => crate::mini_app::close_focused_pane(&mut self.state),
+            Action::MiniAppResizeGrow => crate::mini_app::resize_grow(&mut self.state),
+            Action::MiniAppResizeShrink => crate::mini_app::resize_shrink(&mut self.state),
 
             Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
                 Ok(mut discovered) => {
