@@ -1,0 +1,21 @@
+# Maintainer: Taylor Finklea <taylor.finklea@gmail.com>
+pkgname=larkline-bin
+pkgver=0.10.0
+pkgrel=1
+pkgdesc="The line to all your tools — a keyboard-driven terminal command palette"
+arch=('x86_64')
+url="https://github.com/TaylorFinklea/larkline"
+license=('GPL-3.0-only')
+provides=('larkline' 'lark')
+conflicts=('larkline' 'lark')
+depends=('gcc-libs' 'glibc')
+optdepends=(
+    'git: for `lark plugin sync` to fetch the standard plugin library'
+    'neovim: parent-editor integration via $NVIM socket'
+)
+source=("https://github.com/TaylorFinklea/larkline/releases/download/v${pkgver}/lark-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+sha256sums=('SKIP') # Replace with `updpkgsums` output before each release.
+
+package() {
+    install -Dm755 "${srcdir}/lark" "${pkgdir}/usr/bin/lark"
+}
