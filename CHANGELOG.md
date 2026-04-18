@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.10.0 — Distribution + lark.nvim v2 (unreleased)
+
+Rollup release — ships v0.6.0 through v0.10.0 accumulated on `main` since v0.5.0.
+
+### Distribution
+- **crates.io**: published as `larkline`. Install via `cargo install larkline`.
+- **AUR**: `larkline-bin` package pulls the linux tarball from GitHub Releases.
+- **Nix flake**: `nix profile install github:TaylorFinklea/larkline` builds from source.
+- **Homebrew**: formula unchanged — `brew install TaylorFinklea/tap/larkline`.
+
+### Correctness
+- **Tracing to file**: TUI sessions write logs to `$XDG_STATE_HOME/larkline/lark.log` via a daily rolling, non-blocking appender. Writing to stderr corrupted the ratatui alternate screen whenever any log fired at the current level. CLI subcommands (`init-plugin`, `plugin sync`, `secret`) keep logging to stderr.
+- **`lark plugin sync`** repairs dead symlinks and relinks stale cache paths. Dead symlinks are no longer silently ignored. `--force` overwrites user-customized plugins after an interactive `y/N` prompt (non-TTY defaults to skip).
+
+### lark.nvim v2
+- `$NVIM` socket detection: plugins can dispatch `ActionKind::NvimEdit` to open files in the parent Neovim instance via the `nvim` CLI remote-send flag.
+- New Lua host API `lark.nvim_exec(cmd)` sends arbitrary ex commands back to the parent editor; returns `false` outside Neovim so plugins can feature-detect.
+- Updated `file-search` and `notes` plugins to surface "Open in Neovim" actions when running under nvim.
+
+### Earlier unreleased work (rollup)
+- **v0.6.0**: Plugin deep-dives (Kubernetes 6 cmd, GitHub 5 cmd, SSH 4 cmd, Weather 3 cmd). Widget drill-in, upgrade menu action, picker search, friendlier error display.
+- **v0.7.0**: New plugins — Obsidian/Notes (4 cmd), Tailscale (3 cmd), Linear (3 cmd).
+- **v0.8.0**: Mini App Mode — full-screen split-pane UI, `on_action` chaining, user-initiated splits/resize/close, `lark.clipboard_read()`, clipboard history plugin, Docker Dashboard reference mini app.
+- **v0.9.0**: `app.rs` split from 4027 to 2851 lines across 8 focused modules. Prefetch concurrency cap (8). Slow-plugin profiling at `info` level. Widget auto-refresh skipped when dashboard hidden.
+
 ## v0.3.0
 
 ### Plugin Manager

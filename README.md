@@ -9,19 +9,40 @@
 ### Homebrew (macOS & Linux)
 
 ```sh
-brew tap tfinklea/tap
-brew install lark
+brew install TaylorFinklea/tap/larkline
 ```
 
-### GitHub Releases
-
-Download the pre-built binary for your platform from the [Releases page](https://github.com/tfinklea/larkline/releases), extract, and place `lark` on your `$PATH`.
-
-### From Source
+### Cargo (any platform with a Rust toolchain)
 
 ```sh
 cargo install larkline
 ```
+
+### AUR (Arch Linux)
+
+```sh
+yay -S larkline-bin
+```
+
+### Nix (flakes)
+
+```sh
+nix profile install github:TaylorFinklea/larkline
+```
+
+### GitHub Releases (pre-built tarballs)
+
+Download the tarball for your platform from the [Releases page](https://github.com/TaylorFinklea/larkline/releases) and place `lark` on your `$PATH`.
+
+### First run
+
+After installing, fetch the standard plugin library:
+
+```sh
+lark plugin sync
+```
+
+This clones the plugin repo to `~/.cache/larkline/standard-plugins/` and symlinks each plugin into `~/.config/larkline/plugins/`. Re-run after upgrading to pick up updates — dead symlinks get repaired automatically. Use `lark plugin sync --force` to overwrite locally modified plugins (with an interactive confirmation prompt).
 
 ## Quick Start
 
