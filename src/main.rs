@@ -277,6 +277,66 @@ fn plugin_cache_dir() -> std::path::PathBuf {
     base.join("larkline").join("standard-plugins")
 }
 
+/// Log file directory — follows XDG state-dir conventions.
+///
+/// `$XDG_STATE_HOME/larkline`, defaulting to `$HOME/.local/state/larkline`.
+/// Used when the TUI is active; writing to stderr would corrupt the alternate
+/// screen buffer.
+fn log_file_dir() -> std::path::PathBuf {
+    resolve_log_file_dir(
+        std::env::var("XDG_STATE_HOME").ok(),
+        std::env::var("HOME").ok(),
+    )
+}
+
+/// Pure helper for [`log_file_dir`] — unit-testable without touching env vars.
+fn resolve_log_file_dir(xdg_state_home: Option<String>, home: Option<String>) -> std::path::PathBuf {
+    let base = if let Some(xdg) = xdg_state_home {
+        std::path::PathBuf::from(xdg)
+    } else {
+        let home = home.unwrap_or_else(|| "/tmp".to_string());
+        std::path::PathBuf::from(home).join(".local").join("state")
+    };
+    base.join("larkline")
+}
+
+/// Initialize tracing for a TUI session, writing to a rolling log file.
+///
+/// Returns a `WorkerGuard` that must live for the process lifetime; dropping
+/// it flushes the non-blocking writer. When `RUST_LOG` is set, prints the log
+/// file path to stderr so the user can tail it.
+///
+/// On directory creation failure, falls back to a never-initialized subscriber
+/// so larkline still runs — silent logs are preferable to a corrupted TUI.
+fn init_tui_logger(
+    log_dir: &std::path::Path,
+    log_level: tracing::Level,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    if std::fs::create_dir_all(log_dir).is_err() {
+        return None;
+    }
+    let appender = tracing_appender::rolling::daily(log_dir, "lark.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()),
+        )
+        .with_writer(non_blocking)
+        .with_ansi(false);
+
+    if subscriber.try_init().is_err() {
+        return None;
+    }
+
+    if std::env::var_os("RUST_LOG").is_some() {
+        let log_path = log_dir.join("lark.log");
+        eprintln!("larkline: logging to {}", log_path.display());
+    }
+
+    Some(guard)
+}
+
 /// Handle `lark plugin sync|list|remove` subcommands.
 #[allow(clippy::too_many_lines)]
 fn handle_plugin_command(args: &[String]) -> Result<()> {
@@ -579,13 +639,11 @@ async fn main() -> Result<()> {
     // Parse log level from config; fall back to WARN on invalid values.
     let log_level: tracing::Level = config.logging.level.parse().unwrap_or(tracing::Level::WARN);
 
-    // Initialize logging to stderr (hidden when TUI is active).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    // Initialize logging to a rolling file. All code paths reaching this point
+    // are TUI sessions — CLI subcommands returned earlier. Writing to stderr
+    // here would corrupt ratatui's alternate screen buffer.
+    let log_dir = log_file_dir();
+    let _log_guard = init_tui_logger(&log_dir, log_level);
 
     info!("larkline starting");
 
@@ -641,6 +699,30 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_file_dir_prefers_xdg_state_home() {
+        let dir = resolve_log_file_dir(
+            Some("/tmp/xdg-state-test".to_string()),
+            Some("/tmp/home-test".to_string()),
+        );
+        assert_eq!(dir, std::path::PathBuf::from("/tmp/xdg-state-test/larkline"));
+    }
+
+    #[test]
+    fn log_file_dir_falls_back_to_home_state() {
+        let dir = resolve_log_file_dir(None, Some("/tmp/home-test".to_string()));
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("/tmp/home-test/.local/state/larkline")
+        );
+    }
+
+    #[test]
+    fn log_file_dir_handles_missing_home() {
+        let dir = resolve_log_file_dir(None, None);
+        assert_eq!(dir, std::path::PathBuf::from("/tmp/.local/state/larkline"));
+    }
 
     #[test]
     fn alias_zsh_contains_key_components() {
