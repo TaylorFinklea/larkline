@@ -5,6 +5,7 @@
 #   ./scripts/release.sh patch          # 0.5.0 → 0.5.1
 #   ./scripts/release.sh minor          # 0.5.0 → 0.6.0
 #   ./scripts/release.sh major          # 0.5.0 → 1.0.0
+#   ./scripts/release.sh set 0.10.0     # explicit — jumps past skipped versions
 #   ./scripts/release.sh --patch        # flag syntax also works
 #   ./scripts/release.sh --minor
 #
@@ -17,18 +18,33 @@ set -euo pipefail
 
 # --- Parse arguments ---
 BUMP=""
-for arg in "$@"; do
-    case "$arg" in
-        patch|--patch) BUMP="patch" ;;
-        minor|--minor) BUMP="minor" ;;
-        major|--major) BUMP="major" ;;
-        --help|-h) echo "Usage: ./scripts/release.sh <patch|minor|major>"; exit 0 ;;
-        *) echo "Unknown argument: $arg"; echo "Usage: ./scripts/release.sh <patch|minor|major>"; exit 1 ;;
+EXPLICIT_VERSION=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        patch|--patch) BUMP="patch"; shift ;;
+        minor|--minor) BUMP="minor"; shift ;;
+        major|--major) BUMP="major"; shift ;;
+        set)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "Error: 'set' requires a version argument (e.g. set 0.10.0)"
+                exit 1
+            fi
+            if [[ ! "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Error: version '$1' is not semver X.Y.Z"
+                exit 1
+            fi
+            BUMP="set"
+            EXPLICIT_VERSION="$1"
+            shift
+            ;;
+        --help|-h) echo "Usage: ./scripts/release.sh <patch|minor|major|set X.Y.Z>"; exit 0 ;;
+        *) echo "Unknown argument: $1"; echo "Usage: ./scripts/release.sh <patch|minor|major|set X.Y.Z>"; exit 1 ;;
     esac
 done
 
 if [[ -z "$BUMP" ]]; then
-    echo "Usage: ./scripts/release.sh <patch|minor|major>"
+    echo "Usage: ./scripts/release.sh <patch|minor|major|set X.Y.Z>"
     exit 1
 fi
 
@@ -67,9 +83,21 @@ case "$BUMP" in
     major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH_NUM=0 ;;
     minor) MINOR=$((MINOR + 1)); PATCH_NUM=0 ;;
     patch) PATCH_NUM=$((PATCH_NUM + 1)) ;;
+    set)
+        # Explicit version — already validated as semver above.
+        IFS='.' read -r MAJOR MINOR PATCH_NUM <<< "$EXPLICIT_VERSION"
+        ;;
 esac
 
 NEW="${MAJOR}.${MINOR}.${PATCH_NUM}"
+
+# Guard against accidental same-or-lower version.
+if [[ "$BUMP" == "set" ]]; then
+    if [[ "$NEW" == "$CURRENT" ]]; then
+        echo "Error: target version $NEW equals current version; nothing to do."
+        exit 1
+    fi
+fi
 echo ""
 echo "==> Bumping $CURRENT → $NEW"
 

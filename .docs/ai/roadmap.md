@@ -89,10 +89,22 @@ Non-user-facing cleanup: split the `app.rs` god-object and tune the prefetch/wid
 - [x] Phase E: Split `handle_action()` by mode — delegate to per-mode handlers (Unified, ViewOutput, MiniApp, PluginManager, etc.)
 - [x] Phase F: Performance — prefetch tuning, slow-plugin profiling, skip widget refresh when dashboard is not visible
 
+### v0.10.0 — Distribution + lark.nvim v2 (bundled)
+
+- [x] Phase A: Tracing-to-file (`tracing-appender` rolling daily, `$XDG_STATE_HOME/larkline/lark.log`)
+- [x] Phase B: `lark plugin sync` — repair dead symlinks; `--force` overwrites user-modified plugins with interactive confirmation
+- [x] Phase C: crates.io publish wiring (Cargo.toml `exclude`, CI dry-run, tag-gated publish job with auto-issue on failure)
+- [x] Phase D: Install docs in README (Homebrew, Cargo, AUR, Nix, GitHub Releases) + CHANGELOG v0.6–v0.10 rollup
+- [x] Phase E: AUR `larkline-bin` PKGBUILD + publish workflow docs
+- [x] Phase F: Nix flake (`rustPlatform.buildRustPackage`, package + app + devshell)
+- [x] Phase G: lark.nvim v2 — `$NVIM` socket awareness; new `ActionKind::NvimEdit` + Lua host fn for arbitrary ex commands; `file-search` and `notes` plugins updated
+- [x] Phase H: `scripts/release.sh set <version>` mode; handoff docs
+
 ### Future (unordered — pick theme per release)
 
-- **Distribution:** crates.io publish, AUR package, Nix flake, `lark plugin sync` update-in-place
-- **lark.nvim v2:** Telescope integration, action dispatch back to Neovim, bidirectional comms
+- **lark.nvim v3:** Telescope integration (needs `lark list --json` first), action streaming lark → nvim buffer updates in real time
+- **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries
+- **More plugin deep-dives:** Jira, Confluence, PagerDuty, 1Password CLI
 
 ---
 
