@@ -957,17 +957,17 @@ impl App {
                             if was_revalidating {
                                 // Seamlessly update the pane if the user is still viewing it.
                                 if self.state.viewing_plugin_index == Some(plugin_index) {
-                                    self.state.output_mode = Self::output_mode_for(&output);
+                                    self.state.output_mode = crate::app_output::output_mode_for(&output);
                                     self.state.plugin_output = Some(output);
-                                    self.rebuild_output_filter();
-                                    self.check_form_init(plugin_index);
+                                    crate::app_output::rebuild_output_filter(&mut self.state);
+                                    crate::app_output::check_form_init(&mut self.state, plugin_index);
                                 }
                             } else {
                                 // Fresh load: don't overwrite streaming output.
                                 if self.state.plugin_output.is_none() {
                                     self.state.plugin_output = Some(output);
-                                    self.rebuild_output_filter();
-                                    self.check_form_init(plugin_index);
+                                    crate::app_output::rebuild_output_filter(&mut self.state);
+                                    crate::app_output::check_form_init(&mut self.state, plugin_index);
                                 }
                             }
                         }
@@ -1232,7 +1232,7 @@ impl App {
                 {
                     self.state.scroll_offset += 1;
                 } else if self.state.mode == Mode::ViewOutput {
-                    let max = self.visible_output_count().saturating_sub(1);
+                    let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
                     if self.state.output_selected < max {
                         self.state.output_selected += 1;
                     }
@@ -1291,7 +1291,7 @@ impl App {
                 if self.state.mode == Mode::ViewOutput {
                     // In ViewOutput: 0 actions → URL fallback, 1 → run it,
                     // 2+ → open the action palette.
-                    if let Some(item) = self.selected_output_item().cloned() {
+                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
                         match item.actions.len() {
                             0 => {
                                 if let Some(ref url) = item.url {
@@ -1336,10 +1336,10 @@ impl App {
                 if !self.state.output_query.is_empty() {
                     self.state.output_query.clear();
                     self.state.output_searching = false;
-                    self.rebuild_output_filter();
+                    crate::app_output::rebuild_output_filter(&mut self.state);
                     return;
                 }
-                self.reset_output_search();
+                crate::app_output::reset_output_search(&mut self.state);
 
                 if let Some(entry) = self.state.navigation_history.pop() {
                     // Restore previous ViewOutput state from history.
@@ -1383,7 +1383,7 @@ impl App {
                             _ => self.handle_action(Action::PaletteOpen),
                         }
                     }
-                } else if let Some(item) = self.selected_output_item().cloned() {
+                } else if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
                     match item.actions.len() {
                         0 => {
                             if let Some(ref url) = item.url {
@@ -1417,7 +1417,7 @@ impl App {
                 {
                     self.state.scroll_offset += 10;
                 } else if self.state.mode == Mode::ViewOutput {
-                    let max = self.visible_output_count().saturating_sub(1);
+                    let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
                     self.state.output_selected = (self.state.output_selected + 10).min(max);
                 } else {
                     // Advance unified_selected by up to 10 selectable rows.
@@ -1498,7 +1498,7 @@ impl App {
 
             Action::PaletteOpen => {
                 if self.state.mode == Mode::ViewOutput {
-                    if let Some(item) = self.selected_output_item().cloned() {
+                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
                         let mut actions = item.actions.clone();
                         // Add built-in actions.
                         actions.push(ItemAction {
@@ -1575,8 +1575,7 @@ impl App {
 
             Action::CopyLabel => {
                 if self.state.mode == Mode::ViewOutput {
-                    let text = self
-                        .selected_output_item()
+                    let text = crate::app_output::selected_output_item(&self.state)
                         .map(|item| item.copy_text.as_ref().unwrap_or(&item.label).clone());
                     if let Some(text) = text {
                         copy_and_flash(&text, &mut self.state);
@@ -1586,7 +1585,7 @@ impl App {
 
             Action::CopyMenu => {
                 if self.state.mode == Mode::ViewOutput {
-                    if let Some(item) = self.selected_output_item().cloned() {
+                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
                         let item = &item;
                         let mut entries = vec![("Label".to_string(), item.label.clone())];
                         if let Some(ref detail) = item.detail {
@@ -1639,7 +1638,7 @@ impl App {
 
             Action::OutputSearch(c) => {
                 self.state.output_query.push(c);
-                self.rebuild_output_filter();
+                crate::app_output::rebuild_output_filter(&mut self.state);
             }
 
             Action::OutputBackspaceSearch => {
@@ -1647,7 +1646,7 @@ impl App {
                     // Empty query + backspace → exit search mode.
                     self.state.output_searching = false;
                 }
-                self.rebuild_output_filter();
+                crate::app_output::rebuild_output_filter(&mut self.state);
             }
 
             Action::OutputExitSearch => {
@@ -1657,8 +1656,7 @@ impl App {
 
             Action::OpenUrl => {
                 if self.state.mode == Mode::ViewOutput {
-                    let url = self
-                        .selected_output_item()
+                    let url = crate::app_output::selected_output_item(&self.state)
                         .and_then(|item| item.url.clone());
                     if let Some(url) = url {
                         open_url(&url);
@@ -1983,7 +1981,7 @@ impl App {
                             // Set a large scroll offset; Paragraph rendering clamps naturally.
                             self.state.scroll_offset = usize::MAX / 2;
                         } else {
-                            let max = self.visible_output_count().saturating_sub(1);
+                            let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
                             self.state.output_selected = max;
                         }
                     }
@@ -2652,13 +2650,13 @@ impl App {
             }
         }
 
-        self.reset_output_search();
+        crate::app_output::reset_output_search(&mut self.state);
         self.state.viewing_plugin_index = Some(plugin_index);
         let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
         match self.state.result_cache.get(&plugin_index).cloned() {
             Some(CachedResult::Ready(output)) if cache_enabled => {
                 // Stale-while-revalidate: show cached output immediately, refresh in background.
-                self.state.output_mode = Self::output_mode_for(&output);
+                self.state.output_mode = crate::app_output::output_mode_for(&output);
                 self.state.plugin_output = Some(output.clone());
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
@@ -2672,7 +2670,7 @@ impl App {
             }
             Some(CachedResult::Revalidating(output)) => {
                 // Already revalidating — show stale data, don't trigger another execution.
-                self.state.output_mode = Self::output_mode_for(&output);
+                self.state.output_mode = crate::app_output::output_mode_for(&output);
                 self.state.plugin_output = Some(output);
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
@@ -2701,147 +2699,11 @@ impl App {
                 self.engine.execute(plugin_index);
             }
         }
-        self.rebuild_output_filter();
-        self.check_form_init(plugin_index);
+        crate::app_output::rebuild_output_filter(&mut self.state);
+        crate::app_output::check_form_init(&mut self.state, plugin_index);
         self.state.vim_mode = VimMode::Normal;
     }
 
-    /// Number of visible output items (filtered count when searching, total otherwise).
-    fn visible_output_count(&self) -> usize {
-        if !self.state.output_filtered_indices.is_empty() || !self.state.output_query.is_empty() {
-            self.state.output_filtered_indices.len()
-        } else {
-            self.state
-                .plugin_output
-                .as_ref()
-                .map_or(0, |o| o.items.len())
-        }
-    }
-
-    /// Returns the output item at the current `output_selected` position,
-    /// mapped through `output_filtered_indices` when a search is active.
-    fn selected_output_item(&self) -> Option<&crate::plugin::traits::OutputItem> {
-        let items = &self.state.plugin_output.as_ref()?.items;
-        if self.state.output_filtered_indices.is_empty() && self.state.output_query.is_empty() {
-            items.get(self.state.output_selected)
-        } else {
-            let real_index = *self
-                .state
-                .output_filtered_indices
-                .get(self.state.output_selected)?;
-            items.get(real_index)
-        }
-    }
-
-    /// Rebuild `output_filtered_indices` based on `output_query`.
-    ///
-    /// Empty query → all item indices. Non-empty → case-insensitive substring match on label+detail.
-    fn rebuild_output_filter(&mut self) {
-        let items = if let Some(ref o) = self.state.plugin_output {
-            &o.items
-        } else {
-            self.state.output_filtered_indices.clear();
-            return;
-        };
-
-        if self.state.output_query.is_empty() {
-            self.state.output_filtered_indices = (0..items.len()).collect();
-        } else {
-            let query_lower = self.state.output_query.to_lowercase();
-            self.state.output_filtered_indices = items
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| {
-                    let haystack = match item.detail {
-                        Some(ref d) => format!("{} {d}", item.label),
-                        None => item.label.clone(),
-                    };
-                    haystack.to_lowercase().contains(&query_lower)
-                })
-                .map(|(i, _)| i)
-                .collect();
-        }
-
-        // Clamp selection to filtered range.
-        let max = self.state.output_filtered_indices.len().saturating_sub(1);
-        if self.state.output_selected > max {
-            self.state.output_selected = max;
-        }
-    }
-
-    /// Reset output search state (called when entering `ViewOutput` or going Back).
-    fn reset_output_search(&mut self) {
-        self.state.output_query.clear();
-        self.state.output_searching = false;
-        self.state.output_filtered_indices.clear();
-    }
-
-    /// Determine the best output mode for the given output.
-    fn output_mode_for(output: &PluginOutput) -> OutputMode {
-        if output.output_format.as_deref() == Some("markdown") && output.raw_text.is_some() {
-            OutputMode::Markdown
-        } else if !output.columns.is_empty() {
-            OutputMode::Table
-        } else if output.raw_text.is_some() && output.items.is_empty() {
-            OutputMode::RawText
-        } else {
-            OutputMode::List
-        }
-    }
-
-    /// Check if the current plugin output has a form and initialize form state.
-    fn check_form_init(&mut self, plugin_index: usize) {
-        let form = self
-            .state
-            .plugin_output
-            .as_ref()
-            .and_then(|o| o.form.clone());
-        if let Some(form_spec) = form {
-            self.initialize_form(plugin_index, &form_spec);
-        }
-    }
-
-    /// Initialize form state from a `FormSpec` returned by a plugin.
-    fn initialize_form(
-        &mut self,
-        plugin_index: usize,
-        form_spec: &crate::plugin::traits::FormSpec,
-    ) {
-        use crate::plugin::traits::FieldType;
-
-        let fields: Vec<FormFieldState> = form_spec
-            .fields
-            .iter()
-            .map(|field| {
-                let default = field.default_value.clone().unwrap_or_default();
-                let selected_option = if let FieldType::Select { ref options } = field.field_type {
-                    options.iter().position(|o| o == &default).unwrap_or(0)
-                } else {
-                    0
-                };
-                let toggled = default == "true";
-                let cursor = default.len();
-                FormFieldState {
-                    spec: field.clone(),
-                    value: default,
-                    cursor,
-                    selected_option,
-                    toggled,
-                }
-            })
-            .collect();
-
-        self.state.form_state = Some(FormState {
-            fields,
-            focused: 0,
-            plugin_index,
-            submit_label: form_spec
-                .submit_label
-                .clone()
-                .unwrap_or_else(|| "Submit".to_string()),
-            is_settings: false,
-        });
-    }
 
     /// Rebuild the unified launcher list from plugin metadata.
     #[allow(clippy::too_many_lines)]

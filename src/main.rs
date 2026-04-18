@@ -10,6 +10,7 @@ use tracing::info;
 
 mod action;
 mod app;
+mod app_output;
 mod config;
 mod history;
 mod input;
