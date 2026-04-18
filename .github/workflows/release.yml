@@ -87,6 +87,61 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  publish-crate:
+    name: Publish to crates.io
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Publish crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --locked
+
+      - name: Report failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          TAG: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const tag = process.env.TAG;
+            const runUrl = process.env.RUN_URL;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `crates.io publish failed for ${tag}`,
+              body: [
+                `The publish-crate job failed for tag \`${tag}\`.`,
+                ``,
+                `The GitHub release and Homebrew tap update proceeded;`,
+                `only the crates.io publish did not. Re-publishing the same`,
+                `version is not possible, so either investigate and cut a`,
+                `patch release, or accept that this tag is crates.io-skipped.`,
+                ``,
+                `Run: ${runUrl}`,
+              ].join('\n'),
+              labels: ['release', 'publish-failure'],
+            });
+
   update-tap:
     name: Update Homebrew Tap
     needs: release

@@ -10,6 +10,24 @@ homepage = "https://github.com/TaylorFinklea/larkline"
 authors = ["Taylor Finklea"]
 keywords = ["cli", "tui", "command-palette", "terminal", "productivity"]
 categories = ["command-line-utilities"]
+readme = "README.md"
+# Trim the published tarball: plugins, docs, CI, packaging — not needed by `cargo install`.
+exclude = [
+    "examples/**",
+    ".docs/**",
+    ".claude/**",
+    "Formula/**",
+    "scripts/**",
+    ".github/**",
+    "docs/**",
+    "lark.nvim/**",
+    "tests/fixtures/**",
+    "packaging/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "*.png",
+    "*.gif",
+]
 
 [[bin]]
 name = "lark"
