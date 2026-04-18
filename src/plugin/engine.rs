@@ -71,12 +71,17 @@ pub enum EngineEvent {
 /// the system on slow machines. User-triggered executions bypass this limit.
 const PREFETCH_CONCURRENCY: usize = 8;
 
-/// Plugins slower than this threshold log a warning for profiling.
+/// Plugins slower than this threshold log at `info` for profiling.
+///
+/// Kept below the default `warn` level: slow plugins are routine (network
+/// calls, docker, github), and any writer that reaches stderr during the TUI
+/// session corrupts the screen. Users opt in via `RUST_LOG=info` or the
+/// `logging.level` config.
 const SLOW_PLUGIN_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn log_execution_time(name: &str, elapsed: std::time::Duration) {
     if elapsed >= SLOW_PLUGIN_THRESHOLD {
-        tracing::warn!(
+        tracing::info!(
             plugin = %name,
             elapsed_ms = elapsed.as_millis(),
             "slow plugin execution"
