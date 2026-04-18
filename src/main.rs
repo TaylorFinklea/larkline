@@ -15,6 +15,7 @@ mod history;
 mod input;
 mod mini_app;
 mod plugin;
+mod plugin_manager_state;
 mod power_menu;
 mod tui;
 mod update;

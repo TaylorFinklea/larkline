@@ -84,8 +84,8 @@ Non-user-facing cleanup: split the `app.rs` god-object and tune the prefetch/wid
 
 - [x] Phase A: Extract widget state helpers into `src/widgets.rs` (ensure_widget_order, rebuild_widget_indices, sync_preview_index, widget picker helpers)
 - [x] Phase B: Extract `build_power_menu_categories()` into `src/power_menu.rs`
-- [~] Phase C: Extract `build_plugin_manager_state*()` into `src/plugin_manager_state.rs`
-- [ ] Phase D: Extract output/form helpers into `src/app_output.rs` (visible_output_count, selected_output_item, rebuild_output_filter, reset_output_search, output_mode_for, check_form_init, initialize_form)
+- [x] Phase C: Extract `build_plugin_manager_state*()` into `src/plugin_manager_state.rs`
+- [~] Phase D: Extract output/form helpers into `src/app_output.rs` (visible_output_count, selected_output_item, rebuild_output_filter, reset_output_search, output_mode_for, check_form_init, initialize_form)
 - [ ] Phase E: Split `handle_action()` by mode — delegate to per-mode handlers (Unified, ViewOutput, MiniApp, PluginManager, etc.)
 - [ ] Phase F: Performance — prefetch tuning, slow-plugin profiling, skip widget refresh when dashboard is not visible
 
