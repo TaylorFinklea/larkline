@@ -79,7 +79,8 @@ Commands:
   secret set <KEY>        Save a secret to macOS Keychain (prompts for value)
   secret list             List secrets stored in Keychain for larkline plugins
   secret delete <KEY>     Remove a secret from macOS Keychain
-  plugin sync             Install/update standard plugins from GitHub
+  plugin sync [--force]   Install/update standard plugins from GitHub
+                          --force prompts before overwriting user-modified plugins
   plugin list             List installed plugins
   plugin remove <NAME>    Remove an installed plugin"
     );
@@ -337,6 +338,75 @@ fn init_tui_logger(
     Some(guard)
 }
 
+/// Classification of a potential plugin target path during `plugin sync`.
+#[derive(Debug, PartialEq, Eq)]
+enum SyncOutcome {
+    /// Path doesn't exist.
+    Missing,
+    /// Symlink exists but its target cannot be resolved.
+    DeadSymlink,
+    /// Symlink resolves into the current cache source dir.
+    InCache,
+    /// Symlink resolves somewhere else (user-customized).
+    OutsideCache,
+    /// Not a symlink — user has written real files here.
+    RealDirectory,
+}
+
+/// Classify a plugin target path relative to the cache source directory.
+fn classify_target(target: &std::path::Path, cache_source: &std::path::Path) -> SyncOutcome {
+    let Ok(meta) = target.symlink_metadata() else {
+        return SyncOutcome::Missing;
+    };
+    if !meta.file_type().is_symlink() {
+        return SyncOutcome::RealDirectory;
+    }
+    let Ok(resolved) = target.canonicalize() else {
+        return SyncOutcome::DeadSymlink;
+    };
+    let Ok(canonical_cache) = cache_source.canonicalize() else {
+        return SyncOutcome::OutsideCache;
+    };
+    if resolved.starts_with(&canonical_cache) {
+        SyncOutcome::InCache
+    } else {
+        SyncOutcome::OutsideCache
+    }
+}
+
+/// Counts accumulated during a sync run, used for the summary line.
+#[derive(Debug, Default)]
+struct SyncCounts {
+    added: usize,
+    repaired: usize,
+    kept_in_cache: usize,
+    kept_custom: usize,
+    kept_modified: usize,
+}
+
+/// Create a plugin symlink at `target` pointing at `source`.
+fn create_plugin_symlink(source: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(source, target)?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(source, target)?;
+    Ok(())
+}
+
+/// Interactively confirm overwrite of a user-modified plugin. Returns `Ok(false)`
+/// when stdin is not a TTY (non-interactive / CI context).
+fn confirm_overwrite(name: &str) -> Result<bool> {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    print!("Overwrite {name}? [y/N]: ");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(input.trim().eq_ignore_ascii_case("y"))
+}
+
 /// Handle `lark plugin sync|list|remove` subcommands.
 #[allow(clippy::too_many_lines)]
 fn handle_plugin_command(args: &[String]) -> Result<()> {
@@ -345,6 +415,7 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
 
     match sub {
         Some("sync") => {
+            let force = args.iter().any(|a| a == "--force");
             let cache = plugin_cache_dir();
             let repo_url = "https://github.com/TaylorFinklea/larkline.git";
 
@@ -399,29 +470,70 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
 
             std::fs::create_dir_all(&plugin_dir)?;
 
-            let mut installed = 0;
-            let mut skipped = 0;
+            let mut counts = SyncCounts::default();
             for entry in std::fs::read_dir(&source_dir)? {
                 let entry = entry?;
-                let name = entry.file_name();
-                let target = plugin_dir.join(&name);
-
-                if target.exists() {
-                    skipped += 1;
+                // Only real plugin dirs — filter stray files (README.md, .gitignore) and
+                // anything without a manifest.
+                if !entry.path().join("manifest.toml").is_file() {
                     continue;
                 }
 
-                // Create symlink to cached plugin.
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(entry.path(), &target)?;
-                #[cfg(windows)]
-                std::os::windows::fs::symlink_dir(entry.path(), &target)?;
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy().into_owned();
+                let target = plugin_dir.join(&name);
 
-                installed += 1;
-                println!("  + {}", name.to_string_lossy());
+                match classify_target(&target, &source_dir) {
+                    SyncOutcome::Missing => {
+                        create_plugin_symlink(&entry.path(), &target)?;
+                        println!("  + {name_str}");
+                        counts.added += 1;
+                    }
+                    SyncOutcome::DeadSymlink => {
+                        std::fs::remove_file(&target)?;
+                        create_plugin_symlink(&entry.path(), &target)?;
+                        println!("  ~ {name_str} (repaired)");
+                        counts.repaired += 1;
+                    }
+                    SyncOutcome::InCache => {
+                        counts.kept_in_cache += 1;
+                    }
+                    SyncOutcome::OutsideCache => {
+                        if force && confirm_overwrite(&name_str)? {
+                            std::fs::remove_file(&target)?;
+                            create_plugin_symlink(&entry.path(), &target)?;
+                            println!("  ~ {name_str} (overwritten)");
+                            counts.repaired += 1;
+                        } else {
+                            let hint = if force { "skipped" } else { "custom" };
+                            println!("  ! {name_str} ({hint} — use --force to overwrite)");
+                            counts.kept_custom += 1;
+                        }
+                    }
+                    SyncOutcome::RealDirectory => {
+                        if force && confirm_overwrite(&name_str)? {
+                            std::fs::remove_dir_all(&target)?;
+                            create_plugin_symlink(&entry.path(), &target)?;
+                            println!("  ~ {name_str} (overwritten)");
+                            counts.repaired += 1;
+                        } else {
+                            let hint = if force { "skipped" } else { "modified" };
+                            println!("  ! {name_str} ({hint} — use --force to overwrite)");
+                            counts.kept_modified += 1;
+                        }
+                    }
+                }
             }
 
-            println!("\nDone! {installed} plugins installed, {skipped} already present.");
+            let total_kept = counts.kept_in_cache + counts.kept_custom + counts.kept_modified;
+            println!(
+                "\nDone! {} added, {} repaired, {} kept ({} custom, {} modified).",
+                counts.added,
+                counts.repaired,
+                total_kept,
+                counts.kept_custom,
+                counts.kept_modified,
+            );
             println!("Plugin directory: {}", plugin_dir.display());
             println!("\nLaunch lark and press R to refresh the plugin list.");
         }
@@ -722,6 +834,74 @@ mod tests {
     fn log_file_dir_handles_missing_home() {
         let dir = resolve_log_file_dir(None, None);
         assert_eq!(dir, std::path::PathBuf::from("/tmp/.local/state/larkline"));
+    }
+
+    #[test]
+    fn classify_target_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        assert_eq!(
+            classify_target(&tmp.path().join("nope"), &cache),
+            SyncOutcome::Missing
+        );
+    }
+
+    #[test]
+    fn classify_target_in_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        let plugin_src = cache.join("hello");
+        std::fs::create_dir_all(&plugin_src).unwrap();
+
+        let plugin_dir = tmp.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let target = plugin_dir.join("hello");
+        std::os::unix::fs::symlink(&plugin_src, &target).unwrap();
+
+        assert_eq!(classify_target(&target, &cache), SyncOutcome::InCache);
+    }
+
+    #[test]
+    fn classify_target_outside_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let external = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&external).unwrap();
+
+        let plugin_dir = tmp.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let target = plugin_dir.join("custom");
+        std::os::unix::fs::symlink(&external, &target).unwrap();
+
+        assert_eq!(classify_target(&target, &cache), SyncOutcome::OutsideCache);
+    }
+
+    #[test]
+    fn classify_target_dead_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let plugin_dir = tmp.path().join("plugins");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let target = plugin_dir.join("dead");
+        std::os::unix::fs::symlink(tmp.path().join("does-not-exist"), &target).unwrap();
+
+        assert_eq!(classify_target(&target, &cache), SyncOutcome::DeadSymlink);
+    }
+
+    #[test]
+    fn classify_target_real_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let plugin_dir = tmp.path().join("plugins");
+        let target = plugin_dir.join("modified");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("manifest.toml"), "[plugin]").unwrap();
+
+        assert_eq!(classify_target(&target, &cache), SyncOutcome::RealDirectory);
     }
 
     #[test]
