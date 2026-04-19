@@ -713,38 +713,51 @@ impl App {
             self.refresh_markdown_cache();
             terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
 
+            // Block up to 16ms waiting for input, then drain every queued event
+            // before re-rendering. Draining matters on terminals that emit
+            // non-Key events (resize, paste, focus) interleaved with keys —
+            // otherwise each non-Key event wastes a frame and the next press
+            // appears to "not register" until another key is pressed.
             if event::poll(std::time::Duration::from_millis(16))? {
-                if let Event::Key(key) = event::read()? {
-                    // Only process key press events, not repeats or releases.
-                    if key.kind == KeyEventKind::Press {
-                        if let Some(action) = input::handle_key(
-                            key,
-                            &self.state.mode,
-                            &self.state.vim_mode,
-                            &self.keybindings,
-                            self.state.pending_confirmation.is_some(),
-                            self.state.copy_menu.is_some(),
-                            self.state.output_searching,
-                            self.state.form_state.is_some(),
-                            self.state.action_palette.is_some(),
-                            self.state.theme_picker.is_some(),
-                            self.state.widget_picker.is_some(),
-                            self.state
-                                .power_menu
-                                .as_ref()
-                                .map(|m| m.categories.as_slice()),
-                            self.state.pending_g,
-                            self.state.widget_focused,
-                        ) {
-                            // Clear pending_g for any action except PendingG itself.
-                            if !matches!(action, Action::PendingG) {
+                loop {
+                    match event::read()? {
+                        Event::Key(key)
+                            if matches!(
+                                key.kind,
+                                KeyEventKind::Press | KeyEventKind::Repeat
+                            ) =>
+                        {
+                            if let Some(action) = input::handle_key(
+                                key,
+                                &self.state.mode,
+                                &self.state.vim_mode,
+                                &self.keybindings,
+                                self.state.pending_confirmation.is_some(),
+                                self.state.copy_menu.is_some(),
+                                self.state.output_searching,
+                                self.state.form_state.is_some(),
+                                self.state.action_palette.is_some(),
+                                self.state.theme_picker.is_some(),
+                                self.state.widget_picker.is_some(),
+                                self.state
+                                    .power_menu
+                                    .as_ref()
+                                    .map(|m| m.categories.as_slice()),
+                                self.state.pending_g,
+                                self.state.widget_focused,
+                            ) {
+                                if !matches!(action, Action::PendingG) {
+                                    self.state.pending_g = false;
+                                }
+                                self.handle_action(action);
+                            } else {
                                 self.state.pending_g = false;
                             }
-                            self.handle_action(action);
-                        } else {
-                            // No action produced — clear pending_g.
-                            self.state.pending_g = false;
                         }
+                        _ => {}
+                    }
+                    if !event::poll(std::time::Duration::ZERO)? {
+                        break;
                     }
                 }
             }
