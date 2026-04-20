@@ -1,0 +1,67 @@
+[plugin]
+name = "Bitwarden"
+description = "Search the Bitwarden vault, copy credentials, and generate passwords"
+version = "0.1.0"
+author = "larkline"
+icon = "🔒"
+icon_nerd = "󰞀"
+category = "productivity"
+secrets = ["BW_SESSION", "BW_PASSWORD"]
+
+[[settings]]
+id = "max_results"
+label = "Max results per search"
+type = "select"
+options = ["25", "50", "100", "200"]
+default = "100"
+
+[[settings]]
+id = "redact_secrets"
+label = "Redact passwords/TOTP in detail view"
+type = "toggle"
+default = "true"
+
+[[commands]]
+name = "Search Vault"
+description = "Search all items across your vault (logins, notes, cards, identities)"
+entry = "items.lua"
+quickkey = "bw"
+timeout_seconds = 15
+
+[[commands]]
+name = "Favorites"
+description = "Favorite items from your vault"
+entry = "favorites.lua"
+quickkey = "bf"
+timeout_seconds = 15
+
+[[commands]]
+name = "Folders"
+description = "Browse items by folder"
+entry = "folders.lua"
+quickkey = "bd"
+timeout_seconds = 15
+
+[[commands]]
+name = "Generate Password"
+description = "Generate a password or passphrase with configurable options"
+entry = "generate.lua"
+quickkey = "bg"
+timeout_seconds = 10
+prefetch = false
+
+[[commands]]
+name = "Sync Vault"
+description = "Pull the latest vault data from the Bitwarden server"
+entry = "sync.lua"
+quickkey = "bs"
+timeout_seconds = 30
+prefetch = false
+
+[[commands]]
+name = "Lock Vault"
+description = "Lock the Bitwarden vault and destroy the session key"
+entry = "lock.lua"
+quickkey = "bl"
+timeout_seconds = 5
+prefetch = false

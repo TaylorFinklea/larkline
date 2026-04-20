@@ -89,7 +89,9 @@ Non-user-facing cleanup: split the `app.rs` god-object and tune the prefetch/wid
 - [x] Phase E: Split `handle_action()` by mode — delegate to per-mode handlers (Unified, ViewOutput, MiniApp, PluginManager, etc.)
 - [x] Phase F: Performance — prefetch tuning, slow-plugin profiling, skip widget refresh when dashboard is not visible
 
-### v0.10.0 — Distribution + lark.nvim v2 (bundled)
+### v0.10.0 — Distribution + lark.nvim v2 (bundled) ✅ SHIPPED
+
+Tag `v0.10.0` cut on 2026-04-19 (commit `627b8fc`).
 
 - [x] Phase A: Tracing-to-file (`tracing-appender` rolling daily, `$XDG_STATE_HOME/larkline/lark.log`)
 - [x] Phase B: `lark plugin sync` — repair dead symlinks; `--force` overwrites user-modified plugins with interactive confirmation
@@ -99,12 +101,36 @@ Non-user-facing cleanup: split the `app.rs` god-object and tune the prefetch/wid
 - [x] Phase F: Nix flake (`rustPlatform.buildRustPackage`, package + app + devshell)
 - [x] Phase G: lark.nvim v2 — `$NVIM` socket awareness; new `ActionKind::NvimEdit` + Lua host fn for arbitrary ex commands; `file-search` and `notes` plugins updated
 - [x] Phase H: `scripts/release.sh set <version>` mode; handoff docs
+- [x] Post-tag fix: `fix(tui): drain all events per frame and accept key repeat` (commit `fa0eeff`) — fixed double-press bug on Ghostty/Kitty-protocol terminals
+
+### v0.11.0 — Bitwarden Deep-Dive
+
+Raycast-parity Bitwarden plugin using the official `bw` CLI. Requires `BW_SESSION` env var (user runs `bw unlock --raw` once and exports).
+
+- [x] Phase A: `lib.lua` + session discovery (`bw_session`, `run_bw` with `--response` JSON, type/icon helpers, redact helpers, detail renderer)
+- [x] Phase B: `items.lua` — search all items, type-specific copy actions (password/username/TOTP/URL for logins; number/CVV/holder/exp for cards; email/phone/SSN/passport for identities; custom fields for all)
+- [x] Phase C: `folders.lua` (browse by folder with drill-in via `on_action`) + `favorites.lua` (`--favorite` filter)
+- [x] Phase D: `generate.lua` — password + passphrase modes, length/symbols/numbers/ambiguous/minnumber/minspecial/capitalize/include-number options, regenerate action chain
+- [x] Phase E: `sync.lua` (status + sync action) + `lock.lua` (confirm-before-lock action)
+- [x] Phase F: Item detail renderer with card (number/CVV/exp/brand), identity (address/phone/SSN/etc), custom fields (field_type 1 = hidden, redacted)
+- [x] Phase G: roadmap + handoff docs + `rbw` backlog
+
+### v0.12.0 — Jira + Confluence (future)
+
+Single plugin group covering both Atlassian products, dual-auth:
+
+- **API token path:** user provides `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` env vars, host base URL in settings
+- **OAuth 2.0 path:** 3LO authorization code flow with token refresh, stored via `lark secret`
+- Commands (Jira): my-issues, my-cycle/sprint, triage queue, create-issue form, transition, comment
+- Commands (Confluence): recent pages, search, my-pages, create-page form
+
+Deferred until OAuth flow is designed — needs a local HTTP callback listener or device-code UX decision.
 
 ### Future (unordered — pick theme per release)
 
 - **lark.nvim v3:** Telescope integration (needs `lark list --json` first), action streaming lark → nvim buffer updates in real time
 - **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries
-- **More plugin deep-dives:** Jira, Confluence, PagerDuty, 1Password CLI
+- **More plugin deep-dives:** PagerDuty, 1Password CLI (deferred — user doesn't use these)
 
 ---
 
@@ -154,6 +180,16 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [x] Fix `src/tui/ui.rs:417-418`: same byte-index truncation pattern (`&value[..40]`) in copy-menu preview — replace with `.chars().take(40).collect::<String>()`
 - [x] ccusage plugin: `fmt_tokens()`, `fmt_cost()`, and `get_since()` are copy-pasted identically across `daily.lua`, `sessions.lua`, `monthly.lua`, `weekly.lua`, `blocks.lua` (lines 3-25 in each) — add a comment block at the top of each file with a `-- SHARED:` marker so a future lib.lua extraction is trivially diff-able
 - [x] github plugin: `gh_headers()` is copy-pasted identically across `my-prs.lua:3`, `reviews.lua:3`, `issues.lua:3`, `notifications.lua:3` — add a `-- SHARED: gh_headers` comment marker in each file for the same future extraction
+
+### Bitwarden Backlog (post-v0.11.0)
+
+- [ ] **rbw support:** `rbw` is a Rust-native Bitwarden client that caches the session in a background agent, skipping the `BW_SESSION` export dance. Add a `use_rbw` toggle in `bitwarden/manifest.toml` settings and a conditional code path in `lib.lua`: when enabled, swap `bw get/list` for `rbw get/list` and skip `--session`. rbw emits plain text for passwords (not JSON), so the output parsing differs — either shell `rbw get` per item or provide a `rbw list --fields name,id,username,uri` summary for the list view.
+- [ ] **Send support:** `bw send list`/`create`/`delete` — create and manage Bitwarden Sends (time-limited secure shares)
+- [ ] **Organization + collection items:** `bw list items --organizationid <id>`; show collection filter when in an org
+- [ ] **Attachments:** `bw get attachment <id>` to download attachments associated with items
+- [ ] **Edit + delete item actions:** `bw edit item`, `bw delete item <id> --hard` — require confirmation
+- [ ] **Lock-after-clipboard:** optional setting to auto-lock vault N seconds after a password copy (matches Raycast behaviour)
+- [ ] **TOTP countdown in detail view:** render a live 30-second countdown next to the TOTP row (would need widget auto-refresh or streaming output)
 
 ### Sonnet Tier (moderate — mid-tier models)
 
