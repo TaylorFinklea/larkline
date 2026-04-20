@@ -17,16 +17,37 @@ local function run_bw(session, args, title)
     for _, a in ipairs(args) do full[#full + 1] = a end
     local raw = lark.exec("bw", full)
     if not raw or raw == "" then
-        return nil, { title = title, items = { { label = "No response from bw CLI", icon = "!" } } }
+        return nil, { title = title, items = { { label = "No response from bw CLI", detail = "Is `bw` installed and on $PATH?", icon = "!" } } }
     end
     local ok, parsed = pcall(lark.json.decode, raw)
     if not ok or type(parsed) ~= "table" then
-        return nil, { title = title, items = { { label = "Failed to parse bw response", icon = "!" } } }
+        return nil, { title = title, items = { { label = "Failed to parse bw response", detail = raw:sub(1, 120), icon = "!" } } }
     end
     if not parsed.success then
         return nil, { title = title, items = { { label = "bw error: " .. (parsed.message or "unknown"), icon = "!" } } }
     end
     return parsed.data, nil
+end
+
+local function verify_session(session, title)
+    local data, err = run_bw(session, { "status" }, title)
+    if err then return err end
+    local status = (data and data.status) or "nil"
+    local email = (data and data.userEmail) or ""
+    if status ~= "unlocked" or email == "" then
+        return {
+            title = title,
+            items = {
+                {
+                    label = "Bitwarden session is not unlocked",
+                    detail = string.format("bw reports status=%s, account=%s — run `export BW_SESSION=$(bw unlock --raw)` again and relaunch lark",
+                                           status, email == "" and "(none)" or email),
+                    icon = "🔒",
+                },
+            },
+        }
+    end
+    return nil
 end
 
 local function icon_for_type(t)
@@ -101,6 +122,9 @@ lark.register({
     on_run = function()
         local session, err = bw_session("Favorites")
         if err then return err end
+
+        local verr = verify_session(session, "Favorites")
+        if verr then return verr end
 
         local data, rerr = run_bw(session, { "list", "items", "--favorite" }, "Favorites")
         if rerr then return rerr end

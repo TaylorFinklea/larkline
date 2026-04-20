@@ -43,7 +43,7 @@ local function run_bw(session, args, title)
     if not raw or raw == "" then
         return nil, {
             title = title,
-            items = { { label = "No response from bw CLI", icon = "!" } },
+            items = { { label = "No response from bw CLI", detail = "Is `bw` installed and on $PATH?", icon = "!" } },
         }
     end
     -- --response returns { success: bool, data: ..., message: ... }
@@ -62,6 +62,30 @@ local function run_bw(session, args, title)
         }
     end
     return parsed.data, nil
+end
+
+-- Preflight the session by asking bw for its status. bw never errors for a
+-- stale session — it silently reports status="locked", userEmail=null — so we
+-- must verify the unlocked state before trusting list output.
+local function verify_session(session, title)
+    local data, err = run_bw(session, { "status" }, title)
+    if err then return err end
+    local state = (data and data.status) or "nil"
+    local email = (data and data.userEmail) or ""
+    if state ~= "unlocked" or email == "" then
+        return {
+            title = title,
+            items = {
+                {
+                    label = "Bitwarden session is not unlocked",
+                    detail = string.format("bw reports status=%s, account=%s — run `export BW_SESSION=$(bw unlock --raw)` again and relaunch lark",
+                                           state, email == "" and "(none)" or email),
+                    icon = "🔒",
+                },
+            },
+        }
+    end
+    return nil
 end
 
 local function icon_for_type(t)

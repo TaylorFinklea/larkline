@@ -16,16 +16,32 @@ local function run_bw(session, args, title)
     for _, a in ipairs(args) do full[#full + 1] = a end
     local raw = lark.exec("bw", full)
     if not raw or raw == "" then
-        return nil, { title = title, items = { { label = "No response from bw CLI", icon = "!" } } }
+        return nil, { title = title, items = { { label = "No response from bw CLI", detail = "Is `bw` installed and on $PATH?", icon = "!" } } }
     end
     local ok, parsed = pcall(lark.json.decode, raw)
     if not ok or type(parsed) ~= "table" then
-        return nil, { title = title, items = { { label = "Failed to parse bw response", icon = "!" } } }
+        return nil, { title = title, items = { { label = "Failed to parse bw response", detail = raw:sub(1, 120), icon = "!" } } }
     end
     if not parsed.success then
         return nil, { title = title, items = { { label = "bw error: " .. (parsed.message or "unknown"), icon = "!" } } }
     end
     return parsed.data, nil
+end
+
+local function locked_output(status)
+    local state = (status and status.status) or "nil"
+    local email = (status and status.userEmail) or ""
+    return {
+        title = "Bitwarden Status",
+        items = {
+            {
+                label = "Bitwarden session is not unlocked",
+                detail = string.format("bw reports status=%s, account=%s — run `export BW_SESSION=$(bw unlock --raw)` again and relaunch lark",
+                                       state, email == "" and "(none)" or email),
+                icon = "🔒",
+            },
+        },
+    }
 end
 
 lark.register({
@@ -36,9 +52,13 @@ lark.register({
         local status, serr = run_bw(session, { "status" }, "Sync Vault")
         if serr then return serr end
 
-        local account = (status and status.userEmail) or "unknown"
+        local account = (status and status.userEmail) or ""
+        local state   = (status and status.status) or ""
+        if state ~= "unlocked" or account == "" then
+            return locked_output(status)
+        end
+
         local server = (status and status.serverUrl) or "bitwarden.com"
-        local state  = (status and status.status) or "unknown"
         local synced = (status and (status.lastSync or status.lastsync)) or "never"
 
         local last_sync, lerr = run_bw(session, { "sync", "--last" }, "Sync Vault")
