@@ -360,12 +360,7 @@ fn render_preview_pane(
 // ---------------------------------------------------------------------------
 
 /// Render the mini app layout tree into the given area.
-fn render_mini_app(
-    frame: &mut Frame,
-    mini: &MiniAppState,
-    theme: &Theme,
-    area: Rect,
-) {
+fn render_mini_app(frame: &mut Frame, mini: &MiniAppState, theme: &Theme, area: Rect) {
     render_layout_node(frame, mini, theme, &mini.layout, area);
 }
 
@@ -410,13 +405,7 @@ fn render_layout_node(
 }
 
 /// Render a single pane with its content and border.
-fn render_pane(
-    frame: &mut Frame,
-    pane: &PaneState,
-    theme: &Theme,
-    area: Rect,
-    is_focused: bool,
-) {
+fn render_pane(frame: &mut Frame, pane: &PaneState, theme: &Theme, area: Rect, is_focused: bool) {
     let border_color = if is_focused {
         theme.accent
     } else {

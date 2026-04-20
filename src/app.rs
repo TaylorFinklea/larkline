@@ -722,10 +722,7 @@ impl App {
                 loop {
                     match event::read()? {
                         Event::Key(key)
-                            if matches!(
-                                key.kind,
-                                KeyEventKind::Press | KeyEventKind::Repeat
-                            ) =>
+                            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
                         {
                             if let Some(action) = input::handle_key(
                                 key,
@@ -975,17 +972,24 @@ impl App {
                             if was_revalidating {
                                 // Seamlessly update the pane if the user is still viewing it.
                                 if self.state.viewing_plugin_index == Some(plugin_index) {
-                                    self.state.output_mode = crate::app_output::output_mode_for(&output);
+                                    self.state.output_mode =
+                                        crate::app_output::output_mode_for(&output);
                                     self.state.plugin_output = Some(output);
                                     crate::app_output::rebuild_output_filter(&mut self.state);
-                                    crate::app_output::check_form_init(&mut self.state, plugin_index);
+                                    crate::app_output::check_form_init(
+                                        &mut self.state,
+                                        plugin_index,
+                                    );
                                 }
                             } else {
                                 // Fresh load: don't overwrite streaming output.
                                 if self.state.plugin_output.is_none() {
                                     self.state.plugin_output = Some(output);
                                     crate::app_output::rebuild_output_filter(&mut self.state);
-                                    crate::app_output::check_form_init(&mut self.state, plugin_index);
+                                    crate::app_output::check_form_init(
+                                        &mut self.state,
+                                        plugin_index,
+                                    );
                                 }
                             }
                         }
@@ -1024,9 +1028,8 @@ impl App {
                                 .as_ref()
                                 .and_then(|o| o.layout.clone())
                                 .expect("checked above");
-                            self.state.mini_app = Some(
-                                crate::mini_app::build_mini_app_state(plugin_index, layout),
-                            );
+                            self.state.mini_app =
+                                Some(crate::mini_app::build_mini_app_state(plugin_index, layout));
                             self.state.mode = Mode::MiniApp;
                         } else {
                             if self.state.mode != Mode::ViewOutput {
@@ -1061,9 +1064,10 @@ impl App {
                             // mini app state. Otherwise use the title as a pane ID hint to
                             // update a single pane's content.
                             if let Some(ref layout) = output.layout {
-                                self.state.mini_app = Some(
-                                    crate::mini_app::build_mini_app_state(plugin_index, layout.clone()),
-                                );
+                                self.state.mini_app = Some(crate::mini_app::build_mini_app_state(
+                                    plugin_index,
+                                    layout.clone(),
+                                ));
                             } else if let Some(ref mut mini) = self.state.mini_app {
                                 // Use the output title as target pane ID.
                                 let target = &output.title;
@@ -1080,10 +1084,8 @@ impl App {
                                     pane.scroll_offset = 0;
                                 }
                             }
-                            self.state.status_message = Some((
-                                "Action completed".to_string(),
-                                std::time::Instant::now(),
-                            ));
+                            self.state.status_message =
+                                Some(("Action completed".to_string(), std::time::Instant::now()));
                         } else if self.state.viewing_plugin_index == Some(plugin_index) {
                             // ViewOutput mode: replace entire output.
                             self.state.output_selected = 0;
@@ -1099,20 +1101,16 @@ impl App {
                             } else {
                                 OutputMode::List
                             };
-                            self.state.status_message = Some((
-                                "Action completed".to_string(),
-                                std::time::Instant::now(),
-                            ));
+                            self.state.status_message =
+                                Some(("Action completed".to_string(), std::time::Instant::now()));
                         }
                     }
                     Err(e) => {
-                        self.state.status_message = Some((
-                            format!("Action failed: {e}"),
-                            std::time::Instant::now(),
-                        ));
+                        self.state.status_message =
+                            Some((format!("Action failed: {e}"), std::time::Instant::now()));
                     }
                 }
-            },
+            }
         }
     }
 
@@ -1250,7 +1248,8 @@ impl App {
                 {
                     self.state.scroll_offset += 1;
                 } else if self.state.mode == Mode::ViewOutput {
-                    let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
+                    let max =
+                        crate::app_output::visible_output_count(&self.state).saturating_sub(1);
                     if self.state.output_selected < max {
                         self.state.output_selected += 1;
                     }
@@ -1309,7 +1308,9 @@ impl App {
                 if self.state.mode == Mode::ViewOutput {
                     // In ViewOutput: 0 actions → URL fallback, 1 → run it,
                     // 2+ → open the action palette.
-                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
+                    if let Some(item) =
+                        crate::app_output::selected_output_item(&self.state).cloned()
+                    {
                         match item.actions.len() {
                             0 => {
                                 if let Some(ref url) = item.url {
@@ -1401,7 +1402,9 @@ impl App {
                             _ => self.handle_action(Action::PaletteOpen),
                         }
                     }
-                } else if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
+                } else if let Some(item) =
+                    crate::app_output::selected_output_item(&self.state).cloned()
+                {
                     match item.actions.len() {
                         0 => {
                             if let Some(ref url) = item.url {
@@ -1435,7 +1438,8 @@ impl App {
                 {
                     self.state.scroll_offset += 10;
                 } else if self.state.mode == Mode::ViewOutput {
-                    let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
+                    let max =
+                        crate::app_output::visible_output_count(&self.state).saturating_sub(1);
                     self.state.output_selected = (self.state.output_selected + 10).min(max);
                 } else {
                     // Advance unified_selected by up to 10 selectable rows.
@@ -1516,7 +1520,9 @@ impl App {
 
             Action::PaletteOpen => {
                 if self.state.mode == Mode::ViewOutput {
-                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
+                    if let Some(item) =
+                        crate::app_output::selected_output_item(&self.state).cloned()
+                    {
                         let mut actions = item.actions.clone();
                         // Add built-in actions.
                         actions.push(ItemAction {
@@ -1603,7 +1609,9 @@ impl App {
 
             Action::CopyMenu => {
                 if self.state.mode == Mode::ViewOutput {
-                    if let Some(item) = crate::app_output::selected_output_item(&self.state).cloned() {
+                    if let Some(item) =
+                        crate::app_output::selected_output_item(&self.state).cloned()
+                    {
                         let item = &item;
                         let mut entries = vec![("Label".to_string(), item.label.clone())];
                         if let Some(ref detail) = item.detail {
@@ -1809,7 +1817,8 @@ impl App {
                             // Set a large scroll offset; Paragraph rendering clamps naturally.
                             self.state.scroll_offset = usize::MAX / 2;
                         } else {
-                            let max = crate::app_output::visible_output_count(&self.state).saturating_sub(1);
+                            let max = crate::app_output::visible_output_count(&self.state)
+                                .saturating_sub(1);
                             self.state.output_selected = max;
                         }
                     }
@@ -1975,7 +1984,6 @@ impl App {
             }
 
             // ----- Mini app actions -----
-
             Action::MiniAppFocusNext => crate::mini_app::focus_next(&mut self.state),
             Action::MiniAppFocusPrev => crate::mini_app::focus_prev(&mut self.state),
             Action::MiniAppClose => crate::mini_app::close(&mut self.state),
@@ -2052,7 +2060,6 @@ impl App {
         }
     }
 
-
     fn execute_item_action(&mut self, action: &ItemAction) {
         match action.kind {
             ActionKind::Open => {
@@ -2093,10 +2100,17 @@ impl App {
                 // Chain: call the plugin's on_action callback.
                 // args[0] = callback_id, args[1..] = context (joined with space).
                 let callback_id = action.args.first().cloned().unwrap_or_default();
-                let context = action.args.iter().skip(1).cloned().collect::<Vec<_>>().join(" ");
+                let context = action
+                    .args
+                    .iter()
+                    .skip(1)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 if let Some(plugin_index) = self.state.viewing_plugin_index {
                     self.state.is_loading = true;
-                    self.engine.execute_action(plugin_index, callback_id, context);
+                    self.engine
+                        .execute_action(plugin_index, callback_id, context);
                 }
             }
             ActionKind::UpdatePane => {
@@ -2104,10 +2118,17 @@ impl App {
                 // args[0] = pane_id, args[1] = callback_id, args[2..] = context.
                 let _pane_id = action.args.first().cloned().unwrap_or_default();
                 let callback_id = action.args.get(1).cloned().unwrap_or_default();
-                let context = action.args.iter().skip(2).cloned().collect::<Vec<_>>().join(" ");
+                let context = action
+                    .args
+                    .iter()
+                    .skip(2)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 if let Some(plugin_index) = self.state.viewing_plugin_index {
                     self.state.is_loading = true;
-                    self.engine.execute_action(plugin_index, callback_id, context);
+                    self.engine
+                        .execute_action(plugin_index, callback_id, context);
                 }
             }
             ActionKind::NvimEdit => {
@@ -2115,10 +2136,7 @@ impl App {
                 let Some(path) = action.args.first() else {
                     return;
                 };
-                let split = action
-                    .args
-                    .get(1)
-                    .map_or("edit", String::as_str);
+                let split = action.args.get(1).map_or("edit", String::as_str);
                 match nvim_open_file(path, split) {
                     Ok(()) => {
                         self.state.status_message =
@@ -2135,10 +2153,8 @@ impl App {
                     }
                     Err(NvimOpenError::CommandFailed(e)) => {
                         tracing::warn!(error = %e, path = %path, "nvim remote-send failed");
-                        self.state.status_message = Some((
-                            format!("nvim open failed: {e}"),
-                            std::time::Instant::now(),
-                        ));
+                        self.state.status_message =
+                            Some((format!("nvim open failed: {e}"), std::time::Instant::now()));
                     }
                 }
             }
@@ -2237,7 +2253,6 @@ impl App {
         crate::app_output::check_form_init(&mut self.state, plugin_index);
         self.state.vim_mode = VimMode::Normal;
     }
-
 
     /// Rebuild the unified launcher list from plugin metadata.
     #[allow(clippy::too_many_lines)]
@@ -2441,7 +2456,6 @@ impl App {
             .map_or(0, |(i, _)| i);
         crate::widgets::sync_preview_index(&mut self.state);
     }
-
 }
 
 // ---------------------------------------------------------------------------

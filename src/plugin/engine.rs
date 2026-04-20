@@ -171,12 +171,7 @@ impl PluginEngine {
     ///
     /// Spawns a Tokio task that calls `Plugin::execute_action()` and sends
     /// an `EngineEvent::ActionResult` when complete.
-    pub fn execute_action(
-        &self,
-        plugin_index: usize,
-        callback_id: String,
-        context: String,
-    ) {
+    pub fn execute_action(&self, plugin_index: usize, callback_id: String, context: String) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
@@ -186,10 +181,9 @@ impl PluginEngine {
                 secrets,
                 PLUGIN_LIST.scope(
                     all_plugins,
-                    INVOKE_DEPTH.scope(
-                        0,
-                        async move { plugin.execute_action(&callback_id, &context).await },
-                    ),
+                    INVOKE_DEPTH.scope(0, async move {
+                        plugin.execute_action(&callback_id, &context).await
+                    }),
                 ),
             ));
             let result = match handle.await {

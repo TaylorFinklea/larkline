@@ -291,7 +291,10 @@ fn log_file_dir() -> std::path::PathBuf {
 }
 
 /// Pure helper for [`log_file_dir`] — unit-testable without touching env vars.
-fn resolve_log_file_dir(xdg_state_home: Option<String>, home: Option<String>) -> std::path::PathBuf {
+fn resolve_log_file_dir(
+    xdg_state_home: Option<String>,
+    home: Option<String>,
+) -> std::path::PathBuf {
     let base = if let Some(xdg) = xdg_state_home {
         std::path::PathBuf::from(xdg)
     } else {
@@ -385,7 +388,10 @@ struct SyncCounts {
 }
 
 /// Create a plugin symlink at `target` pointing at `source`.
-fn create_plugin_symlink(source: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+fn create_plugin_symlink(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::io::Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::symlink(source, target)?;
     #[cfg(windows)]
@@ -528,11 +534,7 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
             let total_kept = counts.kept_in_cache + counts.kept_custom + counts.kept_modified;
             println!(
                 "\nDone! {} added, {} repaired, {} kept ({} custom, {} modified).",
-                counts.added,
-                counts.repaired,
-                total_kept,
-                counts.kept_custom,
-                counts.kept_modified,
+                counts.added, counts.repaired, total_kept, counts.kept_custom, counts.kept_modified,
             );
             println!("Plugin directory: {}", plugin_dir.display());
             println!("\nLaunch lark and press R to refresh the plugin list.");
@@ -818,7 +820,10 @@ mod tests {
             Some("/tmp/xdg-state-test".to_string()),
             Some("/tmp/home-test".to_string()),
         );
-        assert_eq!(dir, std::path::PathBuf::from("/tmp/xdg-state-test/larkline"));
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("/tmp/xdg-state-test/larkline")
+        );
     }
 
     #[test]

@@ -31,10 +31,7 @@ fn collect_pane_ids(layout: &MiniAppLayout, out: &mut Vec<PaneId>) {
 ///
 /// Initializes per-pane state from the layout tree's content declarations.
 #[allow(dead_code)]
-pub fn build_mini_app_state(
-    plugin_index: usize,
-    layout: MiniAppLayout,
-) -> MiniAppState {
+pub fn build_mini_app_state(plugin_index: usize, layout: MiniAppLayout) -> MiniAppState {
     let order = pane_order(&layout);
     let focused = order.first().cloned().unwrap_or_default();
 
@@ -85,10 +82,7 @@ fn collect_pane_states(layout: &MiniAppLayout, panes: &mut HashMap<PaneId, PaneS
 ///
 /// The focused pane becomes the left/top child; a new empty pane is the right/bottom child.
 /// Returns the ID of the new pane, or `None` if the focused pane wasn't found.
-pub fn split_pane(
-    state: &mut MiniAppState,
-    direction: SplitDirection,
-) -> Option<PaneId> {
+pub fn split_pane(state: &mut MiniAppState, direction: SplitDirection) -> Option<PaneId> {
     let focused_id = state.focused_pane.clone();
     let new_id = format!("{focused_id}_split_{}", state.panes.len());
 
@@ -189,9 +183,9 @@ fn remove_pane_from_tree(layout: &mut MiniAppLayout, target_id: &str) -> bool {
     match layout {
         MiniAppLayout::Split { children, .. } => {
             // Check if any direct child is the target pane.
-            if let Some(pos) = children.iter().position(|c| {
-                matches!(&c.layout, MiniAppLayout::Pane { id, .. } if id == target_id)
-            }) {
+            if let Some(pos) = children.iter().position(
+                |c| matches!(&c.layout, MiniAppLayout::Pane { id, .. } if id == target_id),
+            ) {
                 if children.len() == 2 {
                     // Replace the split with the surviving sibling.
                     let sibling_idx = 1 - pos;
@@ -230,7 +224,9 @@ fn remove_pane_from_tree(layout: &mut MiniAppLayout, target_id: &str) -> bool {
 fn adjust_size_in_tree(layout: &mut MiniAppLayout, target_id: &str, amount: i16) {
     if let MiniAppLayout::Split { children, .. } = layout {
         // Find which child contains the target.
-        let target_idx = children.iter().position(|c| pane_ids_contain(&c.layout, target_id));
+        let target_idx = children
+            .iter()
+            .position(|c| pane_ids_contain(&c.layout, target_id));
         if let Some(idx) = target_idx {
             let current = children[idx].size as i16;
             let new_size = (current + amount).clamp(10, 90) as u16;
@@ -260,9 +256,9 @@ fn adjust_size_in_tree(layout: &mut MiniAppLayout, target_id: &str, amount: i16)
 fn pane_ids_contain(layout: &MiniAppLayout, target_id: &str) -> bool {
     match layout {
         MiniAppLayout::Pane { id, .. } => id == target_id,
-        MiniAppLayout::Split { children, .. } => {
-            children.iter().any(|c| pane_ids_contain(&c.layout, target_id))
-        }
+        MiniAppLayout::Split { children, .. } => children
+            .iter()
+            .any(|c| pane_ids_contain(&c.layout, target_id)),
     }
 }
 
@@ -272,7 +268,11 @@ fn pane_ids_contain(layout: &MiniAppLayout, target_id: &str) -> bool {
 
 pub fn focus_next(state: &mut AppState) {
     if let Some(ref mut mini) = state.mini_app {
-        if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+        if let Some(pos) = mini
+            .pane_order
+            .iter()
+            .position(|id| *id == mini.focused_pane)
+        {
             let next = (pos + 1) % mini.pane_order.len();
             mini.focused_pane = mini.pane_order[next].clone();
         }
@@ -281,7 +281,11 @@ pub fn focus_next(state: &mut AppState) {
 
 pub fn focus_prev(state: &mut AppState) {
     if let Some(ref mut mini) = state.mini_app {
-        if let Some(pos) = mini.pane_order.iter().position(|id| *id == mini.focused_pane) {
+        if let Some(pos) = mini
+            .pane_order
+            .iter()
+            .position(|id| *id == mini.focused_pane)
+        {
             let prev = if pos == 0 {
                 mini.pane_order.len().saturating_sub(1)
             } else {

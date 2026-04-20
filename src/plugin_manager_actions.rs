@@ -107,8 +107,7 @@ pub fn delete_secret(app: &mut App) {
                 &app.state.plugins,
                 &app.pm_config,
             ));
-            app.state.status_message =
-                Some((format!("Deleted {key}"), std::time::Instant::now()));
+            app.state.status_message = Some((format!("Deleted {key}"), std::time::Instant::now()));
         }
     }
 }

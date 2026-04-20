@@ -50,9 +50,7 @@ pub fn widget_move_left(app: &mut App) {
 }
 
 pub fn widget_move_right(app: &mut App) {
-    if app.state.widget_focused
-        && app.state.widget_selected + 1 < app.state.widget_indices.len()
-    {
+    if app.state.widget_focused && app.state.widget_selected + 1 < app.state.widget_indices.len() {
         crate::widgets::ensure_widget_order(&app.state, &mut app.pm_config);
         if let Some(&pidx) = app.state.widget_indices.get(app.state.widget_selected) {
             let meta = &app.state.plugins[pidx];

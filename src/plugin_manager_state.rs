@@ -92,8 +92,7 @@ pub fn build_with_expanded(
         if is_expanded {
             // Command rows.
             for (cmd_name, qk) in commands {
-                let cmd_enabled =
-                    plugin_enabled && !pm_config.is_command_disabled(gk, cmd_name);
+                let cmd_enabled = plugin_enabled && !pm_config.is_command_disabled(gk, cmd_name);
                 rows.push(PluginManagerRow::Command {
                     group_key: gk.clone(),
                     name: cmd_name.clone(),

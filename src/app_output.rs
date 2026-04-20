@@ -9,10 +9,7 @@ pub fn visible_output_count(state: &AppState) -> usize {
     if !state.output_filtered_indices.is_empty() || !state.output_query.is_empty() {
         state.output_filtered_indices.len()
     } else {
-        state
-            .plugin_output
-            .as_ref()
-            .map_or(0, |o| o.items.len())
+        state.plugin_output.as_ref().map_or(0, |o| o.items.len())
     }
 }
 
@@ -23,9 +20,7 @@ pub fn selected_output_item(state: &AppState) -> Option<&OutputItem> {
     if state.output_filtered_indices.is_empty() && state.output_query.is_empty() {
         items.get(state.output_selected)
     } else {
-        let real_index = *state
-            .output_filtered_indices
-            .get(state.output_selected)?;
+        let real_index = *state.output_filtered_indices.get(state.output_selected)?;
         items.get(real_index)
     }
 }
@@ -89,10 +84,7 @@ pub fn output_mode_for(output: &PluginOutput) -> OutputMode {
 
 /// Check if the current plugin output has a form and initialize form state.
 pub fn check_form_init(state: &mut AppState, plugin_index: usize) {
-    let form = state
-        .plugin_output
-        .as_ref()
-        .and_then(|o| o.form.clone());
+    let form = state.plugin_output.as_ref().and_then(|o| o.form.clone());
     if let Some(form_spec) = form {
         initialize_form(state, plugin_index, &form_spec);
     }

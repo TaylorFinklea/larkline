@@ -149,16 +149,12 @@ pub fn submit(app: &mut App) {
         // Settings form: persist values to plugin store, then rerun.
         let plugin_index = form.plugin_index;
         if let Some(meta) = app.state.plugins.get(plugin_index) {
-            let store_path = crate::plugin::store::store_path_for(
-                &meta.name,
-                meta.plugin_group.as_deref(),
-            );
+            let store_path =
+                crate::plugin::store::store_path_for(&meta.name, meta.plugin_group.as_deref());
             let mut store = crate::plugin::store::PluginStore::load(store_path);
             for field in &form.fields {
                 let value = match field.spec.field_type {
-                    FieldType::Toggle => {
-                        if field.toggled { "true" } else { "false" }.to_string()
-                    }
+                    FieldType::Toggle => if field.toggled { "true" } else { "false" }.to_string(),
                     FieldType::Select { ref options } => options
                         .get(field.selected_option)
                         .cloned()
