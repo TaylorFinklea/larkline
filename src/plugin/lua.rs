@@ -8,6 +8,15 @@ use mlua::prelude::*;
 use crate::plugin::registry::DiscoveredPlugin;
 use crate::plugin::traits::{Plugin, PluginError, PluginMetadata, PluginOutput};
 
+/// Serialize JSON / Rust values into Lua while mapping `null`/`None` to Lua `nil`
+/// rather than the mlua null-sentinel userdata. This is the behavior plugins
+/// expect — idioms like `x and x ~= ""` break when `x` is a truthy userdata.
+fn null_safe_ser_options() -> mlua::serde::ser::Options {
+    mlua::serde::ser::Options::new()
+        .serialize_none_to_null(false)
+        .serialize_unit_to_null(false)
+}
+
 /// A plugin that runs Lua code in an embedded VM with access to the `lark.*` host API.
 ///
 /// Each call to [`execute()`](Plugin::execute) creates a fresh Lua VM — no state leaks between runs.
@@ -121,7 +130,8 @@ impl LuaPlugin {
             .create_function(|lua, s: String| {
                 let json_value: serde_json::Value =
                     serde_json::from_str(&s).map_err(LuaError::external)?;
-                lua.to_value(&json_value).map_err(LuaError::external)
+                lua.to_value_with(&json_value, null_safe_ser_options())
+                    .map_err(LuaError::external)
             })
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
         json_table
@@ -219,7 +229,9 @@ impl LuaPlugin {
             .create_function(move |lua, key: String| {
                 let guard = store_for_get.lock().expect("store lock");
                 match guard.get(&key) {
-                    Some(val) => lua.to_value(val).map_err(LuaError::external),
+                    Some(val) => lua
+                        .to_value_with(val, null_safe_ser_options())
+                        .map_err(LuaError::external),
                     None => Ok(LuaValue::Nil),
                 }
             })
@@ -301,7 +313,8 @@ impl LuaPlugin {
                     .await
                     .map_err(LuaError::external)?;
 
-                lua.to_value(&output).map_err(LuaError::external)
+                lua.to_value_with(&output, null_safe_ser_options())
+                    .map_err(LuaError::external)
             })
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
         lark.set("invoke", invoke_fn)
@@ -684,6 +697,32 @@ lark.register({
         );
         let output = plugin.execute().await.expect("execution failed");
         assert_eq!(output.title, "value");
+    }
+
+    #[tokio::test]
+    async fn lark_json_null_maps_to_lua_nil() {
+        // Regression: mlua's default to_value maps JSON null to a null-sentinel
+        // userdata, which is truthy. Plugins write `x and x ~= ""` expecting
+        // nil — a userdata sentinel silently slipped through and later crashed
+        // table.concat. lark.json.decode must produce nil for null.
+        let plugin = lua_plugin_from_source(
+            "json-null-test",
+            r#"
+lark.register({
+    on_run = function()
+        local decoded = lark.json.decode('{"a": null, "b": "ok"}')
+        local parts = {}
+        if decoded.a == nil then parts[#parts + 1] = "a-is-nil" end
+        -- The dangerous idiom — truthy + non-empty-string check.
+        if decoded.a and decoded.a ~= "" then parts[#parts + 1] = "a-leaked" end
+        if decoded.b == "ok" then parts[#parts + 1] = "b-is-ok" end
+        return { title = table.concat(parts, ","), items = {} }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution failed");
+        assert_eq!(output.title, "a-is-nil,b-is-ok");
     }
 
     #[tokio::test]
