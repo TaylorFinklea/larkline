@@ -34,6 +34,20 @@ local function bw_session(title)
     }
 end
 
+-- bw --response wraps every payload in a discriminated envelope. Unwrap to
+-- the useful payload so callers can work with it directly.
+--   list:     { object = "list", data = [...] }
+--   template: { object = "template", template = {...} }   (used by `status`)
+--   string:   { object = "string", data = "..." }         (used by `get totp`, `sync --last`)
+--   item/folder/collection: { object = "item"|..., ...fields inlined }
+local function unwrap_bw(d)
+    if type(d) ~= "table" then return d end
+    if d.object == "list" then return d.data or {} end
+    if d.object == "template" then return d.template or {} end
+    if d.object == "string" then return d.data or "" end
+    return d
+end
+
 -- Invoke `bw` with a session key via lark's sandboxed process API (no shell).
 -- Returns (data, error_payload_or_nil).
 local function run_bw(session, args, title)
@@ -61,7 +75,7 @@ local function run_bw(session, args, title)
             items = { { label = "bw error: " .. msg, icon = "!" } },
         }
     end
-    return parsed.data, nil
+    return unwrap_bw(parsed.data), nil
 end
 
 -- Preflight the session by asking bw for its status. bw never errors for a

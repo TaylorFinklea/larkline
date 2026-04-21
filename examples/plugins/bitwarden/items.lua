@@ -13,6 +13,20 @@ local function bw_session(title)
     }
 end
 
+-- bw --response wraps payloads in a discriminated envelope. Unwrap to the
+-- useful payload so callers can work with it directly.
+--   list:     { object = "list", data = [...] }
+--   template: { object = "template", template = {...} }   (used by `status`)
+--   string:   { object = "string", data = "..." }         (used by `get totp`)
+--   item/folder/etc: { object = "item", ...fields inlined }
+local function unwrap_bw(d)
+    if type(d) ~= "table" then return d end
+    if d.object == "list" then return d.data or {} end
+    if d.object == "template" then return d.template or {} end
+    if d.object == "string" then return d.data or "" end
+    return d
+end
+
 local function run_bw(session, args, title)
     local full = { "--session", session, "--response" }
     for _, a in ipairs(args) do full[#full + 1] = a end
@@ -27,7 +41,7 @@ local function run_bw(session, args, title)
     if not parsed.success then
         return nil, { title = title, items = { { label = "bw error: " .. (parsed.message or "unknown"), icon = "!" } } }
     end
-    return parsed.data, nil
+    return unwrap_bw(parsed.data), nil
 end
 
 local function verify_session(session, title)
