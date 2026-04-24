@@ -2359,7 +2359,7 @@ impl App {
                     scored.push((pidx, score, match_positions));
                 }
             }
-            scored.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            scored.sort_unstable_by_key(|row| std::cmp::Reverse(row.1));
 
             scored
                 .into_iter()

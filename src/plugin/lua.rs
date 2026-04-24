@@ -141,6 +141,40 @@ impl LuaPlugin {
         lark.set("json", json_table)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.base64 — standard-alphabet padded encode/decode. Plugins need this
+        // for HTTP Basic auth headers and similar wire formats; the shell-out
+        // workaround (printf '%s' 'x' | base64) is a fork per call and fragile
+        // across platforms.
+        let base64_table = lua
+            .create_table()
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let base64_encode = lua
+            .create_function(|_, s: mlua::String| {
+                use base64::Engine;
+                Ok(base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        base64_table
+            .set("encode", base64_encode)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        let base64_decode = lua
+            .create_function(|lua, s: String| {
+                use base64::Engine;
+                match base64::engine::general_purpose::STANDARD.decode(s.as_bytes()) {
+                    Ok(bytes) => Ok(LuaValue::String(lua.create_string(&bytes)?)),
+                    Err(_) => Ok(LuaValue::Nil),
+                }
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        base64_table
+            .set("decode", base64_decode)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        lark.set("base64", base64_table)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // lark.http — get/post sub-table.
         let http_table = lua
             .create_table()
@@ -697,6 +731,36 @@ lark.register({
         );
         let output = plugin.execute().await.expect("execution failed");
         assert_eq!(output.title, "value");
+    }
+
+    #[tokio::test]
+    async fn lark_base64_roundtrips_basic_auth_string() {
+        // The canonical Atlassian Basic auth header shape: email:token, base64.
+        // Verifies both encode + decode and the nil-on-invalid-input contract.
+        let plugin = lua_plugin_from_source(
+            "base64-test",
+            r#"
+lark.register({
+    on_run = function()
+        local creds = "taylor@example.com:abc123"
+        local encoded = lark.base64.encode(creds)
+        local decoded = lark.base64.decode(encoded)
+        local invalid = lark.base64.decode("!!!not-valid-base64!!!")
+        local parts = {
+            encoded,
+            (decoded == creds) and "roundtrip-ok" or "roundtrip-FAIL",
+            (invalid == nil) and "invalid-is-nil" or "invalid-FAIL",
+        }
+        return { title = table.concat(parts, "|"), items = {} }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution failed");
+        assert_eq!(
+            output.title,
+            "dGF5bG9yQGV4YW1wbGUuY29tOmFiYzEyMw==|roundtrip-ok|invalid-is-nil"
+        );
     }
 
     #[tokio::test]

@@ -903,6 +903,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "async-trait",
+ "base64",
  "crossterm",
  "mlua",
  "nucleo-matcher",

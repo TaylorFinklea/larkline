@@ -1,0 +1,103 @@
+[plugin]
+name = "Atlassian"
+description = "Search and manage Jira issues and Confluence pages — API token or OAuth"
+version = "0.1.0"
+author = "larkline"
+icon = "🟦"
+icon_nerd = "󰁯"
+category = "productivity"
+secrets = ["ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN"]
+
+[[settings]]
+id = "atlassian_host"
+label = "Atlassian host (API-token mode)"
+type = "text"
+default = ""
+description = "e.g. acme.atlassian.net — leave blank if using OAuth"
+
+[[settings]]
+id = "default_project_key"
+label = "Default Jira project key (for triage + new-issue)"
+type = "text"
+default = ""
+
+[[settings]]
+id = "max_results"
+label = "Max results per list"
+type = "select"
+options = ["25", "50", "100"]
+default = "50"
+
+[[commands]]
+name = "My Issues"
+description = "Jira issues assigned to you (not Done)"
+entry = "my-issues.lua"
+quickkey = "jmi"
+timeout_seconds = 15
+
+[[commands]]
+name = "Active Sprint"
+description = "Issues in your team's active sprint"
+entry = "sprint.lua"
+quickkey = "jsp"
+timeout_seconds = 15
+
+[[commands]]
+name = "Triage Queue"
+description = "Unassigned To-Do issues in the default project"
+entry = "triage.lua"
+quickkey = "jtr"
+timeout_seconds = 15
+
+[[commands]]
+name = "New Jira Issue"
+description = "Create a new Jira issue"
+entry = "new-issue.lua"
+quickkey = "jnw"
+timeout_seconds = 20
+prefetch = false
+
+[[commands]]
+name = "Transition Issue"
+description = "Move a Jira issue to a different status"
+entry = "transition.lua"
+quickkey = "jtx"
+timeout_seconds = 15
+prefetch = false
+
+[[commands]]
+name = "Comment on Issue"
+description = "Add a comment to a Jira issue"
+entry = "comment.lua"
+quickkey = "jcm"
+timeout_seconds = 15
+prefetch = false
+
+[[commands]]
+name = "Recent Pages"
+description = "Recently updated Confluence pages"
+entry = "confluence-recent.lua"
+quickkey = "cre"
+timeout_seconds = 15
+
+[[commands]]
+name = "Search Confluence"
+description = "Full-text search across Confluence"
+entry = "confluence-search.lua"
+quickkey = "csr"
+timeout_seconds = 15
+
+[[commands]]
+name = "My Pages"
+description = "Confluence pages you created, newest first"
+entry = "confluence-my-pages.lua"
+quickkey = "cmy"
+timeout_seconds = 15
+
+[[commands]]
+name = "New Page"
+description = "Create a new Confluence page"
+entry = "confluence-new-page.lua"
+quickkey = "cnw"
+timeout_seconds = 20
+prefetch = false

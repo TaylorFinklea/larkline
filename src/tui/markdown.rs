@@ -133,10 +133,8 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                         lines.push(Line::raw(""));
                     }
                 }
-                TagEnd::Item => {
-                    if !current_spans.is_empty() {
-                        lines.push(Line::from(std::mem::take(&mut current_spans)));
-                    }
+                TagEnd::Item if !current_spans.is_empty() => {
+                    lines.push(Line::from(std::mem::take(&mut current_spans)));
                 }
                 TagEnd::BlockQuote(_) => {
                     in_blockquote = false;
@@ -168,10 +166,8 @@ pub fn markdown_to_text<'a>(input: &str, theme: &Theme) -> Text<'a> {
                 ));
             }
 
-            Event::SoftBreak | Event::HardBreak => {
-                if !current_spans.is_empty() {
-                    lines.push(Line::from(std::mem::take(&mut current_spans)));
-                }
+            Event::SoftBreak | Event::HardBreak if !current_spans.is_empty() => {
+                lines.push(Line::from(std::mem::take(&mut current_spans)));
             }
 
             Event::Rule => {
