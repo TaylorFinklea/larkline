@@ -1,7 +1,34 @@
 -- Atlassian: My Issues — Jira issues assigned to you, not yet Done.
 -- Shared helpers copied from lib.lua (sandbox has no require).
 
-local function atlassian_auth()
+local function not_signed_in_error(title)
+    return {
+        title = title or "Atlassian",
+        items = {
+            {
+                label = "Not signed in to Atlassian",
+                detail = "Run `lark atlassian login` for OAuth, or set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host for API-token auth",
+                icon = "🔒",
+                actions = {
+                    { label = "Run `lark atlassian login`", kind = "shell",
+                      args = { "lark atlassian login" } },
+                    { label = "Open Atlassian API tokens page", kind = "open",
+                      args = { "https://id.atlassian.com/manage-profile/security/api-tokens" } },
+                },
+            },
+        },
+    }
+end
+
+local function lark_binary()
+    local b = lark.env("LARK_BINARY")
+    if b and b ~= "" then return b end
+    return "lark"
+end
+
+local function trim(s) return (s or ""):gsub("%s+$", "") end
+
+local function atlassian_auth(title)
     local email = lark.env("ATLASSIAN_EMAIL")
     local token = lark.env("ATLASSIAN_API_TOKEN")
     local host  = lark.store.get("atlassian_host")
@@ -16,20 +43,23 @@ local function atlassian_auth()
             site_url = site,
         }, nil
     end
-    return nil, {
-        title = "My Issues",
-        items = {
-            {
-                label = "Not signed in to Atlassian",
-                detail = "Set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host, or run `lark atlassian login`",
-                icon = "🔒",
-                actions = {
-                    { label = "Open Atlassian API tokens page", kind = "open",
-                      args = { "https://id.atlassian.com/manage-profile/security/api-tokens" } },
-                },
-            },
-        },
-    }
+
+    -- OAuth path: shell out to the running binary for a fresh access token.
+    local bin = lark_binary()
+    local tok = trim(lark.exec(bin, { "atlassian", "token" }))
+    if tok == "" then return nil, not_signed_in_error(title) end
+    local cid = trim(lark.exec(bin, { "atlassian", "cloudid" }))
+    if cid == "" then return nil, not_signed_in_error(title) end
+    local site = trim(lark.exec(bin, { "atlassian", "site" }))
+    if site == "" then site = "https://api.atlassian.com/ex/jira/" .. cid end
+
+    return {
+        mode = "oauth",
+        header = "Bearer " .. tok,
+        jira_base = "https://api.atlassian.com/ex/jira/" .. cid,
+        conf_base = "https://api.atlassian.com/ex/confluence/" .. cid,
+        site_url = site,
+    }, nil
 end
 
 local function url_encode(s)

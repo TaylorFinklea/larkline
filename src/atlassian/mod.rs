@@ -34,6 +34,7 @@ pub async fn handle_command(args: &[String]) -> Result<()> {
         Some("login") => oauth::login_command(&args[1..]).await,
         Some("token") => oauth::token_command().await,
         Some("cloudid") => cloudid_command(),
+        Some("site") => site_command(),
         Some("status") => status_command(),
         Some("logout") => logout_command(),
         Some(other) => {
@@ -55,6 +56,7 @@ fn print_usage() {
            lark atlassian login [--email <addr>]    Authorize in a browser\n  \
            lark atlassian token                     Print a valid access token (refreshes if needed)\n  \
            lark atlassian cloudid                   Print the active Atlassian cloud id\n  \
+           lark atlassian site                      Print the human-facing site URL (for browser links)\n  \
            lark atlassian status                    Show signed-in account + token state\n  \
            lark atlassian logout                    Delete all persisted auth state\n\n\
          Alternative: set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host setting for API-token auth."
@@ -73,6 +75,26 @@ fn cloudid_command() -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+/// Print the human-facing site URL (e.g. `https://acme.atlassian.net`) so plugins
+/// can build browser URLs without knowing the cloudid-proxy convention. Falls
+/// back to the cache file when the Keychain entry is missing (covers caches
+/// written by Phase B, which predate `ATLASSIAN_SITE_URL`).
+fn site_command() -> Result<()> {
+    if let Some(url) = keychain::get(keychain::ATLASSIAN_SITE_URL)? {
+        if !url.is_empty() {
+            println!("{url}");
+            return Ok(());
+        }
+    }
+    if let Ok(c) = cache::read() {
+        if !c.site_url.is_empty() {
+            println!("{}", c.site_url);
+            return Ok(());
+        }
+    }
+    std::process::exit(1);
 }
 
 fn logout_command() -> Result<()> {

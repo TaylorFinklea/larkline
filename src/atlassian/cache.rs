@@ -34,6 +34,10 @@ pub struct Cached {
     pub expires_at: i64,
     pub cloudid: String,
     pub email: String,
+    /// Human-facing site URL (e.g. `https://acme.atlassian.net`). Missing on
+    /// caches written by Phase B — `Option` keeps old JSON forward-compatible.
+    #[serde(default)]
+    pub site_url: String,
 }
 
 impl Cached {
@@ -114,6 +118,7 @@ mod tests {
             expires_at: now + 30,
             cloudid: "c".into(),
             email: "e@e.com".into(),
+            site_url: "https://example.atlassian.net".into(),
         };
         assert!(!stale.is_fresh(), "30s-to-expiry must not be fresh");
 
@@ -123,6 +128,7 @@ mod tests {
             expires_at: now + 120,
             cloudid: "c".into(),
             email: "e@e.com".into(),
+            site_url: "https://example.atlassian.net".into(),
         };
         assert!(fresh.is_fresh(), "120s-to-expiry must be fresh");
 
@@ -132,6 +138,7 @@ mod tests {
             expires_at: now - 10,
             cloudid: "c".into(),
             email: "e@e.com".into(),
+            site_url: "https://example.atlassian.net".into(),
         };
         assert!(!expired.is_fresh(), "expired cache must not be fresh");
     }
@@ -152,6 +159,7 @@ mod tests {
             expires_at: now_unix() + 3600,
             cloudid: "c".into(),
             email: "e@e.com".into(),
+            site_url: "https://example.atlassian.net".into(),
         };
         let raw = serde_json::to_string_pretty(&cached).unwrap();
         super::write_private(&path, &raw).expect("write");

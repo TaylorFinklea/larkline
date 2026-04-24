@@ -691,6 +691,20 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Inject `LARK_BINARY` into the secrets map so plugins can re-invoke the
+/// running binary via `lark.env("LARK_BINARY")`. Lets dev runs (target/debug/lark,
+/// not on `$PATH`) still dispatch subcommands like `lark atlassian token`.
+/// Using the secrets map avoids the unsafe `std::env::set_var` banned by our
+/// `forbid(unsafe_code)` lint.
+fn inject_lark_binary(secrets: &mut std::collections::HashMap<String, String>) {
+    if let Ok(exe) = std::env::current_exe() {
+        secrets.insert(
+            "LARK_BINARY".to_string(),
+            exe.to_string_lossy().into_owned(),
+        );
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Handle CLI flags before TUI init.
@@ -802,6 +816,7 @@ async fn main() -> Result<()> {
         .flat_map(|p| p.metadata().secrets.iter().map(String::as_str))
         .collect();
     config::resolve_keychain_secrets(&mut secrets, &declared_keys);
+    inject_lark_binary(&mut secrets);
 
     let mut terminal = tui::init()?;
     let mut app = app::App::new(plugins, &config, config_warnings, secrets);

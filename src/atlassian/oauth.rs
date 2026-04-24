@@ -307,6 +307,7 @@ pub async fn login_command(_args: &[String]) -> Result<()> {
 
     keychain::put(keychain::ATLASSIAN_REFRESH_TOKEN, refresh)?;
     keychain::put(keychain::ATLASSIAN_CLOUDID, &resource.id)?;
+    keychain::put(keychain::ATLASSIAN_SITE_URL, &resource.url)?;
     if !email.is_empty() {
         keychain::put(keychain::ATLASSIAN_ACCOUNT_EMAIL, &email)?;
     }
@@ -316,6 +317,7 @@ pub async fn login_command(_args: &[String]) -> Result<()> {
         expires_at: cache::now_unix() + tokens.expires_in,
         cloudid: resource.id.clone(),
         email: email.clone(),
+        site_url: resource.url.clone(),
     })?;
 
     eprintln!();
@@ -358,11 +360,13 @@ pub async fn token_command() -> Result<()> {
 
     let cloudid = keychain::get(keychain::ATLASSIAN_CLOUDID)?.unwrap_or_default();
     let email = keychain::get(keychain::ATLASSIAN_ACCOUNT_EMAIL)?.unwrap_or_default();
+    let site_url = keychain::get(keychain::ATLASSIAN_SITE_URL)?.unwrap_or_default();
     let cached = cache::Cached {
         access_token: tokens.access_token,
         expires_at: cache::now_unix() + tokens.expires_in,
         cloudid,
         email,
+        site_url,
     };
     cache::write(&cached)?;
     println!("{}", cached.access_token);

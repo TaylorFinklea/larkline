@@ -7,17 +7,48 @@
 --   issue_icon(), status_badge(), adf_to_plaintext(), adf_from_plaintext(),
 --   issue_browser_url(), url_encode(), build_query().
 
+-- Error payload for the "no auth configured" state. Used by atlassian_auth()
+-- when neither API-token env vars nor an OAuth refresh token are available.
+local function not_signed_in_error(title)
+    return {
+        title = title or "Atlassian",
+        items = {
+            {
+                label = "Not signed in to Atlassian",
+                detail = "Run `lark atlassian login` for OAuth, or set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host for API-token auth",
+                icon = "🔒",
+                actions = {
+                    { label = "Run `lark atlassian login`", kind = "shell",
+                      args = { "lark atlassian login" } },
+                    { label = "Open Atlassian API tokens page", kind = "open",
+                      args = { "https://id.atlassian.com/manage-profile/security/api-tokens" } },
+                },
+            },
+        },
+    }
+end
+
+-- Path to the running `lark` binary. In brew / cargo-install it's on PATH;
+-- under `cargo run` dev we pick it up from the host-injected LARK_BINARY value.
+local function lark_binary()
+    local b = lark.env("LARK_BINARY")
+    if b and b ~= "" then return b end
+    return "lark"
+end
+
+local function trim(s) return (s or ""):gsub("%s+$", "") end
+
 -- Resolve auth on each invocation. Returns (auth_table, err_output).
 --   auth = {
 --     mode       = "token" | "oauth",
 --     header     = "Basic ..." | "Bearer ...",
---     jira_base  = "https://acme.atlassian.net" or "https://api.atlassian.com/ex/jira/<cloudid>",
---     conf_base  = "https://acme.atlassian.net/wiki" or "https://api.atlassian.com/ex/confluence/<cloudid>/wiki",
---     site_url   = "https://acme.atlassian.net",          -- for browser links (issue URLs, page URLs)
+--     jira_base  = "https://acme.atlassian.net"       or "https://api.atlassian.com/ex/jira/<cloudid>",
+--     conf_base  = "https://acme.atlassian.net/wiki"  or "https://api.atlassian.com/ex/confluence/<cloudid>",
+--     site_url   = "https://acme.atlassian.net",      -- always the human-facing URL (for browser links)
 --   }
--- Phase A only implements the token branch. The OAuth branch returns a "run
--- `lark atlassian login`" error with a chain action; Phase C replaces it.
-local function atlassian_auth()
+-- API-token auth wins when present — some users override on a per-session
+-- basis to bypass a stale OAuth refresh.
+local function atlassian_auth(title)
     local email = lark.env("ATLASSIAN_EMAIL")
     local token = lark.env("ATLASSIAN_API_TOKEN")
     local host  = lark.store.get("atlassian_host")
@@ -34,20 +65,22 @@ local function atlassian_auth()
         }, nil
     end
 
-    -- OAuth stub — Phase C replaces with real `lark atlassian token` dispatch.
-    return nil, {
-        title = "Atlassian",
-        items = {
-            {
-                label = "Not signed in to Atlassian",
-                detail = "Set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host, or run `lark atlassian login` (v0.12.0-B)",
-                icon = "🔒",
-                actions = {
-                    { label = "Open sign-in docs", kind = "open", args = { "https://id.atlassian.com/manage-profile/security/api-tokens" } },
-                },
-            },
-        },
-    }
+    -- OAuth path: call back into the running binary to get a fresh access token.
+    local bin = lark_binary()
+    local tok = trim(lark.exec(bin, { "atlassian", "token" }))
+    if tok == "" then return nil, not_signed_in_error(title) end
+    local cid = trim(lark.exec(bin, { "atlassian", "cloudid" }))
+    if cid == "" then return nil, not_signed_in_error(title) end
+    local site = trim(lark.exec(bin, { "atlassian", "site" }))
+    if site == "" then site = "https://api.atlassian.com/ex/jira/" .. cid end
+
+    return {
+        mode      = "oauth",
+        header    = "Bearer " .. tok,
+        jira_base = "https://api.atlassian.com/ex/jira/" .. cid,
+        conf_base = "https://api.atlassian.com/ex/confluence/" .. cid,
+        site_url  = site,
+    }, nil
 end
 
 -- Minimal URL percent-encoder. Handles the JQL/CQL special chars plus spaces.

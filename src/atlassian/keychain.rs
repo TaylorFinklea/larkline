@@ -14,11 +14,16 @@ use anyhow::{Context, Result, bail};
 pub const ATLASSIAN_REFRESH_TOKEN: &str = "ATLASSIAN_REFRESH_TOKEN";
 pub const ATLASSIAN_CLOUDID: &str = "ATLASSIAN_CLOUDID";
 pub const ATLASSIAN_ACCOUNT_EMAIL: &str = "ATLASSIAN_ACCOUNT_EMAIL";
+/// Human-facing URL of the Atlassian site (e.g. `https://acme.atlassian.net`).
+/// Distinct from the `/ex/jira/<cloudid>` proxy URL used for API calls: this
+/// is what plugins hand to the browser for "Open in browser" actions.
+pub const ATLASSIAN_SITE_URL: &str = "ATLASSIAN_SITE_URL";
 
-pub const ALL_KEYS: [&str; 3] = [
+pub const ALL_KEYS: [&str; 4] = [
     ATLASSIAN_REFRESH_TOKEN,
     ATLASSIAN_CLOUDID,
     ATLASSIAN_ACCOUNT_EMAIL,
+    ATLASSIAN_SITE_URL,
 ];
 
 /// Store `value` at `service`, upserting if present. macOS-only.
