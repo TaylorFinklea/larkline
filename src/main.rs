@@ -11,6 +11,7 @@ use tracing::info;
 mod action;
 mod app;
 mod app_output;
+mod atlassian;
 mod config;
 mod form_actions;
 mod history;
@@ -726,6 +727,9 @@ async fn main() -> Result<()> {
     }
     if args.get(1).is_some_and(|a| a == "plugin") {
         return handle_plugin_command(&args[2..]);
+    }
+    if args.get(1).is_some_and(|a| a == "atlassian") {
+        return atlassian::handle_command(&args[2..]).await;
     }
 
     // Parse --query flag (pre-fill search on launch).

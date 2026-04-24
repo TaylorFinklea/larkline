@@ -60,6 +60,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 rpassword = "7.4.0"
 base64 = "0.22"
+sha2 = "0.10"
+rand = "0.9"
 
 [dev-dependencies]
 tempfile = "3"
