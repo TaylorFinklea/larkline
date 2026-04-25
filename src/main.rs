@@ -9,6 +9,7 @@ use anyhow::Result;
 use tracing::info;
 
 mod action;
+mod actions;
 mod app;
 mod app_output;
 mod atlassian;
