@@ -130,6 +130,72 @@ fn init_plugin(name: &str, shell: bool, multi: bool) -> Result<()> {
     Ok(())
 }
 
+/// JSON shape for `lark list --json`. Decoupled from the internal
+/// `PluginMetadata` struct so the wire format can evolve independently.
+/// Consumed by `lark.nvim` (Telescope source) and any other headless tooling.
+#[derive(serde::Serialize)]
+// Four booleans are part of the JSON contract (has_settings / is_widget /
+// is_mini_app / streaming). Each is independent — flattening into a bitfield
+// would hurt downstream consumer ergonomics with no real win.
+#[allow(clippy::struct_excessive_bools)]
+struct ListEntry {
+    name: String,
+    description: String,
+    icon: String,
+    icon_nerd: Option<String>,
+    category: Option<String>,
+    plugin_group: Option<String>,
+    quickkey: Option<String>,
+    keybinding: Option<String>,
+    /// "Lua" or "Script" — backend type.
+    kind: &'static str,
+    author: String,
+    version: String,
+    secrets: Vec<String>,
+    has_settings: bool,
+    is_widget: bool,
+    is_mini_app: bool,
+    streaming: bool,
+}
+
+/// Handle `lark list [--json]` — enumerate every discovered plugin/command.
+fn handle_list_command(_args: &[String]) -> Result<()> {
+    let (cfg, _) = config::load().unwrap_or_else(|e| {
+        eprintln!("larkline: config error ({e}), using defaults");
+        (config::Config::default(), Vec::new())
+    });
+
+    let discovered = plugin::registry::scan(&cfg.general.plugin_dirs)?;
+
+    let entries: Vec<ListEntry> = discovered
+        .into_iter()
+        .map(|d| ListEntry {
+            name: d.metadata.name,
+            description: d.metadata.description,
+            icon: d.metadata.icon,
+            icon_nerd: d.metadata.icon_nerd,
+            category: d.metadata.category,
+            plugin_group: d.metadata.plugin_group,
+            quickkey: d.metadata.quickkey,
+            keybinding: d.metadata.keybinding,
+            kind: match d.kind {
+                plugin::registry::PluginKind::Lua => "Lua",
+                plugin::registry::PluginKind::Script => "Script",
+            },
+            author: d.metadata.author,
+            version: d.metadata.version,
+            secrets: d.metadata.secrets,
+            has_settings: !d.metadata.settings_spec.is_empty(),
+            is_widget: d.metadata.widget,
+            is_mini_app: d.metadata.mini_app,
+            streaming: d.metadata.streaming,
+        })
+        .collect();
+
+    println!("{}", serde_json::to_string_pretty(&entries)?);
+    Ok(())
+}
+
 /// Execute a plugin by name and print its JSON output to stdout.
 async fn invoke_plugin(name: &str) -> Result<()> {
     let (cfg, _) = config::load().unwrap_or_else(|e| {
@@ -744,6 +810,9 @@ async fn main() -> Result<()> {
     }
     if args.get(1).is_some_and(|a| a == "atlassian") {
         return atlassian::handle_command(&args[2..]).await;
+    }
+    if args.get(1).is_some_and(|a| a == "list") {
+        return handle_list_command(&args[2..]);
     }
 
     // Parse --query flag (pre-fill search on launch).
