@@ -115,16 +115,18 @@ Raycast-parity Bitwarden plugin using the official `bw` CLI. Requires `BW_SESSIO
 - [x] Phase F: Item detail renderer with card (number/CVV/exp/brand), identity (address/phone/SSN/etc), custom fields (field_type 1 = hidden, redacted)
 - [x] Phase G: roadmap + handoff docs + `rbw` backlog
 
-### v0.12.0 — Jira + Confluence (future)
+### v0.12.0 — Atlassian (Jira + Confluence) deep-dive
 
-Single plugin group covering both Atlassian products, dual-auth:
+Single plugin covering both Atlassian products with both auth paths supported:
 
-- **API token path:** user provides `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` env vars, host base URL in settings
-- **OAuth 2.0 path:** 3LO authorization code flow with token refresh, stored via `lark secret`
-- Commands (Jira): my-issues, my-cycle/sprint, triage queue, create-issue form, transition, comment
-- Commands (Confluence): recent pages, search, my-pages, create-page form
+- [x] Phase A: API-token path (`ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` + `atlassian_host` setting), `lark.base64` Lua host API, plugin scaffold + my-issues
+- [x] Phase B: OAuth 2.0 (3LO + PKCE) subsystem — `lark atlassian login/token/cloudid/site/status/logout` subcommands. Refresh tokens in macOS Keychain, access tokens in `~/.cache/larkline/atlassian-access.json` (mode 0600). Hand-rolled HTTP callback listener (no new dep).
+- [x] Phase C: Plugin auth dispatcher in `lib.lua` — falls through to OAuth via `lark atlassian token` when API-token vars are absent. New `LARK_BINARY` host injection so dev runs (target/debug) can re-invoke themselves.
+- [x] Phase D: Jira commands — sprint, triage, new-issue (form + ADF), transition (chain), comment (chain).
+- [x] Phase E: Confluence commands — recent, search (CQL), my-pages, new-page (storage format).
+- [x] Phase F: roadmap + handoff docs + CHANGELOG + `docs/plugins/atlassian.md`.
 
-Deferred until OAuth flow is designed — needs a local HTTP callback listener or device-code UX decision.
+**Pre-publish gate (Taylor):** OAuth `BAKED_CLIENT_ID` in `src/atlassian/oauth.rs:22` is a placeholder. Register a public OAuth 2.0 (3LO) app at https://developer.atlassian.com/console/myapps/ and either bake the real id or document `LARKLINE_ATLASSIAN_CLIENT_ID` env override. API-token path is fully usable today; OAuth path is gated.
 
 ### Future (unordered — pick theme per release)
 

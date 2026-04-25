@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.12.0 — Atlassian (Jira + Confluence) deep-dive (unreleased)
+
+Single plugin covering both Jira and Confluence Cloud, with two auth paths.
+
+### Plugin (10 commands)
+
+- **Jira (6):** My Issues, Active Sprint, Triage Queue, New Issue (form), Transition Issue (chain), Comment on Issue.
+- **Confluence (4):** Recent Pages, Search (CQL), My Pages, New Page (storage format).
+- ADF (Atlassian Document Format) reducer covers the common nodes (paragraph, heading, text, bulletList, codeBlock, link). Unsupported nodes render as `[unsupported: <type>]`.
+
+### Auth — both paths supported
+
+- **API token** (zero new infrastructure): set `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` via `lark secret set`, plus `atlassian_host` in plugin settings. Same pattern as the github / linear / homeassistant plugins.
+- **OAuth 2.0 (3LO + PKCE)**: run `lark atlassian login` once. Refresh tokens persist in macOS Keychain; access tokens cache to `~/.cache/larkline/atlassian-access.json` (0600). Plugins call back via `lark atlassian token` (silently refreshes when needed).
+
+When both are configured, the API-token path wins — useful for per-session overrides when OAuth refresh is misbehaving.
+
+### New CLI subcommands
+
+- `lark atlassian login` — browser-based authorization with a hand-rolled one-shot HTTP callback listener (no new HTTP-server dep).
+- `lark atlassian token` / `cloudid` / `site` — read state for plugins.
+- `lark atlassian status` — debug info (signed-in account, expiry).
+- `lark atlassian logout` — clear all persisted auth state.
+
+### New Lua host APIs
+
+- `lark.base64.encode(s)` / `lark.base64.decode(s)` — backed by the `base64` crate. Used by the API-token auth path; useful for any plugin that needs HTTP Basic auth.
+- `LARK_BINARY` injected into the secrets map so plugins can re-invoke the running binary via `lark.exec(lark.env("LARK_BINARY") or "lark", {...})`. Lets dev runs (target/debug, not on `$PATH`) dispatch their own subcommands.
+
+### Dependencies
+
+- `base64` (already transitive via reqwest, now a direct dep).
+- `sha2` (new, ~20k LOC) — for PKCE S256 challenge.
+- `rand` (new direct dep, was transitive) — 32-byte CSRF state + PKCE verifier.
+
+### Pre-publish gate
+
+`BAKED_CLIENT_ID` in `src/atlassian/oauth.rs` is currently a placeholder. Before shipping the OAuth path, register a public OAuth 2.0 (3LO) app at <https://developer.atlassian.com/console/myapps/>. Users can self-host via `LARKLINE_ATLASSIAN_CLIENT_ID` env override regardless. The API-token path has no such gate.
+
+### Drive-by
+
+- Fixed two pre-existing rust 1.95 clippy lints (sort_unstable_by → sort_unstable_by_key + Reverse in `app.rs`, redundant `if`-inside-match collapses in `markdown.rs`).
+- `forbid(unsafe_code)` continues to hold — the OAuth subsystem and `LARK_BINARY` injection both stay clear of `std::env::set_var` (Rust 2024's unsafe API).
+
+## v0.11.0 — Bitwarden deep-dive (unreleased)
+
+Raycast-parity plugin for the official `bw` CLI. 6 commands: Search Vault, Favorites, Folders, Generate Password, Sync Vault, Lock Vault. Supports all four item types (login / note / card / identity) with type-aware copy actions. Custom fields with hidden-type redaction in the detail view. Session lookup via `BW_SESSION` env var.
+
+Plus follow-up fixes:
+
+- **bw `--response` envelope unwrapping** (`9b84d6b`): the plugin was reading `parsed.data.userEmail` / `.status` directly when those live one level deeper under `.template`. Symptom was "Account unknown" + "No items in vault" even on an unlocked vault. Fix is a single `unwrap_bw` helper in each command file.
+- **`lark.json.decode` null-safety** (`50cfa79`): mlua's default `to_value` mapped JSON `null` to a truthy userdata sentinel, so idiomatic plugin guards like `if x and x ~= "" then` silently leaked the sentinel through and crashed `table.concat`. `lark.json.decode` now produces Lua `nil` for null. Affects every plugin, fixes a class of latent bugs.
+- **Stale-session preflight** (`7b4ee48`): `bw --response` returns `success: true, data: []` for a stale `BW_SESSION` instead of raising an error. Added an explicit `bw status` preflight that checks `status == "unlocked"` AND `userEmail` is non-empty.
+
 ## v0.10.0 — Distribution + lark.nvim v2 (unreleased)
 
 Rollup release — ships v0.6.0 through v0.10.0 accumulated on `main` since v0.5.0.
