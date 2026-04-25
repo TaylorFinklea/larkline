@@ -128,11 +128,25 @@ Single plugin covering both Atlassian products with both auth paths supported:
 
 **Pre-publish gate (Taylor):** OAuth `BAKED_CLIENT_ID` in `src/atlassian/oauth.rs:22` is a placeholder. Register a public OAuth 2.0 (3LO) app at https://developer.atlassian.com/console/myapps/ and either bake the real id or document `LARKLINE_ATLASSIAN_CLIENT_ID` env override. API-token path is fully usable today; OAuth path is gated.
 
+### v0.13.0 — lark.nvim v3 (Telescope-native picker)
+
+Headless contract on the Rust side, Telescope source on the Lua side. Plus the `lark.nvim/` subdirectory was extracted to its own public repo at <https://github.com/TaylorFinklea/lark.nvim>.
+
+- [x] Phase A: `lark list --json` headless plugin enumeration
+- [x] Phase B: extract action dispatcher from TUI to `crate::actions` for CLI reuse
+- [x] Phase C: `lark action <plugin> --action-json '<JSON>' [--confirm]` subcommand with three outcome variants (`side` / `chained` / `needs_confirmation`)
+- [x] Phase D: extract `lark.nvim/` to standalone repo at TaylorFinklea/lark.nvim (fresh history)
+- [x] Phase E: Telescope plugin list picker (`lua/lark/cli.lua`, `picker.lua`, `lua/telescope/_extensions/lark.lua`)
+- [x] Phase F: results picker + action dispatch + chain stacking (`lua/lark/results.lua`, `actions.lua`)
+- [x] Phase G: floating-terminal fallback for forms / mini-apps + new keymap (`<C-l>` Telescope, `<C-l><C-l>` TUI)
+- [x] Phase H: roadmap + current-state + CHANGELOG + `docs/plugins/lark-nvim.md`
+
 ### Future (unordered — pick theme per release)
 
-- **lark.nvim v3:** Telescope integration (needs `lark list --json` first), action streaming lark → nvim buffer updates in real time
-- **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries
-- **More plugin deep-dives:** PagerDuty, 1Password CLI (deferred — user doesn't use these)
+- **lark.nvim v4:** action-result previewers (Jira issue body, Confluence page rendered in the picker preview pane); two-way streaming so `on_action` updates a Neovim buffer in real time.
+- **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries.
+- **More plugin deep-dives:** PagerDuty, 1Password CLI (deferred — Taylor doesn't use these).
+- **Atlassian polish:** `lark atlassian switch` for multi-cloud orgs; register the OAuth app under Taylor's developer account so OAuth path works without `LARKLINE_ATLASSIAN_CLIENT_ID` override.
 
 ---
 

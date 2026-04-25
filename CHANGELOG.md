@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.13.0 — lark.nvim v3 (Telescope-native picker) (unreleased)
+
+The headless contract for the new `lark.nvim` v3 Telescope integration. The nvim plugin now lives at <https://github.com/TaylorFinklea/lark.nvim>.
+
+### New CLI subcommands
+
+- `lark list --json` — emits the full plugin catalog as JSON to stdout. One entry per discovered command (multi-command plugins flatten to multiple entries with a `plugin_group` field). Stable wire format consumed by `lark.nvim`'s Telescope source.
+- `lark action <plugin> --action-json '<JSON>' [--confirm]` — fires a single `ItemAction` against a plugin and prints a tagged outcome. Three outcome variants:
+  - `side` { summary, stdout? } — clipboard / open / shell / nvim_edit side-effect.
+  - `chained` { output: PluginOutput } — chain / update_pane returned a new view.
+  - `needs_confirmation` { command, args, description } — confirm-required shell action; caller prompts and re-issues with `--confirm`.
+
+Both new subcommands inherit the same SECRETS scope as the TUI, so `lark.env(KEY)` calls inside plugins resolve identically. (Drive-by fix: `lark invoke` now does this too.)
+
+### Action dispatcher extraction
+
+Action execution was lifted out of the TUI's `App::execute_item_action` into a CLI-friendly `crate::actions` module:
+
+- `actions::execute(action, plugin) -> Result<ActionResult>` — TUI-free dispatcher. Consumed by `lark action`.
+- `actions::side_effects::{open_url, copy_to_clipboard, nvim_open_file}` — the building blocks (moved from `app.rs` private helpers).
+
+The TUI's behavior is unchanged in v0.13.0; consolidation onto the new dispatcher is deferred.
+
+### lark.nvim v3 (separate repo)
+
+`<https://github.com/TaylorFinklea/lark.nvim>` — declared as a peer-dependency on `nvim-telescope/telescope.nvim`. The nvim plugin gains:
+
+- `:Telescope lark` opens a Telescope picker over the larkline plugin catalog.
+- `<CR>` invokes the plugin and pushes a results picker on top.
+- `<CR>` on a result row fires the primary action; `<C-a>` opens an action sub-picker.
+- Chain actions push fresh pickers on the stack — `<Esc>` returns.
+- Forms (Bitwarden Generate Password, Atlassian New Issue) and mini-apps (Docker Dashboard) automatically fall back to the legacy floating-terminal TUI.
+- New default keymap: `<C-l>` = Telescope picker, `<C-l><C-l>` = floating-terminal TUI.
+
+Requires `lark` v0.13.0+ on `$PATH`.
+
+### Repo extraction
+
+The `lark.nvim/` subdirectory was removed from this repo and extracted to `TaylorFinklea/lark.nvim` (fresh history). A pointer doc at `lark.nvim.md` documents the new install URL. v2 commit history for the floating-terminal wrapper is still retrievable here via `git log -- lark.nvim/`.
+
+### Tests
+
+194 tests pass (was 186 pre-v0.13.0). New: `tests/cli_list_test.rs` (1 test, JSON shape contract), `tests/cli_action_test.rs` (4 tests, all three outcome variants + unknown-plugin error path), `actions::tests` (2 unit tests).
+
 ## v0.12.0 — Atlassian (Jira + Confluence) deep-dive (unreleased)
 
 Single plugin covering both Jira and Confluence Cloud, with two auth paths.
