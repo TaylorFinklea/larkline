@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::info;
 
 mod action;
@@ -159,6 +159,101 @@ struct ListEntry {
     streaming: bool,
 }
 
+/// JSON shape emitted by `lark action`. Wire format consumed by `lark.nvim`'s
+/// Telescope source — every variant maps onto a Telescope-side handler.
+#[derive(serde::Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+enum ActionWireOutcome {
+    /// Side-effect happened; show a notification + optional shell stdout.
+    Side {
+        summary: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stdout: Option<String>,
+    },
+    /// Chain produced a new view; embed it so Telescope can push a new picker.
+    /// Boxed to keep the enum's stack size balanced — `PluginOutput` is the
+    /// largest variant body and would dwarf `Side` / `NeedsConfirmation`.
+    Chained {
+        output: Box<plugin::traits::PluginOutput>,
+    },
+    /// User confirmation required before running a shell command. The Lua
+    /// caller prompts via `vim.ui.confirm` and re-issues the call with `--confirm`.
+    NeedsConfirmation {
+        command: String,
+        args: Vec<String>,
+        description: String,
+    },
+}
+
+/// Handle `lark action <plugin> --action-json '<JSON>' [--confirm]` —
+/// dispatch a single action against a plugin and print the outcome as JSON.
+async fn handle_action_command(args: &[String]) -> Result<()> {
+    let plugin_name = args.first().ok_or_else(|| {
+        anyhow::anyhow!("Usage: lark action <PLUGIN_NAME> --action-json '<JSON>'")
+    })?;
+
+    // Hand-rolled flag parsing matches the existing pattern in main.rs (no clap).
+    let mut action_json: Option<&String> = None;
+    let mut confirm = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--action-json" => {
+                action_json = args.get(i + 1);
+                i += 2;
+            }
+            "--confirm" => {
+                confirm = true;
+                i += 1;
+            }
+            other => anyhow::bail!("lark action: unknown argument `{other}`"),
+        }
+    }
+    let action_json = action_json
+        .ok_or_else(|| anyhow::anyhow!("--action-json '<ItemAction JSON>' is required"))?;
+
+    let action: plugin::traits::ItemAction = serde_json::from_str(action_json)
+        .with_context(|| format!("invalid --action-json: {action_json}"))?;
+
+    // Confirmation gate: a confirm-required shell action without `--confirm`
+    // surfaces a `needs_confirmation` outcome so the caller (Telescope) can
+    // prompt the user and re-issue the call.
+    if action.confirm && !confirm && action.kind == plugin::traits::ActionKind::Shell {
+        let cmd = action.args.first().cloned().unwrap_or_default();
+        let cmd_args: Vec<String> = action.args.iter().skip(1).cloned().collect();
+        let outcome = ActionWireOutcome::NeedsConfirmation {
+            command: cmd,
+            args: cmd_args,
+            description: action.label.clone(),
+        };
+        println!("{}", serde_json::to_string_pretty(&outcome)?);
+        return Ok(());
+    }
+
+    let ctx = build_plugin_context()?;
+    let target = find_plugin(&ctx.plugins, plugin_name)?.clone();
+
+    let result = plugin::engine::SECRETS
+        .scope(
+            ctx.secrets,
+            plugin::engine::PLUGIN_LIST.scope(
+                ctx.plugins,
+                plugin::engine::INVOKE_DEPTH
+                    .scope(0, async { actions::execute(&action, &target).await }),
+            ),
+        )
+        .await?;
+
+    let outcome = match result {
+        actions::ActionResult::Side { summary, stdout } => {
+            ActionWireOutcome::Side { summary, stdout }
+        }
+        actions::ActionResult::Chained(output) => ActionWireOutcome::Chained { output },
+    };
+    println!("{}", serde_json::to_string_pretty(&outcome)?);
+    Ok(())
+}
+
 /// Handle `lark list [--json]` — enumerate every discovered plugin/command.
 fn handle_list_command(_args: &[String]) -> Result<()> {
     let (cfg, _) = config::load().unwrap_or_else(|e| {
@@ -197,8 +292,15 @@ fn handle_list_command(_args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Execute a plugin by name and print its JSON output to stdout.
-async fn invoke_plugin(name: &str) -> Result<()> {
+/// Bundle of state both `invoke` and `action` need: the discovered plugin Vec,
+/// the secrets map ready for `SECRETS::scope`, and the `Arc` of plugins for
+/// `PLUGIN_LIST::scope`. Built once via [`build_plugin_context`].
+struct PluginContext {
+    plugins: Arc<Vec<Arc<dyn plugin::Plugin>>>,
+    secrets: Arc<std::collections::HashMap<String, String>>,
+}
+
+fn build_plugin_context() -> Result<PluginContext> {
     let (cfg, _) = config::load().unwrap_or_else(|e| {
         eprintln!("larkline: config error ({e}), using defaults");
         (config::Config::default(), Vec::new())
@@ -215,21 +317,47 @@ async fn invoke_plugin(name: &str) -> Result<()> {
         }
     }
 
+    // Mirror the TUI's secrets pipeline so plugins invoked headlessly see the
+    // same `lark.env(KEY)` results as inside the TUI.
+    let mut secrets = config::load_secrets();
+    let declared_keys: Vec<&str> = discovered
+        .iter()
+        .flat_map(|d| d.metadata.secrets.iter().map(String::as_str))
+        .collect();
+    config::resolve_keychain_secrets(&mut secrets, &declared_keys);
+    inject_lark_binary(&mut secrets);
+
     let plugins: Vec<Arc<dyn plugin::Plugin>> =
         discovered.into_iter().map(plugin::build_plugin).collect();
 
-    let target = plugins
+    Ok(PluginContext {
+        plugins: Arc::new(plugins),
+        secrets: Arc::new(secrets),
+    })
+}
+
+fn find_plugin<'a>(
+    plugins: &'a [Arc<dyn plugin::Plugin>],
+    name: &str,
+) -> Result<&'a Arc<dyn plugin::Plugin>> {
+    plugins
         .iter()
         .find(|p| p.metadata().name == name)
-        .ok_or_else(|| anyhow::anyhow!("plugin not found: {name}"))?
-        .clone();
+        .ok_or_else(|| anyhow::anyhow!("plugin not found: {name}"))
+}
 
-    let all_plugins = Arc::new(plugins);
+/// Execute a plugin by name and print its JSON output to stdout.
+async fn invoke_plugin(name: &str) -> Result<()> {
+    let ctx = build_plugin_context()?;
+    let target = find_plugin(&ctx.plugins, name)?.clone();
 
-    let output = plugin::engine::PLUGIN_LIST
+    let output = plugin::engine::SECRETS
         .scope(
-            all_plugins,
-            plugin::engine::INVOKE_DEPTH.scope(0, async { target.execute().await }),
+            ctx.secrets,
+            plugin::engine::PLUGIN_LIST.scope(
+                ctx.plugins,
+                plugin::engine::INVOKE_DEPTH.scope(0, async { target.execute().await }),
+            ),
         )
         .await?;
 
@@ -772,48 +900,57 @@ fn inject_lark_binary(secrets: &mut std::collections::HashMap<String, String>) {
     }
 }
 
+/// Dispatch CLI subcommands that should run *before* TUI / config init.
+/// Returns `Ok(Some(_))` when a subcommand handled the invocation (caller
+/// should propagate). `Ok(None)` means no subcommand matched and the TUI
+/// should launch.
+async fn dispatch_subcommand(args: &[String]) -> Result<Option<()>> {
+    let Some(first) = args.get(1) else {
+        return Ok(None);
+    };
+    match first.as_str() {
+        "--help" | "-h" => {
+            print_help();
+            Ok(Some(()))
+        }
+        "--version" => {
+            println!("lark {}", env!("CARGO_PKG_VERSION"));
+            Ok(Some(()))
+        }
+        "--print-alias" => {
+            let shell = args.get(2).map_or("zsh", String::as_str);
+            print_alias(shell);
+            Ok(Some(()))
+        }
+        "init-plugin" => {
+            let name = args.get(2).ok_or_else(|| {
+                anyhow::anyhow!("Usage: lark init-plugin <NAME> [--shell|--multi]")
+            })?;
+            let shell = args.iter().any(|a| a == "--shell");
+            let multi = args.iter().any(|a| a == "--multi");
+            init_plugin(name, shell, multi).map(Some)
+        }
+        "invoke" => {
+            let name = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("Usage: lark invoke <PLUGIN_NAME>"))?;
+            invoke_plugin(name).await.map(Some)
+        }
+        "secret" => handle_secret_command(&args[2..]).map(Some),
+        "plugin" => handle_plugin_command(&args[2..]).map(Some),
+        "atlassian" => atlassian::handle_command(&args[2..]).await.map(Some),
+        "list" => handle_list_command(&args[2..]).map(Some),
+        "action" => handle_action_command(&args[2..]).await.map(Some),
+        _ => Ok(None),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Handle CLI flags before TUI init.
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).is_some_and(|a| a == "--help" || a == "-h") {
-        print_help();
+    if let Some(()) = dispatch_subcommand(&args).await? {
         return Ok(());
-    }
-    if args.get(1).is_some_and(|a| a == "--version") {
-        println!("lark {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-    if args.get(1).is_some_and(|a| a == "--print-alias") {
-        let shell = args.get(2).map_or("zsh", String::as_str);
-        print_alias(shell);
-        return Ok(());
-    }
-    if args.get(1).is_some_and(|a| a == "init-plugin") {
-        let name = args
-            .get(2)
-            .ok_or_else(|| anyhow::anyhow!("Usage: lark init-plugin <NAME> [--shell|--multi]"))?;
-        let shell = args.iter().any(|a| a == "--shell");
-        let multi = args.iter().any(|a| a == "--multi");
-        return init_plugin(name, shell, multi);
-    }
-    if args.get(1).is_some_and(|a| a == "invoke") {
-        let name = args
-            .get(2)
-            .ok_or_else(|| anyhow::anyhow!("Usage: lark invoke <PLUGIN_NAME>"))?;
-        return invoke_plugin(name).await;
-    }
-    if args.get(1).is_some_and(|a| a == "secret") {
-        return handle_secret_command(&args[2..]);
-    }
-    if args.get(1).is_some_and(|a| a == "plugin") {
-        return handle_plugin_command(&args[2..]);
-    }
-    if args.get(1).is_some_and(|a| a == "atlassian") {
-        return atlassian::handle_command(&args[2..]).await;
-    }
-    if args.get(1).is_some_and(|a| a == "list") {
-        return handle_list_command(&args[2..]);
     }
 
     // Parse --query flag (pre-fill search on launch).

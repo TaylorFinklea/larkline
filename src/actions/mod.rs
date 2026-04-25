@@ -103,8 +103,9 @@ fn execute_shell(action: &ItemAction) -> Result<ActionResult> {
     } else {
         format!("{stdout}{stderr}")
     };
+    let exit_code = output.status.code().unwrap_or(-1);
     Ok(ActionResult::Side {
-        summary: format!("{cmd} (exit {})", output.status),
+        summary: format!("{cmd} (exit {exit_code})"),
         stdout: Some(combined),
     })
 }
