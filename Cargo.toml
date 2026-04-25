@@ -20,7 +20,6 @@ exclude = [
     "scripts/**",
     ".github/**",
     "docs/**",
-    "lark.nvim/**",
     "tests/fixtures/**",
     "packaging/**",
     "AGENTS.md",
