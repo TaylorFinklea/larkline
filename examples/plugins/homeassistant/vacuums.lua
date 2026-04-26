@@ -1,5 +1,6 @@
 -- Vacuums — robot vacuum entities with start, pause, stop, dock, and locate.
 
+-- SHARED: get_config template (canonical copy in helpers.lua; only the title literal in error items diverges per file)
 local function get_config()
     local raw_url = lark.store.get("ha_url")
     local url = (type(raw_url) == "string" and raw_url ~= "") and raw_url or nil
@@ -18,10 +19,12 @@ local function get_config()
     return url:gsub("/$", ""), token, nil
 end
 
+-- SHARED: ha_headers (canonical copy in helpers.lua)
 local function ha_headers(token)
     return { Authorization = "Bearer " .. token, ["Content-Type"] = "application/json" }
 end
 
+-- SHARED: friendly_name (canonical copy in helpers.lua)
 local function friendly_name(entity)
     if entity.attributes and type(entity.attributes) == "table" and entity.attributes.friendly_name then
         return tostring(entity.attributes.friendly_name)
@@ -29,6 +32,7 @@ local function friendly_name(entity)
     return tostring(entity.entity_id or "unknown")
 end
 
+-- SHARED: curl_service (canonical copy in helpers.lua)
 local function curl_service(url, token, service, body)
     return {
         "curl", "-s", "-X", "POST",
