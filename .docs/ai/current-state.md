@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-04-25
+> Updated: 2026-04-26
 
 ## Active Branch
 
@@ -57,10 +57,25 @@ bash scripts/release.sh set 0.13.0
 
 ## Validation
 
-- `cargo test` — 194 passed (was 186 pre-v0.13.0; +8 across the new actions module + cli_list_test + cli_action_test).
+- `cargo test` — 204 passed (was 194 after v0.13.0; +10 from the post-tag backlog burn — `init_plugin_test` (4) and `plugin_output_smoke_test` (6)).
 - `cargo clippy -- -D warnings` — clean.
+- `cargo clippy --tests --all-targets -- -D warnings` — clean (was failing before the burn on pre-existing test-only lints in `cli_list_test.rs` and `plugin/traits.rs`; both fixed).
 - `cargo fmt -- --check` — clean.
 - `nvim --headless` — both lark.nvim modules load cleanly under default config.
+
+## Post-v0.13.0 Backlog Burn (2026-04-26)
+
+While waiting on the v0.13.0 smoke test + tag, knocked through the open backlog items that didn't need design decisions:
+
+- **HA plugin** — `-- SHARED:` markers above `get_config`/`ha_headers`/`friendly_name`/`curl_service` across all 22 command files. Canonical copy stays in `helpers.lua` (which also serves as the "Helpers" command's entry). Pattern matches `ccusage`/`github`.
+- **Compose plugin** — same per-helper `-- SHARED:` markers above `trim`/`split_lines`/`shell_action`/`clipboard_action`/`compose_action`; canonical copy in `docker/lib.lua`.
+- **`init-plugin` integration tests** — `tests/init_plugin_test.rs` exercises the binary path with `XDG_CONFIG_HOME` redirection. 4 cases: Lua scaffold, shell scaffold (executable bit), multi-command scaffold, and refuses-to-overwrite.
+- **Output schema smoke tests** — `tests/plugin_output_smoke_test.rs` runs 6 pure plugins through the engine and asserts well-formed `PluginOutput` shape: `Emoji`, `Hello World (Lua)`, `Timezones`, `Quicklinks`, `Calculator`, `Base64 Encode`. Other ~34 plugins skipped (network/auth/state).
+- **Drive-by clippy fixes** — `cargo clippy --tests` was previously broken under Rust 1.95 because test code wasn't in the lint scope. Fixed `cli_list_test.rs` (`struct_excessive_bools`) and three `_ => panic!` matches in `plugin/traits.rs`.
+
+Confirmed-skipped during the burn:
+- "Plugin error output: convert raw stderr to user-friendly messages" — audit found plugins already use structured error items, not raw stderr passthrough. Remaining work is a UX-wording pass, not tech debt.
+- Bitwarden backlog (rbw, Send, attachments, edit/delete, lock-after-clipboard, TOTP countdown) — these are real features. Belong in a future Bitwarden-themed milestone.
 
 ## Pre-Release Gates
 

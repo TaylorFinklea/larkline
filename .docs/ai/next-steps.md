@@ -1,10 +1,12 @@
 # Next Steps
 
-> Updated: 2026-04-25
+> Updated: 2026-04-26
 
-## v0.13.0 — Ready to Cut
+## v0.13.0 — Ready to Cut (after smoke test)
 
-Six commits accumulated since `v0.12.0` was tagged. The Rust side is the headless contract for `lark.nvim` v3 (Telescope picker, separate repo).
+Five v0.13.0 commits + four post-tag backlog-burn commits accumulated since `v0.12.0` was tagged. The Rust side is the headless contract for `lark.nvim` v3 (Telescope picker, separate repo).
+
+**Pre-tag smoke test** (Phase 2 below) is the only remaining gate. Once green:
 
 ```sh
 bash scripts/release.sh set 0.13.0
@@ -56,4 +58,16 @@ If anything looks off, fix and recommit before tagging. The Rust contract has 5 
 
 ## Backlog
 
-See `.docs/ai/roadmap.md` → Backlog section. Bitwarden + Atlassian backlog items still apply (rbw, send, multi-cloud switch).
+See `.docs/ai/roadmap.md` → Backlog section. The post-v0.13.0 burn (2026-04-26) closed:
+
+- HA plugin dedup markers (22 files)
+- Compose plugin dedup markers (5 helpers)
+- `init-plugin` scaffolder integration tests (4 cases)
+- Output schema smoke tests for 6 pure plugins
+- Pre-existing `cargo clippy --tests` lints in `cli_list_test.rs` and `plugin/traits.rs`
+
+What's left in the backlog:
+
+- "Plugin error output: convert raw stderr to user-friendly messages" — needs a UX-wording pass, not a tech-debt pass. Defer.
+- Bitwarden backlog (rbw, Send, attachments, edit/delete, lock-after-clipboard, TOTP countdown) — feature work, belongs in a future Bitwarden milestone.
+- Atlassian polish (multi-cloud `lark atlassian switch`, OAuth client_id registration).

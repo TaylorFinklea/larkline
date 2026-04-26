@@ -166,17 +166,22 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 
 ### Plugin Quality
 
-- [ ] HA plugin dedup: extract shared Lua module for duplicated `get_config`/`headers`/`filters` across 21 files
-- [ ] Compose plugin: simplify inline action helper arg-building
-- [ ] Audit all plugins for missing icons — every plugin must have one
-- [ ] Audit shell plugins for jq safety — no raw `$var` interpolation in JSON strings
+- [x] HA plugin dedup: `-- SHARED:` markers above duplicated helpers in 22 command files (canonical copy in `helpers.lua`)
+- [x] Compose plugin: `-- SHARED:` markers above 5 duplicated helpers (canonical copy in `docker/lib.lua`)
+- [x] Audit all plugins for missing icons — every plugin must have one <!-- audited 2026-04-26: all 44 manifests have `icon` -->
+- [x] Audit shell plugins for jq safety — no raw `$var` interpolation in JSON strings <!-- audited 2026-04-26: all 5 shell entries clean -->
 - [ ] Improve plugin error output: convert raw stderr to user-friendly messages where feasible in plugin code
 
 ### Test Coverage
 
-- [ ] Manifest validation tests for all 39 plugins (valid TOML, required fields present)
-- [ ] Output format smoke tests (valid JSON structure) for plugins with testable output
-- [ ] `init-plugin` scaffolder edge case tests
+- [x] Manifest validation tests for all 39 plugins (valid TOML, required fields present) <!-- tests/plugin_manifest_integration_test.rs -->
+- [x] Output format smoke tests (valid JSON structure) for plugins with testable output <!-- tests/plugin_output_smoke_test.rs — 6 pure plugins -->
+- [x] `init-plugin` scaffolder edge case tests <!-- tests/init_plugin_test.rs — Lua/shell/multi/refuses-overwrite -->
+
+### Drive-by clippy fixes (post-v0.13.0 burn)
+
+- [x] `tests/cli_list_test.rs:13` — add `#[allow(clippy::struct_excessive_bools)]` to mirror production `ListEntry`
+- [x] `src/plugin/traits.rs:634/637/659` — replace `_ =>` with explicit variant patterns to satisfy `match_wildcard_for_single_variants` under `cargo clippy --tests`
 
 ### Documentation
 
