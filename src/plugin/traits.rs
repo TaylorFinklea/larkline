@@ -631,10 +631,10 @@ mod tests {
                         assert!(matches!(direction, SplitDirection::Vertical));
                         assert_eq!(inner.len(), 2);
                     }
-                    _ => panic!("expected nested Split"),
+                    MiniAppLayout::Pane { .. } => panic!("expected nested Split"),
                 }
             }
-            _ => panic!("expected Split"),
+            MiniAppLayout::Pane { .. } => panic!("expected Split"),
         }
     }
 
@@ -656,7 +656,7 @@ mod tests {
                 assert_eq!(id, "main");
                 assert_eq!(content.items.len(), 1);
             }
-            _ => panic!("expected Pane"),
+            MiniAppLayout::Split { .. } => panic!("expected Pane"),
         }
     }
 

@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)] // Fields are checked via `serde::Deserialize` errors, not direct reads.
+#[allow(clippy::struct_excessive_bools)] // Mirrors the production `ListEntry` in src/main.rs — flattening would hurt downstream wire-format ergonomics.
 struct ListEntry {
     name: String,
     description: String,
