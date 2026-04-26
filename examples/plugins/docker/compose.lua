@@ -1,11 +1,13 @@
 -- Docker: Compose — manage Compose stacks with logs, services, lifecycle.
 -- Shared helpers copied from lib.lua.
 
+-- SHARED: trim (canonical copy in lib.lua)
 local function trim(text)
     if not text then return nil end
     return text:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- SHARED: split_lines (canonical copy in lib.lua)
 local function split_lines(raw)
     local lines = {}
     if not raw or raw == "" then return lines end
@@ -15,6 +17,7 @@ local function split_lines(raw)
     return lines
 end
 
+-- SHARED: shell_action (canonical copy in lib.lua)
 local function shell_action(label, args, confirm_flag)
     local action = {
         label = label,
@@ -27,6 +30,7 @@ local function shell_action(label, args, confirm_flag)
     return action
 end
 
+-- SHARED: clipboard_action (canonical copy in lib.lua)
 local function clipboard_action(label, value)
     return {
         label = label,
@@ -35,6 +39,7 @@ local function clipboard_action(label, value)
     }
 end
 
+-- SHARED: compose_action (canonical copy in lib.lua)
 local function compose_action(label, use_v2, project, subcmd, extra, confirm_flag)
     if use_v2 then
         local args = { "docker", "compose", "-p", project, subcmd }
