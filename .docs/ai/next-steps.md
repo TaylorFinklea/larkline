@@ -1,73 +1,94 @@
 # Next Steps
 
-> Updated: 2026-04-26
+> Updated: 2026-04-29
 
-## v0.13.0 — Ready to Cut (after smoke test)
+## v0.14.0 — Ready to Cut (after smoke test)
 
-Five v0.13.0 commits + four post-tag backlog-burn commits accumulated since `v0.12.0` was tagged. The Rust side is the headless contract for `lark.nvim` v3 (Telescope picker, separate repo).
+Five v0.14.0 commits in larkline (`v0.14.0-prep` branch) + one in lark.nvim
+(`v0.14.0-prep` branch). The wire-format change is purely additive:
+`OutputItem.preview: Option<String>`. Telescope's right-hand pane renders
+the focused row's preview while scrolling.
 
-**Pre-tag smoke test** (Phase 2 below) is the only remaining gate. Once green:
+**Pre-tag smoke test** (below) is the only remaining gate. Once green:
 
 ```sh
-bash scripts/release.sh set 0.13.0
+# In larkline:
+bash scripts/release.sh set 0.14.0
+# In lark.nvim:
+git tag v0.14.0 && git push --tags
 ```
 
-This bumps `Cargo.toml` + `Formula/larkline.rb`, commits, tags `v0.13.0`, pushes. CI handles the rest.
+The script bumps `Cargo.toml` + `Formula/larkline.rb`, commits, tags
+`v0.14.0`, pushes. CI handles the rest.
 
 ## Pre-release smoke test
 
-Manual end-to-end test before tagging — the Lua side only has unit-level smoke tests, full picker behavior needs a real nvim+telescope environment:
+Manual end-to-end against a real nvim + telescope environment. Need:
+- a recent `lark` build with `preview` on the wire
+- `lark.nvim` `v0.14.0-prep` branch
+- a logged-in GitHub `gh` CLI (for the GitHub previews)
+- optionally: Atlassian + Bitwarden configured
 
 ```sh
-# 1. Install lark.nvim via lazy.nvim:
-{
-  "TaylorFinklea/lark.nvim",
-  dependencies = { "nvim-telescope/telescope.nvim" },
-  config = function()
-    require("lark").setup({})
-    pcall(require("telescope").load_extension, "lark")
-  end,
-}
-
-# 2. Build local lark with the new subcommands:
+# 1. Build local lark:
 cd ~/git/larkline && cargo build --release
 
-# 3. With LARK_BINARY pointing at target/release/lark, in nvim:
+# 2. Point lark.nvim at it:
+LARK_BINARY=$(pwd)/target/release/lark nvim
+
+# 3. Inside nvim:
 #    :Telescope lark
-#    Pick a plugin (e.g. "Recent Pages" if Atlassian configured) — hit <CR>.
-#    Try <C-a> on a row for the action sub-picker.
-#    Try a chain action (e.g. show_detail on a Jira issue) — should push a picker.
-#    Try a form-based plugin (e.g. "Generate Password") — should fall back to floating terminal.
-#    Try a mini-app (e.g. "Docker Dashboard") — should fall back too.
+#    Pick "My PRs" — preview pane should show PR body. j/k should refresh
+#    smoothly with no flicker.
+#    Try the action sub-picker via <C-a> — preview pane should still work.
+#
+# 4. Toggle Atlassian preview_full on (TUI: Plugin Manager → atlassian →
+#    Settings → preview_full → toggle). Re-run :Telescope lark → "My
+#    Issues". Preview pane should show description text. Toggle off
+#    again — preview falls back to "(no preview available)".
+#
+# 5. Bitwarden: bw unlock --raw | export BW_SESSION=...
+#    :Telescope lark → "Vault" → preview shows item details with
+#    password redacted (••••••••).
+#
+# 6. Form fallback: :Telescope lark → "Generate Password" → should
+#    drop into the floating-terminal TUI (previewer never runs in this
+#    path).
+#
+# 7. Mini-app fallback: :Telescope lark → "Docker Dashboard" → same
+#    floating-terminal fallback.
 ```
 
-If anything looks off, fix and recommit before tagging. The Rust contract has 5 integration tests covering the JSON shapes; the Lua side relies on user verification.
+**Confluence quality check:** if Confluence pages are macro-heavy and the
+preview pane shows ugly residual placeholders, decide whether to:
+(a) ship as-is and add a "best effort" note in user docs (already there);
+(b) defer Confluence preview to v0.14.x by gating just the Confluence
+files behind a `preview_full_confluence` setting.
 
-## Open follow-ups (not blocking v0.13.0)
+If anything looks off, fix and re-commit on the prep branches before
+tagging.
 
-- **Register Atlassian OAuth app** (carried from v0.12.0) — Taylor's call. API-token path works today; OAuth path errors with a clear "OAuth client id not configured" message until `LARKLINE_ATLASSIAN_CLIENT_ID` is set or the baked id is replaced.
-- **Action-result previewers in Telescope** — Telescope can show preview text for the focused entry. Markdown bodies for Jira issues, Confluence pages would be a nice polish. Defer to v0.14.x.
-- **Streaming output** — plugins that emit newline-delimited JSON (log tailers) currently fall back to floating terminal. Telescope can update finders dynamically; engineering cost is moderate. Defer.
-- **Atlassian `switch` subcommand** — multi-cloud Atlassian users. Polish, defer.
+## Open follow-ups (not blocking v0.14.0)
 
-## v0.14.0 candidates
+- **Register Atlassian OAuth app** (carried from v0.12.0) — Taylor's call.
+- **Lazy preview fetching (Approach B)** — fetch `preview` on demand via a
+  `preview_action` callback. Worth revisiting once we have data on whether
+  the `preview_full=true` Atlassian latency hurts in practice.
+- **Treesitter highlighting** beyond markdown filetype default.
+- **Attachments / images** in previews (binary content is silently skipped today).
+- **Streaming previews** (live-update while reading).
 
-- **Telescope previewers** for plugin output (Jira issue body, Confluence page).
+## v0.15.0+ candidates
+
+- **`cargo-dist`** evaluation — replace `scripts/release.sh` + `release.yml`.
 - **PagerDuty / 1Password CLI** plugin deep-dives (deferred while Taylor isn't using them).
-- **`cargo-dist`** evaluation — replace `scripts/release.sh` + `release.yml` with unified cross-platform tooling.
+- **Atlassian `switch`** for multi-cloud orgs.
 
 ## Backlog
 
-See `.docs/ai/roadmap.md` → Backlog section. The post-v0.13.0 burn (2026-04-26) closed:
+See `.docs/ai/roadmap.md` → Backlog section. Open items unchanged from
+post-v0.13.0 burn:
 
-- HA plugin dedup markers (22 files)
-- Compose plugin dedup markers (5 helpers)
-- `init-plugin` scaffolder integration tests (4 cases)
-- Output schema smoke tests for 6 pure plugins
-- Pre-existing `cargo clippy --tests` lints in `cli_list_test.rs` and `plugin/traits.rs`
-
-What's left in the backlog:
-
-- "Plugin error output: convert raw stderr to user-friendly messages" — needs a UX-wording pass, not a tech-debt pass. Defer.
-- Bitwarden backlog (rbw, Send, attachments, edit/delete, lock-after-clipboard, TOTP countdown) — feature work, belongs in a future Bitwarden milestone.
+- "Plugin error output: convert raw stderr to user-friendly messages" — UX-wording pass.
+- Bitwarden backlog (rbw, Send, attachments, edit/delete, lock-after-clipboard, TOTP countdown).
 - Atlassian polish (multi-cloud `lark atlassian switch`, OAuth client_id registration).

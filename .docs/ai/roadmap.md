@@ -141,9 +141,35 @@ Headless contract on the Rust side, Telescope source on the Lua side. Plus the `
 - [x] Phase G: floating-terminal fallback for forms / mini-apps + new keymap (`<C-l>` Telescope, `<C-l><C-l>` TUI)
 - [x] Phase H: roadmap + current-state + CHANGELOG + `docs/plugins/lark-nvim.md`
 
+### v0.14.0 — lark.nvim v4 (Telescope picker previewers)
+
+Render rich body content in Telescope's right-hand preview pane while
+scrolling rows in a `lark` results picker. New optional `preview` field on
+`OutputItem` (markdown by convention; plain text fine). Plugins populate it
+inline; the previewer reads `entry.value.preview` and writes it to the
+preview buffer synchronously. Implementation kept on a `v0.14.0-prep` branch;
+Taylor tags after a manual smoke test.
+
+- [x] Phase A: `OutputItem.preview: Option<String>` with serde tests
+- [x] Phase B: `lark.nvim/lua/lark/previewer.lua` (buffer previewer, markdown filetype) wired into `results.lua`
+- [x] Phase C: GitHub plugin (zero-cost — `search/issues` already returns the body)
+- [x] Phase D: Atlassian plugin — opt-in `preview_full` toggle (default off). Jira (description via JQL `fields=description`) and Confluence (body.storage via `expand=`). Ships with a best-effort storage→text reducer for Confluence
+- [x] Phase E: Bitwarden plugin (free plumb; honors `redact_secrets`)
+- [x] Phase F: Docs (`lark-nvim.md` Previewers section, `ARCHITECTURE.md` schema, CHANGELOG, both repos' README + handoff)
+
+**Deferred to v0.14.x or later:**
+- Lazy preview fetching (Approach B): fetch `preview` on demand via a
+  `preview_action` callback. Not worth the cross-repo round-trip latency yet.
+- Treesitter highlighting beyond what `filetype = "markdown"` gives for free.
+- Attachments / images in previews.
+- Streaming previews (live-update while reading).
+- "Open preview in main buffer" action.
+
 ### Future (unordered — pick theme per release)
 
-- **lark.nvim v4:** action-result previewers (Jira issue body, Confluence page rendered in the picker preview pane); two-way streaming so `on_action` updates a Neovim buffer in real time.
+- **lark.nvim v5+:** lazy preview fetching; preview-pane action ("open in
+  main buffer", attachments). Two-way streaming so `on_action` can update a
+  Neovim buffer in real time.
 - **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries.
 - **More plugin deep-dives:** PagerDuty, 1Password CLI (deferred — Taylor doesn't use these).
 - **Atlassian polish:** `lark atlassian switch` for multi-cloud orgs; register the OAuth app under Taylor's developer account so OAuth path works without `LARKLINE_ATLASSIAN_CLIENT_ID` override.

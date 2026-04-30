@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.14.0 — lark.nvim v4 (Telescope picker previewers) (unreleased)
+
+While scrolling rows in a Telescope `lark` results picker, the right-hand
+preview pane now renders rich body content for the focused row — read a
+Jira issue, Confluence page, GitHub PR description, or vault item without
+leaving the picker.
+
+### Wire format
+
+- `OutputItem.preview: Option<String>` — new optional field. Markdown by
+  convention; plain text is fine. Empty/missing → previewer pane shows
+  `(no preview available)`. The TUI ignores this field. Plugins should
+  pre-truncate at ~5KB.
+
+### lark.nvim v4 (separate repo)
+
+- New `lua/lark/previewer.lua` — buffer previewer that reads
+  `entry.value.preview`, splits on newlines, and writes to the preview
+  buffer with `filetype = "markdown"`. Synchronous fill, no race on fast
+  j/k scrolling. Wired into `lua/lark/results.lua` automatically — every
+  results picker gets a preview pane for free.
+
+### Plugin updates
+
+- **GitHub** — `My PRs` and `Issues` rows now carry `preview = pr.body`.
+  Zero-cost: `search/issues` already returns the body.
+- **Atlassian** — new `preview_full` toggle setting (default off). When
+  on, list calls add `description` (Jira) or `body.storage` (Confluence)
+  to the request and populate `preview` on each row. Confluence storage
+  format is reduced to plain text via a best-effort regex strip — prose
+  pages render cleanly, macro-heavy pages may show residual placeholders.
+- **Bitwarden** — every vault row carries `preview = render_detail_markdown(item)`,
+  honoring the existing `redact_secrets` setting. Passwords, CVV codes,
+  SSN/passport/license numbers are masked, matching the TUI detail view.
+
+### Documented as deferred
+
+Lazy preview fetching (Approach B), treesitter highlighting beyond
+markdown filetype, attachments/images, streaming previews, and "open
+preview in main buffer" actions are explicit non-goals for v0.14.0.
+
+---
+
 ## v0.13.0 — lark.nvim v3 (Telescope-native picker) (unreleased)
 
 The headless contract for the new `lark.nvim` v3 Telescope integration. The nvim plugin now lives at <https://github.com/TaylorFinklea/lark.nvim>.

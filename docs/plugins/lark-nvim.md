@@ -52,6 +52,38 @@ floating-terminal-only mode (`:Lark`, `<C-l>`).
 | `<C-l>` | n / t | Telescope picker (auto-falls back to TUI if telescope is missing) |
 | `<C-l><C-l>` | n / t | Open the floating-terminal TUI explicitly |
 
+## Previewers (v0.14.0+)
+
+When you scroll rows in the results picker, the right-hand pane renders the
+focused row's body content — read a Jira issue, Confluence page, GitHub PR
+description, or vault item without leaving the picker. The previewer reads
+an optional `preview` field on each row (markdown by convention; plain text
+also works). Empty/missing → the pane shows `(no preview available)`.
+
+The buffer's filetype is set to `markdown`, so any markdown highlighter or
+treesitter `markdown` parser style the content for free.
+
+**Per-plugin status:**
+
+| Plugin | Preview | Notes |
+|---|---|---|
+| GitHub (My PRs, Issues) | On by default | `search/issues` already returns the body, so no extra API cost. |
+| Atlassian (Jira + Confluence) | Opt-in via `preview_full` setting | Default off. When on, list calls also fetch issue descriptions / page bodies — adds noticeable latency. Confluence storage-format reducer is best-effort: prose-heavy pages render cleanly; macro-heavy pages may show residual placeholders. |
+| Bitwarden (Vault) | On by default | `bw list items` already returns full bodies. The preview honors the existing `redact_secrets` setting — passwords, CVV codes, SSN/passport/license numbers are masked, matching the TUI detail view. |
+| Other plugins | Empty (placeholder) | Plugins can opt in by setting `preview` on each row in their JSON output. |
+
+**Disabling the preview pane:** if your Telescope theme is `dropdown` or
+otherwise omits the previewer, the picker keeps working — the previewer is
+silently ignored.
+
+**Long previews:** plugins should pre-truncate at ~5KB (the standard plugins
+do). Telescope handles long buffer fills, but smaller payloads keep the JSON
+contract snappy.
+
+**Plugin author notes:** populate `OutputItem.preview` with a string. Markdown
+is the convention but plain text is fine. Skip rendering attachments, images,
+or other binary content — the previewer is text-only.
+
 ## Underlying CLI contract
 
 The Telescope source talks to `lark` via three subcommands. Useful to know

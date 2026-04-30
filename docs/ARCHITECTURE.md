@@ -243,6 +243,8 @@ pub struct OutputItem {
     pub icon: Option<String>,
     pub url: Option<String>,
     pub actions: Vec<ItemAction>,
+    pub copy_text: Option<String>,         // Override for `y` (TUI copy)
+    pub preview: Option<String>,           // Markdown body for lark.nvim Telescope preview pane (v0.14.0+)
     pub metadata: HashMap<String, String>, // Extensible key-value pairs
 }
 
@@ -395,6 +397,14 @@ The contract between script plugins and the host. Plugins write this JSON to std
                 }
               }
             }
+          },
+          "copy_text": {
+            "type": "string",
+            "description": "Plugin-defined override for the TUI `y` (copy) action — copy this instead of `label`"
+          },
+          "preview": {
+            "type": "string",
+            "description": "Markdown body shown in the lark.nvim Telescope preview pane (v0.14.0+). The TUI ignores this field. Plugins should pre-truncate at ~5KB."
           },
           "metadata": {
             "type": "object",
