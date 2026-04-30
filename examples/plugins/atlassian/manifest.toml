@@ -28,6 +28,13 @@ type = "select"
 options = ["25", "50", "100"]
 default = "50"
 
+[[settings]]
+id = "preview_full"
+label = "Fetch issue/page bodies for Telescope preview pane"
+type = "toggle"
+default = "false"
+description = "When on, list calls also fetch description (Jira) and body.storage (Confluence) for the lark.nvim Telescope previewer. Adds noticeable latency to list calls."
+
 [[commands]]
 name = "My Issues"
 description = "Jira issues assigned to you (not Done)"

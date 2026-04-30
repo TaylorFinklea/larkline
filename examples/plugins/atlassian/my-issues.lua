@@ -137,6 +137,38 @@ local function issue_browser_url(auth, key)
     return (auth.site_url or auth.jira_base) .. "/browse/" .. key
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require). Keep
+-- parity with lib.lua when editing.
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function adf_to_text(node)
+    if type(node) ~= "table" then return "" end
+    local out = {}
+    local function flatten(n)
+        if type(n) ~= "table" then return end
+        if n.type == "text" then out[#out + 1] = n.text or "" end
+        if n.content then
+            for _, c in ipairs(n.content) do flatten(c) end
+        end
+        if n.type == "paragraph" or n.type == "heading" or n.type == "listItem" then
+            out[#out + 1] = "\n"
+        end
+    end
+    flatten(node)
+    return preview_truncate(table.concat(out, ""))
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 local function issue_to_row(auth, issue)
     local f = issue.fields or {}
     local type_name = f.issuetype and f.issuetype.name or nil
@@ -146,11 +178,19 @@ local function issue_to_row(auth, issue)
     if priority then detail_parts[#detail_parts + 1] = priority end
     if updated then detail_parts[#detail_parts + 1] = updated end
     local url = issue_browser_url(auth, issue.key)
+    -- Preview body for Telescope (lark.nvim v0.14.0). Only present when the
+    -- preview_full setting is on; field is requested in the JQL fetch.
+    local preview = nil
+    if f.description then
+        preview = adf_to_text(f.description)
+        if preview == "" then preview = nil end
+    end
     return {
         label = issue.key .. "  " .. (f.summary or ""),
         detail = table.concat(detail_parts, "  ·  "),
         icon = issue_icon(type_name),
         copy_text = issue.key,
+        preview = preview,
         actions = {
             { label = "Open in browser", kind = "open", args = { url } },
             { label = "Copy key", kind = "clipboard", args = { issue.key } },
@@ -169,11 +209,13 @@ lark.register({
 
         local max = tonumber(lark.store.get("max_results")) or 50
         local jql = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
+        local fields = "summary,status,issuetype,priority,updated"
+        if preview_enabled() then fields = fields .. ",description" end
         local data, rerr = atlassian_get(auth, auth.jira_base,
             "/rest/api/3/search",
             {
                 jql = jql,
-                fields = "summary,status,issuetype,priority,updated",
+                fields = fields,
                 maxResults = tostring(max),
             },
             "My Issues")

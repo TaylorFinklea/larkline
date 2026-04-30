@@ -76,6 +76,37 @@ local function atlassian_get(auth, base, path, params, title)
     return data, nil
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function storage_to_text(html)
+    if type(html) ~= "string" or html == "" then return "" end
+    local s = html:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+    s = s:gsub("</p>", "\n"):gsub("</li>", "\n"):gsub("<br%s*/?>", "\n")
+    s = s:gsub("</h%d>", "\n\n")
+    s = s:gsub("<[^>]+>", "")
+    s = s:gsub("&amp;", "&")
+        :gsub("&lt;", "<")
+        :gsub("&gt;", ">")
+        :gsub("&quot;", '"')
+        :gsub("&#39;", "'")
+        :gsub("&nbsp;", " ")
+    s = s:gsub("\n\n\n+", "\n\n")
+    s = s:gsub("^%s+", "")
+    return preview_truncate(s)
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 -- /rest/api/search returns a flat 'results' list; each entry has either
 -- `content` (page/blogpost) or `space` (space-only result). We keep just
 -- content matches so the row layout stays uniform.
@@ -93,11 +124,19 @@ local function search_result_to_row(auth, result)
     local title = (result.title or content.title or ""):gsub("@@@hl@@@", ""):gsub("@@@endhl@@@", "")
     local excerpt = (result.excerpt or ""):gsub("@@@hl@@@", ""):gsub("@@@endhl@@@", ""):gsub("\n", " ")
     if #excerpt > 100 then excerpt = excerpt:sub(1, 100) .. "…" end
+    -- Preview for Telescope (lark.nvim v0.14.0). When preview_full is on, the
+    -- expand query asks for content.body.storage on each result.
+    local preview = nil
+    if content.body and content.body.storage and content.body.storage.value then
+        preview = storage_to_text(content.body.storage.value)
+        if preview == "" then preview = nil end
+    end
     return {
         label = title,
         detail = excerpt,
         icon = (content.type == "blogpost") and "📰" or "📄",
         copy_text = title,
+        preview = preview,
         actions = {
             { label = "Open in browser", kind = "open", args = { url } },
             { label = "Copy URL", kind = "clipboard", args = { url } },
@@ -126,8 +165,10 @@ lark.register({
 
         -- Escape backslashes + quotes for safe inclusion in the CQL string literal.
         local cql = string.format('text ~ "%s"', q:gsub('\\', '\\\\'):gsub('"', '\\"'))
+        local search_params = { cql = cql, limit = "25" }
+        if preview_enabled() then search_params.expand = "content.body.storage" end
         local data, rerr = atlassian_get(auth, auth.conf_base, "/rest/api/search",
-            { cql = cql, limit = "25" }, "Search Confluence")
+            search_params, "Search Confluence")
         if rerr then return rerr end
 
         local items = {}

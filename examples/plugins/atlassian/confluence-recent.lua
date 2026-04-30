@@ -82,17 +82,56 @@ local function page_browser_url(auth, page)
     return site .. "/wiki/spaces/" .. (page.space and page.space.key or "~") .. "/pages/" .. (page.id or "")
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function storage_to_text(html)
+    if type(html) ~= "string" or html == "" then return "" end
+    local s = html:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+    s = s:gsub("</p>", "\n"):gsub("</li>", "\n"):gsub("<br%s*/?>", "\n")
+    s = s:gsub("</h%d>", "\n\n")
+    s = s:gsub("<[^>]+>", "")
+    s = s:gsub("&amp;", "&")
+        :gsub("&lt;", "<")
+        :gsub("&gt;", ">")
+        :gsub("&quot;", '"')
+        :gsub("&#39;", "'")
+        :gsub("&nbsp;", " ")
+    s = s:gsub("\n\n\n+", "\n\n")
+    s = s:gsub("^%s+", "")
+    return preview_truncate(s)
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 local function page_to_row(auth, page)
     local space = page.space and (page.space.name or page.space.key) or "?"
     local updated = page.history and page.history.lastUpdated and page.history.lastUpdated.when
     local detail_parts = { space }
     if updated then detail_parts[#detail_parts + 1] = updated:sub(1, 10) end
     local url = page_browser_url(auth, page)
+    -- Preview body for Telescope (lark.nvim v0.14.0). Storage format is XHTML-ish;
+    -- the reducer is best-effort — macro-heavy pages may show residual placeholders.
+    local preview = nil
+    if page.body and page.body.storage and page.body.storage.value then
+        preview = storage_to_text(page.body.storage.value)
+        if preview == "" then preview = nil end
+    end
     return {
         label = page.title or "Untitled",
         detail = table.concat(detail_parts, "  ·  "),
         icon = "📄",
         copy_text = page.title or "",
+        preview = preview,
         actions = {
             { label = "Open in browser", kind = "open", args = { url } },
             { label = "Copy URL", kind = "clipboard", args = { url } },
@@ -110,12 +149,14 @@ lark.register({
         -- The legacy /rest/api/content endpoint is the most stable for "all
         -- recent pages". The newer /api/v2 doesn't return 'expand' fields the
         -- same way and requires per-space queries. Stick with v1 here.
+        local expand = "space,history.lastUpdated,version"
+        if preview_enabled() then expand = expand .. ",body.storage" end
         local data, rerr = atlassian_get(auth, auth.conf_base,
             "/rest/api/content",
             {
                 limit = tostring(max),
                 orderby = "history.lastUpdated desc",
-                expand = "space,history.lastUpdated,version",
+                expand = expand,
                 type = "page",
             }, "Recent Pages")
         if rerr then return rerr end

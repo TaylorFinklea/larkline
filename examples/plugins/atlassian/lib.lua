@@ -236,6 +236,75 @@ local function adf_to_plaintext(node, out)
     return table.concat(out)
 end
 
+-- SHARED: preview_truncate — cap preview strings at ~5KB to keep JSON payload
+-- small. Truncation point: just before the cap; doesn't try to align to
+-- paragraph boundaries (read-mode acceptable).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+-- SHARED: adf_to_text — minimal ADF→text reducer used by preview rendering.
+-- Mirrors the inline flatten() helper used in my-issues.lua's detail view.
+-- Returns "" for nil/non-table input. Output is line-broken plaintext suitable
+-- for the lark.nvim Telescope preview pane (markdown filetype tolerates plain).
+local function adf_to_text(node)
+    if type(node) ~= "table" then return "" end
+    local out = {}
+    local function flatten(n)
+        if type(n) ~= "table" then return end
+        if n.type == "text" then out[#out + 1] = n.text or "" end
+        if n.content then
+            for _, c in ipairs(n.content) do flatten(c) end
+        end
+        if n.type == "paragraph" or n.type == "heading" or n.type == "listItem" then
+            out[#out + 1] = "\n"
+        end
+    end
+    flatten(node)
+    return preview_truncate(table.concat(out, ""))
+end
+
+-- SHARED: storage_to_text — best-effort Confluence storage-format reducer for
+-- preview rendering. Strips XML-ish tags (including <ac:*>/<ri:*> macros and
+-- self-closing structural tags), decodes the most common HTML entities, and
+-- collapses whitespace. Macro-heavy pages may show residual placeholders;
+-- prose-heavy pages render cleanly enough for read-mode previews. Document
+-- the "best effort" caveat in user docs.
+local function storage_to_text(html)
+    if type(html) ~= "string" or html == "" then return "" end
+    -- Drop entire CDATA blocks unchanged (preserves code fences within macros).
+    local s = html:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+    -- Drop block-level tags but keep a newline so paragraphs break.
+    s = s:gsub("</p>", "\n"):gsub("</li>", "\n"):gsub("<br%s*/?>", "\n")
+    s = s:gsub("</h%d>", "\n\n")
+    -- Strip remaining tags (XHTML, including macros).
+    s = s:gsub("<[^>]+>", "")
+    -- Decode the most common entities.
+    s = s:gsub("&amp;", "&")
+        :gsub("&lt;", "<")
+        :gsub("&gt;", ">")
+        :gsub("&quot;", '"')
+        :gsub("&#39;", "'")
+        :gsub("&nbsp;", " ")
+    -- Collapse 3+ blank lines down to 2.
+    s = s:gsub("\n\n\n+", "\n\n")
+    -- Trim leading whitespace.
+    s = s:gsub("^%s+", "")
+    return preview_truncate(s)
+end
+
+-- SHARED: preview_enabled — read the `preview_full` plugin setting. The store
+-- returns strings; treat "true"/"1" as truthy (matches the manifest toggle's
+-- "true"/"false" string form).
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 -- Wrap plain text in a minimal ADF doc for POSTing to Jira (comments + create).
 -- Splits on \n\n into paragraphs; inner \n becomes hardBreak.
 local function adf_from_plaintext(text)

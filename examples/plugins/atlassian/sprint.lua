@@ -108,16 +108,53 @@ local function status_badge(s)
     return "● " .. n
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function adf_to_text(node)
+    if type(node) ~= "table" then return "" end
+    local out = {}
+    local function flatten(n)
+        if type(n) ~= "table" then return end
+        if n.type == "text" then out[#out + 1] = n.text or "" end
+        if n.content then
+            for _, c in ipairs(n.content) do flatten(c) end
+        end
+        if n.type == "paragraph" or n.type == "heading" or n.type == "listItem" then
+            out[#out + 1] = "\n"
+        end
+    end
+    flatten(node)
+    return preview_truncate(table.concat(out, ""))
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 local function issue_to_row(auth, issue)
     local f = issue.fields or {}
     local url = (auth.site_url or auth.jira_base) .. "/browse/" .. issue.key
     local detail_parts = { status_badge(f.status) }
     if f.assignee then detail_parts[#detail_parts + 1] = f.assignee.displayName or "?" end
+    local preview = nil
+    if f.description then
+        preview = adf_to_text(f.description)
+        if preview == "" then preview = nil end
+    end
     return {
         label = issue.key .. "  " .. (f.summary or ""),
         detail = table.concat(detail_parts, "  ·  "),
         icon = issue_icon(f.issuetype and f.issuetype.name),
         copy_text = issue.key,
+        preview = preview,
         actions = {
             { label = "Open in browser", kind = "open", args = { url } },
             { label = "Copy key", kind = "clipboard", args = { issue.key } },
@@ -148,9 +185,11 @@ lark.register({
                 { state = "active", maxResults = "1" }, "Active Sprint")
             if not serr and sprints.values and sprints.values[1] then
                 local sprint = sprints.values[1]
+                local sprint_fields = "summary,status,issuetype,assignee"
+                if preview_enabled() then sprint_fields = sprint_fields .. ",description" end
                 local data, ierr = atlassian_get(auth, auth.jira_base,
                     "/rest/agile/1.0/sprint/" .. sprint.id .. "/issue",
-                    { fields = "summary,status,issuetype,assignee", maxResults = "100" }, "Active Sprint")
+                    { fields = sprint_fields, maxResults = "100" }, "Active Sprint")
                 if ierr then return ierr end
                 local items = {}
                 for _, it in ipairs(data.issues or {}) do

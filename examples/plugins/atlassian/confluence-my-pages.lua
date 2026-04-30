@@ -74,6 +74,37 @@ local function atlassian_get(auth, base, path, params, title)
     return data, nil
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function storage_to_text(html)
+    if type(html) ~= "string" or html == "" then return "" end
+    local s = html:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+    s = s:gsub("</p>", "\n"):gsub("</li>", "\n"):gsub("<br%s*/?>", "\n")
+    s = s:gsub("</h%d>", "\n\n")
+    s = s:gsub("<[^>]+>", "")
+    s = s:gsub("&amp;", "&")
+        :gsub("&lt;", "<")
+        :gsub("&gt;", ">")
+        :gsub("&quot;", '"')
+        :gsub("&#39;", "'")
+        :gsub("&nbsp;", " ")
+    s = s:gsub("\n\n\n+", "\n\n")
+    s = s:gsub("^%s+", "")
+    return preview_truncate(s)
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 local function result_to_row(auth, r)
     local site = auth.site_url or auth.conf_base:gsub("/wiki$", "")
     local content = r.content or {}
@@ -91,11 +122,17 @@ local function result_to_row(auth, r)
     local last = r.lastModified and r.lastModified:sub(1, 10) or nil
     local detail_parts = { space }
     if last then detail_parts[#detail_parts + 1] = last end
+    local preview = nil
+    if content.body and content.body.storage and content.body.storage.value then
+        preview = storage_to_text(content.body.storage.value)
+        if preview == "" then preview = nil end
+    end
     return {
         label = title,
         detail = table.concat(detail_parts, "  ·  "),
         icon = (content.type == "blogpost") and "📰" or "📄",
         copy_text = title,
+        preview = preview,
         actions = {
             { label = "Open in browser", kind = "open", args = { url } },
             { label = "Copy URL", kind = "clipboard", args = { url } },
@@ -110,8 +147,10 @@ lark.register({
         if err then return err end
 
         local cql = "creator = currentUser() AND type = page ORDER BY lastmodified DESC"
+        local search_params = { cql = cql, limit = "50" }
+        if preview_enabled() then search_params.expand = "content.body.storage" end
         local data, rerr = atlassian_get(auth, auth.conf_base, "/rest/api/search",
-            { cql = cql, limit = "50" }, "My Pages")
+            search_params, "My Pages")
         if rerr then return rerr end
 
         local items = {}

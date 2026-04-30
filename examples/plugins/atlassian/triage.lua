@@ -101,6 +101,37 @@ local function status_badge(s)
     return "● " .. n
 end
 
+-- SHARED: copies of helpers from lib.lua (sandbox has no require).
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
+end
+
+local function adf_to_text(node)
+    if type(node) ~= "table" then return "" end
+    local out = {}
+    local function flatten(n)
+        if type(n) ~= "table" then return end
+        if n.type == "text" then out[#out + 1] = n.text or "" end
+        if n.content then
+            for _, c in ipairs(n.content) do flatten(c) end
+        end
+        if n.type == "paragraph" or n.type == "heading" or n.type == "listItem" then
+            out[#out + 1] = "\n"
+        end
+    end
+    flatten(node)
+    return preview_truncate(table.concat(out, ""))
+end
+
+local function preview_enabled()
+    local v = lark.store.get("preview_full")
+    if type(v) ~= "string" then return false end
+    return v == "true" or v == "1"
+end
+
 lark.register({
     on_run = function()
         local auth, err = atlassian_auth("Triage Queue")
@@ -117,8 +148,10 @@ lark.register({
         local jql = string.format(
             'project = "%s" AND statusCategory = "To Do" AND assignee IS EMPTY ORDER BY created DESC',
             proj:gsub('"', '\\"'))
+        local fields = "summary,status,issuetype,priority,reporter,created"
+        if preview_enabled() then fields = fields .. ",description" end
         local data, rerr = atlassian_get(auth, auth.jira_base, "/rest/api/3/search",
-            { jql = jql, fields = "summary,status,issuetype,priority,reporter,created", maxResults = "100" },
+            { jql = jql, fields = fields, maxResults = "100" },
             "Triage Queue")
         if rerr then return rerr end
 
@@ -129,11 +162,17 @@ lark.register({
             local detail_parts = { status_badge(f.status) }
             if f.priority then detail_parts[#detail_parts + 1] = f.priority.name end
             if f.reporter then detail_parts[#detail_parts + 1] = "by " .. (f.reporter.displayName or "?") end
+            local preview = nil
+            if f.description then
+                preview = adf_to_text(f.description)
+                if preview == "" then preview = nil end
+            end
             items[#items + 1] = {
                 label = issue.key .. "  " .. (f.summary or ""),
                 detail = table.concat(detail_parts, "  ·  "),
                 icon = issue_icon(f.issuetype and f.issuetype.name),
                 copy_text = issue.key,
+                preview = preview,
                 actions = {
                     { label = "Open in browser", kind = "open", args = { url } },
                     { label = "Copy key", kind = "clipboard", args = { issue.key } },
