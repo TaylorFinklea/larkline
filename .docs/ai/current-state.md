@@ -67,8 +67,8 @@ gates on a manual smoke test against a locally-built `lark` binary.)
 
 ## Pre-Release Gates
 
-1. **Smoke-test end-to-end against a real Telescope install.** Steps in
-   `.docs/ai/next-steps.md`. The four built-in scenarios (GitHub PR body,
+1. **Smoke-test end-to-end against a real Telescope install.** Runbook in the
+   Now / Next / Later section of `.docs/ai/roadmap.md`. The four built-in scenarios (GitHub PR body,
    Atlassian Jira issue with `preview_full` on, Bitwarden item with
    redaction, fallback to floating terminal) all need a manual pass.
 2. **Confluence storage-format reducer quality.** Best-effort regex strip;
@@ -81,4 +81,4 @@ gates on a manual smoke test against a locally-built `lark` binary.)
 
 ## Next
 
-See `.docs/ai/next-steps.md`.
+See the **Now / Next / Later** section in `.docs/ai/roadmap.md`.

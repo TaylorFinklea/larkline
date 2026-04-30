@@ -1,6 +1,6 @@
 # Session Handoff Template
 
-Copy this template and fill it in at the end of each work session. Update `current-state.md` and `next-steps.md` with the same information.
+Copy this template and fill it in at the end of each work session. Update `current-state.md` and the **Now / Next / Later** section of `roadmap.md` with the same information.
 
 ---
 
