@@ -197,6 +197,11 @@ pub struct OutputItem {
     /// (e.g., PID for a process list, raw branch name for git branches).
     #[serde(default)]
     pub copy_text: Option<String>,
+    /// Optional rich body text shown in Telescope's preview pane (markdown by convention).
+    /// The TUI does not render this field. Empty/missing → previewer shows a placeholder.
+    /// Plugins should pre-truncate at ~5KB to keep the JSON payload small.
+    #[serde(default)]
+    pub preview: Option<String>,
     /// Arbitrary key-value pairs for table column resolution and future extensibility.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
@@ -447,6 +452,29 @@ mod tests {
         let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(item.label, "Chrome");
         assert_eq!(item.copy_text.as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn preview_serializes_when_set() {
+        let item = OutputItem {
+            label: "Issue #42".to_string(),
+            preview: Some("Body of the issue\n\nMore details here.".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&item).expect("serialization failed");
+        let round: OutputItem = serde_json::from_str(&json).expect("round-trip failed");
+        assert_eq!(
+            round.preview.as_deref(),
+            Some("Body of the issue\n\nMore details here.")
+        );
+    }
+
+    #[test]
+    fn preview_absent_deserializes() {
+        let json = r#"{"label": "no preview"}"#;
+        let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
+        assert_eq!(item.label, "no preview");
+        assert!(item.preview.is_none());
     }
 
     #[test]
