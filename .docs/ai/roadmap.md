@@ -4,6 +4,37 @@
 
 Terminal-native Raycast: a keyboard-driven command palette for personal productivity plugins. Launch, search, act, dismiss.
 
+## Now / Next / Later
+
+Active items. Trim as completed.
+
+### Now (v0.14.0 — ready to cut after smoke test)
+
+Five v0.14.0 commits in larkline (`v0.14.0-prep` branch) + one in lark.nvim (`v0.14.0-prep` branch). Wire-format change is purely additive: `OutputItem.preview: Option<String>`. Telescope's right-hand pane renders the focused row's preview while scrolling.
+
+Pre-tag smoke test against a real nvim + telescope environment, then:
+
+```sh
+bash scripts/release.sh set 0.14.0   # in larkline
+git tag v0.14.0 && git push --tags    # in lark.nvim
+```
+
+Smoke-test gate covers: telescope `lark` picker preview pane updates smoothly under j/k; Atlassian preview_full toggle on/off; Bitwarden vault preview with redacted passwords; Generate Password form fallback into floating-terminal TUI; Docker Dashboard mini-app fallback. Confluence quality check: if macro-heavy pages render ugly placeholders, gate behind `preview_full_confluence` for v0.14.x.
+
+### Next (open follow-ups, not blocking v0.14.0)
+
+- Register Atlassian OAuth app (carried from v0.12.0) — Taylor's call.
+- Lazy preview fetching (Approach B) — fetch `preview` on demand via a `preview_action` callback. Worth revisiting once we have data on whether `preview_full=true` Atlassian latency hurts in practice.
+- Treesitter highlighting beyond markdown filetype default.
+- Attachments / images in previews (binary content is silently skipped today).
+- Streaming previews (live-update while reading).
+
+### Later (v0.15.0+ candidates)
+
+- `cargo-dist` evaluation — replace `scripts/release.sh` + `release.yml`.
+- PagerDuty / 1Password CLI plugin deep-dives (deferred while Taylor isn't using them).
+- Atlassian `switch` for multi-cloud orgs.
+
 ## Completed Milestones
 
 | Phase | Summary |
@@ -176,11 +207,9 @@ Taylor tags after a manual smoke test.
 
 ---
 
-## Backlog (parallel work for smaller models)
+## Backlog
 
-<!-- tier3_owner: claude -->
-
-These items can be worked on by cheaper AI assistants alongside any phase. They are scoped, low-risk, and don't require deep architectural knowledge.
+> Self-contained items any agent can pick up alongside any phase. Scoped, low-risk; first agent to start it executes it. Tier hints are advice, not gating.
 
 ### Guardrails
 
@@ -215,7 +244,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [ ] Example plugin READMEs
 - [ ] Keybinding reference accuracy check vs actual defaults in code
 
-### Haiku Tier (trivial — smallest models)
+### Mechanical (Haiku candidates)
 
 - [x] AI Projects plugin: deduplicate inlined `discover_projects()` + helpers across 5 Lua files — extract canonical copy in lib.lua with instructions for manual paste (sandbox has no require)
 - [x] Docker plugin: deduplicate Docker availability check across 6 command files (`containers.lua`, `compose.lua`, `images.lua`, `volumes.lua`, `networks.lua`, `system.lua`)
@@ -238,7 +267,7 @@ These items can be worked on by cheaper AI assistants alongside any phase. They 
 - [ ] **Lock-after-clipboard:** optional setting to auto-lock vault N seconds after a password copy (matches Raycast behaviour)
 - [ ] **TOTP countdown in detail view:** render a live 30-second countdown next to the TOTP row (would need widget auto-refresh or streaming output)
 
-### Sonnet Tier (moderate — mid-tier models)
+### Refactors (Sonnet candidates)
 
 - [x] Docker plugin: extract shared helpers (availability check, result parsing, action builders) into pattern matching AI Projects' approach
 - [x] Git plugin: `status.lua`, `branches.lua`, `log.lua`, `stash.lua` all duplicate `repo_name()` and repo validation — extract shared pattern

@@ -1,5 +1,51 @@
 # Larkline — Agent Instructions
 
+Project-specific guidance for any AI coding agent (Claude Code, Codex, Copilot, etc.). Shared agent behavior (TaskCreate/TaskUpdate, OPENAI_API_KEY conventions, shell discipline) lives in `~/AGENTS.md`.
+
+**Source of truth:** `docs/ARCHITECTURE.md` — all architectural decisions, the phased roadmap, and technology choices live there. Read it before starting any phase.
+
+## Project Overview
+
+Larkline is a Rust-based terminal command palette. Binary: `lark`. Crate: `larkline`. Rust edition: 2024, MSRV 1.85+.
+
+## Architecture Invariants
+
+These are non-negotiable design decisions. Do not violate them:
+
+1. **The `Plugin` trait is sacred.** All plugin backends implement `Plugin`. Never bypass the trait with backend-specific logic in the engine or TUI layers.
+2. **TUI reads state, never owns it.** The TUI layer renders `AppState`. It does not mutate state, make network calls, or execute plugins. State transitions happen in `app.rs`.
+3. **Async via channels, not callbacks.** Plugin results flow from Tokio tasks to the render loop via `tokio::sync::mpsc`. No shared mutable state between the render thread and plugin tasks.
+4. **Graceful degradation.** If a plugin crashes, times out, or returns invalid output — show an error in the output pane, never crash the app.
+5. **No GUI dependencies.** Terminal only. No Electron, webviews, or GUI toolkit imports.
+
+## Build & Development
+
+```bash
+cargo build
+cargo build --release
+cargo test
+cargo clippy -- -D warnings
+cargo fmt
+cargo fmt -- --check   # CI check mode
+cargo run
+
+# CLI flags (no TUI launched)
+cargo run -- --version
+cargo run -- --help
+cargo run -- --print-alias zsh   # also: bash, fish
+cargo run -- init-plugin my-plugin          # Lua scaffold
+cargo run -- init-plugin my-plugin --shell  # Shell scaffold
+```
+
+## Code Style
+
+- Follow the `rust-best-practices` skill (Apollo GraphQL style)
+- Use `thiserror` for library errors (plugin traits, config parsing)
+- Use `anyhow` for application-level errors (main, app state)
+- Prefer `&str` over `String` in function parameters where possible
+- Use `tracing` for all logging (never `println!` or `eprintln!` — they corrupt the TUI)
+- Structured logging: `tracing::info!(plugin_name = %name, "executing plugin")`
+
 ## Skills
 
 All agents working on this codebase should leverage:
