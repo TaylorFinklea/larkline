@@ -94,6 +94,9 @@ lark.register({
                 url = issue_url,
                 copy_text = issue_url,
                 actions = actions,
+                -- Telescope previewer (lark.nvim v0.14.0): search/issues already
+                -- returns the issue body, so plumbing this is zero-cost.
+                preview = issue.body,
             }
         end
 
