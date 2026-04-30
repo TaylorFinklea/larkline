@@ -164,31 +164,19 @@ local function type_label(t)
     return "Item"
 end
 
-local function item_to_row(item)
-    local detail_parts = { type_label(item.type) }
-    if item.type == 1 and item.login then
-        if item.login.username and item.login.username ~= "" then
-            detail_parts[#detail_parts + 1] = item.login.username
-        end
-        local uri = primary_uri(item)
-        if uri then detail_parts[#detail_parts + 1] = uri end
-    elseif item.type == 3 and item.card then
-        if item.card.brand and item.card.brand ~= "" then
-            detail_parts[#detail_parts + 1] = item.card.brand
-        end
-    end
-    if item.favorite then detail_parts[#detail_parts + 1] = "⭐" end
-
-    return {
-        label = item.name or "Untitled",
-        detail = table.concat(detail_parts, "  ·  "),
-        icon = icon_for_type(item.type),
-        copy_text = (item.type == 1 and item.login and item.login.password) or item.name,
-        actions = build_item_actions(item),
-    }
+-- SHARED: render_detail_markdown — build the markdown body for a vault item.
+-- Used by both the TUI detail view (`raw_text`) and the lark.nvim Telescope
+-- preview pane (`preview`). Always honors the `redact_secrets` setting so the
+-- preview pane never leaks passwords/CVV/SSN to a screenshare. Caps output at
+-- 5KB to keep the JSON payload small.
+local PREVIEW_CAP = 5 * 1024
+local function preview_truncate(s)
+    if type(s) ~= "string" then return s end
+    if #s <= PREVIEW_CAP then return s end
+    return s:sub(1, PREVIEW_CAP) .. "\n\n…(truncated)"
 end
 
-local function detail_output(item)
+local function render_detail_markdown(item)
     local redact_on = redact_enabled()
     local lines = {}
     local function kv(k, v) if v and v ~= "" then lines[#lines + 1] = "- **" .. k .. ":** " .. v end end
@@ -239,7 +227,38 @@ local function detail_output(item)
         lines[#lines + 1] = ""
         lines[#lines + 1] = item.notes
     end
+    return preview_truncate(table.concat(lines, "\n"))
+end
 
+local function item_to_row(item)
+    local detail_parts = { type_label(item.type) }
+    if item.type == 1 and item.login then
+        if item.login.username and item.login.username ~= "" then
+            detail_parts[#detail_parts + 1] = item.login.username
+        end
+        local uri = primary_uri(item)
+        if uri then detail_parts[#detail_parts + 1] = uri end
+    elseif item.type == 3 and item.card then
+        if item.card.brand and item.card.brand ~= "" then
+            detail_parts[#detail_parts + 1] = item.card.brand
+        end
+    end
+    if item.favorite then detail_parts[#detail_parts + 1] = "⭐" end
+
+    return {
+        label = item.name or "Untitled",
+        detail = table.concat(detail_parts, "  ·  "),
+        icon = icon_for_type(item.type),
+        copy_text = (item.type == 1 and item.login and item.login.password) or item.name,
+        -- Telescope preview pane (lark.nvim v0.14.0). `bw list items` already
+        -- carries full bodies, so this is a free plumb. Honors the existing
+        -- redact_secrets setting — never leaks passwords/CVV/SSN.
+        preview = render_detail_markdown(item),
+        actions = build_item_actions(item),
+    }
+end
+
+local function detail_output(item)
     local panel = { item_to_row(item) }
     for _, a in ipairs(build_item_actions(item)) do
         if a.kind == "clipboard" then
@@ -248,7 +267,7 @@ local function detail_output(item)
     end
     return {
         title = item.name or "Detail",
-        raw_text = table.concat(lines, "\n"),
+        raw_text = render_detail_markdown(item),
         output_format = "markdown",
         items = panel,
     }
