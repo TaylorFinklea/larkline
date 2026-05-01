@@ -2,6 +2,17 @@
 -- Set the `default_project_key` plugin setting to a project key (e.g. "PROJ").
 -- Shared helpers copied from lib.lua.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
 local function not_signed_in_error(title)
     return {
         title = title or "Atlassian",
@@ -10,6 +21,7 @@ local function not_signed_in_error(title)
                 label = "Not signed in to Atlassian",
                 detail = "Run `lark atlassian login` for OAuth, or set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host for API-token auth",
                 icon = "🔒",
+                help_url = "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
                 actions = {
                     { label = "Run `lark atlassian login`", kind = "shell", args = { "lark atlassian login" } },
                 },
@@ -61,24 +73,46 @@ local function build_query(params)
     return #parts == 0 and "" or "?" .. table.concat(parts, "&")
 end
 local function http_error_output(title, status, body)
-    local msg = (status == 401) and "401 Unauthorized — token revoked or expired"
-        or (status == 403) and "403 Forbidden — account lacks permission"
-        or (status == 404) and "404 Not Found — check project key"
-        or (status >= 500) and string.format("%d — Atlassian is having issues", status)
-        or "HTTP " .. tostring(status)
+    local msg, help_url
+    if status == 401 then
+        msg = "401 Unauthorized — token revoked or expired"
+        help_url = "https://id.atlassian.com/manage-profile/security/api-tokens"
+    elseif status == 403 then
+        msg = "403 Forbidden — account lacks permission"
+        help_url = "https://id.atlassian.com/manage-profile/security/api-tokens"
+    elseif status == 404 then
+        msg = "404 Not Found — check project key"
+        help_url = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/"
+    elseif status >= 500 then
+        msg = string.format("%d — Atlassian is having issues", status)
+        help_url = "https://status.atlassian.com/"
+    else
+        msg = "HTTP " .. tostring(status)
+        help_url = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/"
+    end
     local detail = body and body:gsub("\n", " "):sub(1, 160) or ""
-    return { title = title, items = { { label = "Atlassian API error",
-        detail = msg .. (detail ~= "" and " · " .. detail or ""), icon = "!" } } }
+    return { title = title, items = { error_item({
+        label = "Atlassian API error",
+        detail = msg .. (detail ~= "" and " · " .. detail or ""),
+        help_url = help_url,
+    }) } }
 end
 local function atlassian_get(auth, base, path, params, title)
     local url = base .. path .. build_query(params)
     local resp = lark.http.get(url, { headers = { Authorization = auth.header, Accept = "application/json" }, timeout = 15 })
     if not resp or resp.status == nil then
-        return nil, { title = title, items = { { label = "No response from Atlassian", detail = url, icon = "!" } } }
+        return nil, { title = title, items = { error_item({
+            label = "No response from Atlassian",
+            detail = url,
+            help_url = "https://status.atlassian.com/",
+        }) } }
     end
     if resp.status < 200 or resp.status >= 300 then return nil, http_error_output(title, resp.status, resp.body) end
     local ok, data = pcall(lark.json.decode, resp.body)
-    if not ok then return nil, { title = title, items = { { label = "Invalid JSON", icon = "!" } } } end
+    if not ok then return nil, { title = title, items = { error_item({
+        label = "Invalid JSON",
+        help_url = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/",
+    }) } } end
     return data, nil
 end
 
