@@ -1,5 +1,83 @@
 # Changelog
 
+## v0.15.0 — Plugin Error UX (unreleased)
+
+Error rows produced by plugins (auth missing, API down, missing CLI, parse
+failures) now carry actionable affordances. Press `r` to retry the specific
+operation that failed, `o` to open a troubleshooting URL — the status bar shows
+`[r] retry` and `[o] help` hints automatically when those affordances are set.
+
+### Wire format
+
+- `OutputItem.retry_action: Option<ItemAction>` — when set, `r` dispatches this
+  action instead of the default whole-plugin rerun. Useful for chain-context
+  failures where the standard rerun would lose state. Most plugins leave it
+  unset; the `r` key still falls through to the existing whole-plugin rerun.
+- `OutputItem.help_url: Option<String>` — when set, `o` opens this URL instead
+  of `url`. Convention: error rows carry `help_url` pointing at troubleshooting
+  docs (auth setup, install instructions, status pages); normal rows leave it
+  unset and use `url` for the primary openable link.
+
+Both fields are additive: existing items continue to deserialize unchanged.
+
+### Lua helpers
+
+- New canonical reference module at `examples/plugins/_shared/errors.lua` with
+  `error_item(opts)` (builds a structured error row with `icon = "!"` plus the
+  new fields) and `from_exit(stderr, hints)` (translates known shell-stderr
+  patterns to friendly error rows: missing CLI, auth failure, rate limit,
+  network down). Plugins copy these inline using `-- SHARED:` markers since the
+  Lark Lua sandbox has no `require`. Tests in
+  `tests/plugin_error_translator_test.rs` cover all four translator patterns
+  plus the unmatched fall-through case.
+
+### Plugin migrations
+
+Every deep-dive plugin now wraps existing error items in `error_item()` and
+attaches `help_url` to known troubleshooting docs:
+
+- **GitHub** — auth, install, REST docs, rate-limit. Status-aware
+  `github_http_error(status)` helper for HTTP failures.
+- **Atlassian** — API token regen page (401/403), REST docs (404), Atlassian
+  status page (5xx + network), and the OAuth login flow on the
+  not-signed-in row.
+- **Bitwarden** — Bitwarden CLI docs and the "using the CLI" section for
+  locked / not-logged-in / `BW_SESSION` failures via a `bw_help_url_for(msg)`
+  router.
+- **Linear** — personal-API-keys docs, settings/api page (401/403),
+  rate-limiting docs (429), and generic API docs.
+- **Docker** — `get-docker/` for missing install, `daemon/start/` for
+  daemon-down rows, compose docs for compose-specific errors.
+- **Kubernetes** — `install-kubectl/`, kubectl reference, kubeconfig-organize
+  for context errors.
+- **Home Assistant** — auth docs (token missing / 401), REST API docs (404 /
+  generic), remote-config docs (cannot reach), via a new
+  `ha_http_error(resp, url)` translator inlined into all 22 command files.
+
+### Status bar hints
+
+In `ViewOutput` mode, when the focused item has `retry_action` set, the status
+bar appends `[r] retry`. When it has `help_url`, `[o] help` appears. Hints
+surface only when the affordance is real.
+
+### TUI dispatch changes
+
+- `Action::OpenUrl` (`o`) now prefers `item.help_url` over `item.url` so error
+  rows route to docs without inventing a new key.
+- `Action::RerunCommand` (`r`) now checks `item.retry_action` first and falls
+  through to the standard whole-plugin rerun when unset. Preserves chain
+  context that engine.execute would lose.
+
+### Notes
+
+- `lark.exec()` returns stdout only — stderr is dropped today. The
+  `from_exit(stderr, hints)` translator is included verbatim in shell plugins
+  for forward compatibility; it activates automatically when a stderr-aware
+  exec API ships.
+- `examples/plugins/_shared/` (and any future `_`/`.`-prefixed directory) is
+  silently skipped by `registry::scan` — these dirs aren't plugins, they're
+  shared reference modules.
+
 ## v0.14.0 — lark.nvim v4 (Telescope picker previewers) (unreleased)
 
 While scrolling rows in a Telescope `lark` results picker, the right-hand
