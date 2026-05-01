@@ -202,6 +202,15 @@ pub struct OutputItem {
     /// Plugins should pre-truncate at ~5KB to keep the JSON payload small.
     #[serde(default)]
     pub preview: Option<String>,
+    /// Optional action invoked when the user retries an error item (`r` in TUI, `<C-r>` in
+    /// Telescope). Plugins set this on items whose backing call failed transiently — typically
+    /// the same action that produced the error, so retrying re-fires it.
+    #[serde(default)]
+    pub retry_action: Option<ItemAction>,
+    /// Optional documentation or troubleshooting URL opened by the help affordance (`?` in TUI,
+    /// `<C-?>` in Telescope). Set on error items where a known fix exists upstream.
+    #[serde(default)]
+    pub help_url: Option<String>,
     /// Arbitrary key-value pairs for table column resolution and future extensibility.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
@@ -475,6 +484,50 @@ mod tests {
         let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
         assert_eq!(item.label, "no preview");
         assert!(item.preview.is_none());
+    }
+
+    #[test]
+    fn retry_action_round_trips() {
+        let item = OutputItem {
+            label: "Auth failed".to_string(),
+            icon: Some("!".to_string()),
+            retry_action: Some(ItemAction {
+                id: Some("retry".to_string()),
+                label: "Retry".to_string(),
+                kind: ActionKind::Chain,
+                args: vec!["fetch_issues".to_string()],
+                confirm: false,
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&item).expect("serialization failed");
+        let round: OutputItem = serde_json::from_str(&json).expect("round-trip failed");
+        let retry = round.retry_action.expect("retry_action lost in round-trip");
+        assert_eq!(retry.kind, ActionKind::Chain);
+        assert_eq!(retry.args, vec!["fetch_issues"]);
+    }
+
+    #[test]
+    fn help_url_round_trips() {
+        let item = OutputItem {
+            label: "Missing CLI".to_string(),
+            help_url: Some("https://cli.github.com/manual/installation".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&item).expect("serialization failed");
+        let round: OutputItem = serde_json::from_str(&json).expect("round-trip failed");
+        assert_eq!(
+            round.help_url.as_deref(),
+            Some("https://cli.github.com/manual/installation")
+        );
+    }
+
+    #[test]
+    fn error_fields_absent_default_to_none() {
+        let json = r#"{"label": "plain item"}"#;
+        let item: OutputItem = serde_json::from_str(json).expect("deserialization failed");
+        assert!(item.retry_action.is_none());
+        assert!(item.help_url.is_none());
     }
 
     #[test]
