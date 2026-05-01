@@ -13,6 +13,12 @@ fn shipped_plugin_manifests_parse_and_entries_exist() {
         .expect("failed to read examples/plugins")
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.is_dir())
+        // Mirror `registry::scan`: skip `_`/`.`-prefixed dirs (e.g. `_shared/`).
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| !n.starts_with('_') && !n.starts_with('.'))
+        })
         .collect();
     plugin_dirs.sort();
 

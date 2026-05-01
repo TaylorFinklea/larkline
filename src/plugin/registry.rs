@@ -311,6 +311,15 @@ pub fn scan(dirs: &[PathBuf]) -> anyhow::Result<Vec<DiscoveredPlugin>> {
             if !path.is_dir() {
                 continue;
             }
+            // Skip non-plugin directories by convention: `_`-prefixed (shared
+            // helper modules like `_shared/`) and `.`-prefixed (hidden).
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('_') || n.starts_with('.'))
+            {
+                continue;
+            }
             match parse_manifest(&path) {
                 Ok(discovered) => {
                     for plugin in &discovered {
