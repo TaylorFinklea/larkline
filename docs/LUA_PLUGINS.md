@@ -47,9 +47,12 @@ Every Lua plugin must call `lark.register()` with a table containing an `on_run`
 |-------|------|----------|-------------|
 | `label` | string | yes | Primary text |
 | `detail` | string | no | Secondary text (dimmed) |
-| `icon` | string | no | Emoji or single char |
+| `icon` | string | no | Emoji or single char (use `"!"` for error rows) |
 | `url` | string | no | URL for open action |
 | `actions` | array | no | Item actions (see below) |
+| `preview` | string | no | Markdown body for the lark.nvim Telescope preview pane (TUI ignores) |
+| `retry_action` | object | no | ItemAction fired by `r` — overrides the default whole-plugin rerun |
+| `help_url` | string | no | URL opened by `o` — preferred over `url` for troubleshooting links on error rows |
 
 ### Item Actions
 
@@ -154,12 +157,50 @@ All I/O goes through the `lark.*` API. Memory is capped at 32 MB per run.
 
 ## Error Handling
 
+### Engine-level failures
+
 - **Syntax errors** in your Lua file show as "Lua syntax/load error" in the output pane
 - **Runtime errors** (nil access, type errors) show as "on_run error: ..."
 - **Missing `lark.register()`** shows "plugin did not call lark.register()"
 - **Timeout** shows the standard timeout error
 
 The app never crashes from a plugin error.
+
+### Structured error rows (v0.15.0+)
+
+When your plugin's expected operation fails (auth missing, API down, CLI not installed), return an error row instead of a hard error. Two optional fields make the failure actionable:
+
+- `retry_action` — an `ItemAction` fired by `r`. Use this for chain-context failures where the default whole-plugin rerun would lose state. Most plugins leave it unset and rely on the standard `r` rerun.
+- `help_url` — a URL opened by `o` (takes precedence over `url`). Point at troubleshooting docs: install instructions, auth setup, status pages.
+
+Both surface in the status bar — `[r] retry` and `[o] help` hints appear automatically when the focused item has them.
+
+The canonical Lua helpers live at [`examples/plugins/_shared/errors.lua`](../examples/plugins/_shared/errors.lua) and are inlined into each plugin (the sandbox has no `require`). Two helpers:
+
+```lua
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
+-- Usage on a missing-token error:
+return {
+    title = "My PRs",
+    items = { error_item({
+        label = "GITHUB_TOKEN not set",
+        detail = "Add it to ~/.config/larkline/.env",
+        help_url = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+    }) },
+}
+```
+
+`from_exit(stderr, hints)` translates known stderr patterns (missing CLI, auth failure, network down, rate limit) into structured error items. It's wired into shell-based plugins for forward compatibility — the host's `lark.exec` returns stdout only today, so the translator activates fully when a stderr-aware exec API ships.
 
 ## When to Use Lua vs Shell
 

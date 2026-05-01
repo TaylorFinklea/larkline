@@ -245,6 +245,11 @@ pub struct OutputItem {
     pub actions: Vec<ItemAction>,
     pub copy_text: Option<String>,         // Override for `y` (TUI copy)
     pub preview: Option<String>,           // Markdown body for lark.nvim Telescope preview pane (v0.14.0+)
+    pub retry_action: Option<ItemAction>,  // Action fired by `r` on this row (v0.15.0+ — retries the
+                                           // specific operation; falls through to whole-plugin rerun
+                                           // when unset)
+    pub help_url: Option<String>,          // URL opened by `o` on this row (v0.15.0+ — preferred over
+                                           // `url` so error rows can point at troubleshooting docs)
     pub metadata: HashMap<String, String>, // Extensible key-value pairs
 }
 
@@ -405,6 +410,14 @@ The contract between script plugins and the host. Plugins write this JSON to std
           "preview": {
             "type": "string",
             "description": "Markdown body shown in the lark.nvim Telescope preview pane (v0.14.0+). The TUI ignores this field. Plugins should pre-truncate at ~5KB."
+          },
+          "retry_action": {
+            "type": "object",
+            "description": "ItemAction (same shape as `actions[]` entries) fired by the user pressing `r` on this row (v0.15.0+). When set, overrides the default whole-plugin rerun — useful for retrying a specific failed step in a chain context. Most plugins leave this unset and rely on the rerun fallback."
+          },
+          "help_url": {
+            "type": "string",
+            "description": "URL opened by `o` on this row (v0.15.0+). When set, takes precedence over `url`. Convention: error rows carry `help_url` pointing at troubleshooting docs (auth setup, install instructions, status pages); normal rows leave it unset and use `url` for the primary openable link."
           },
           "metadata": {
             "type": "object",
