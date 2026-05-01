@@ -1682,8 +1682,10 @@ impl App {
 
             Action::OpenUrl => {
                 if self.state.mode == Mode::ViewOutput {
+                    // Error items set `help_url` to point at troubleshooting docs; prefer it
+                    // over `url` so `o` opens help when on a structured error row.
                     let url = crate::app_output::selected_output_item(&self.state)
-                        .and_then(|item| item.url.clone());
+                        .and_then(|item| item.help_url.clone().or_else(|| item.url.clone()));
                     if let Some(url) = url {
                         open_url(&url);
                         self.state.status_message =
@@ -1839,7 +1841,14 @@ impl App {
             }
 
             Action::RerunCommand => {
-                if let Some(plugin_index) = self.state.viewing_plugin_index {
+                // If the focused item carries a `retry_action`, dispatch that — preserves
+                // chain context that `engine.execute(plugin_index)` would lose. Falls
+                // through to the standard rerun when no retry_action is present.
+                let retry = crate::app_output::selected_output_item(&self.state)
+                    .and_then(|item| item.retry_action.clone());
+                if let Some(retry) = retry {
+                    self.execute_item_action(&retry);
+                } else if let Some(plugin_index) = self.state.viewing_plugin_index {
                     // Clear cache so execution always runs fresh.
                     self.state.result_cache.remove(&plugin_index);
                     self.state.plugin_output = None;

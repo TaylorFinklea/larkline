@@ -1489,6 +1489,15 @@ fn render_status_bar(
                             spans.extend(key_hint("⏎", "action", theme));
                             spans.extend(key_hint("SPC", "menu", theme));
                             spans.extend(key_hint("Esc", "back", theme));
+                            // Surface error-item affordances when the focused row has them.
+                            if let Some(item) = crate::app_output::selected_output_item(state) {
+                                if item.retry_action.is_some() {
+                                    spans.extend(key_hint("r", "retry", theme));
+                                }
+                                if item.help_url.is_some() {
+                                    spans.extend(key_hint("o", "help", theme));
+                                }
+                            }
                         }
                     }
                 }
