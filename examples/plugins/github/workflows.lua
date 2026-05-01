@@ -1,5 +1,16 @@
 -- GitHub: Workflow Runs — recent CI/CD runs across your repos.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
 local function time_ago(iso_str)
     if not iso_str then return "" end
     local ts = lark.exec("date", { "-jf", "%Y-%m-%dT%H:%M:%SZ", iso_str, "+%s" })
@@ -18,7 +29,11 @@ lark.register({
         if not token then
             return {
                 title = "Workflow Runs",
-                items = { { label = "GITHUB_TOKEN not set", detail = "Add it to ~/.config/larkline/.env", icon = "!" } },
+                items = { error_item({
+                    label = "GITHUB_TOKEN not set",
+                    detail = "Add it to ~/.config/larkline/.env",
+                    help_url = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+                }) },
             }
         end
 
@@ -34,9 +49,17 @@ lark.register({
         )
 
         if repo_resp.status ~= 200 then
+            local label = "Failed to fetch repos"
+            local detail = "HTTP " .. repo_resp.status
+            local help = "https://docs.github.com/en/rest"
+            if repo_resp.status == 401 or repo_resp.status == 403 then
+                label = "GitHub auth failed"
+                detail = "Run `gh auth login` or refresh GITHUB_TOKEN"
+                help = "https://docs.github.com/en/authentication"
+            end
             return {
                 title = "Workflow Runs",
-                items = { { label = "Failed to fetch repos", detail = "HTTP " .. repo_resp.status, icon = "!" } },
+                items = { error_item({ label = label, detail = detail, help_url = help }) },
             }
         end
 
@@ -44,7 +67,7 @@ lark.register({
         if not ok or type(repos) ~= "table" then
             return {
                 title = "Workflow Runs",
-                items = { { label = "Failed to parse repos", icon = "!" } },
+                items = { error_item({ label = "Failed to parse repos" }) },
             }
         end
 

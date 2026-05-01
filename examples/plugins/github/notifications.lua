@@ -1,6 +1,17 @@
 -- GitHub: Notifications — unread notifications with mark-read actions.
 -- Shared helpers copied from lib.lua.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
 local function gh_headers(token)
     return {
         Authorization = "Bearer " .. token,
@@ -13,8 +24,34 @@ local function github_token_or_error(title)
     if token then return token end
     return nil, {
         title = title,
-        items = { { label = "GITHUB_TOKEN not set", detail = "Add it to ~/.config/larkline/.env", icon = "!" } },
+        items = { error_item({
+            label = "GITHUB_TOKEN not set",
+            detail = "Add it to ~/.config/larkline/.env",
+            help_url = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+        }) },
     }
+end
+
+local function github_http_error(status, extra)
+    if status == 401 or status == 403 then
+        return error_item({
+            label = "GitHub auth failed",
+            detail = (extra and (extra .. " · ") or "") .. "Run `gh auth login` or refresh GITHUB_TOKEN",
+            help_url = "https://docs.github.com/en/authentication",
+        })
+    end
+    if status == 429 then
+        return error_item({
+            label = "GitHub rate limited",
+            detail = "Try again in a few minutes",
+            help_url = "https://docs.github.com/en/rest/overview/resources-in-the-rest-api#rate-limiting",
+        })
+    end
+    return error_item({
+        label = "GitHub API error",
+        detail = "HTTP " .. tostring(status) .. (extra and (" · " .. extra) or ""),
+        help_url = "https://docs.github.com/en/rest",
+    })
 end
 
 local function type_icon(subject_type)
@@ -49,7 +86,7 @@ lark.register({
         if resp.status ~= 200 then
             return {
                 title = "Notifications",
-                items = { { label = "GitHub API error", detail = "HTTP " .. resp.status, icon = "!" } },
+                items = { github_http_error(resp.status) },
             }
         end
 
@@ -57,7 +94,7 @@ lark.register({
         if not ok or type(notifs) ~= "table" then
             return {
                 title = "Notifications",
-                items = { { label = "Failed to parse response", icon = "!" } },
+                items = { error_item({ label = "Failed to parse response" }) },
             }
         end
 
