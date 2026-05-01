@@ -1,6 +1,95 @@
 -- Docker: Compose — manage Compose stacks with logs, services, lifecycle.
 -- Shared helpers copied from lib.lua.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
+-- SHARED: from_exit — canonical copy in examples/plugins/_shared/errors.lua.
+local function from_exit(stderr, hints)
+    hints = hints or {}
+    stderr = stderr or ""
+    local lower = stderr:lower()
+
+    if lower:find("command not found", 1, true)
+        or lower:find("no such file or directory", 1, true) then
+        local cli = hints.cli or "command"
+        local detail
+        if hints.install_url then
+            detail = "Install: " .. hints.install_url
+        else
+            detail = "Check your $PATH"
+        end
+        return error_item({
+            label = cli .. " not found",
+            detail = detail,
+            help_url = hints.install_url,
+            retry_action = hints.retry_action,
+        })
+    end
+
+    if lower:find("401", 1, true)
+        or lower:find("403", 1, true)
+        or lower:find("unauthorized", 1, true)
+        or lower:find("forbidden", 1, true)
+        or lower:find("not authenticated", 1, true)
+        or lower:find("not logged in", 1, true)
+        or lower:find("authentication required", 1, true) then
+        local detail
+        if hints.login_command then
+            detail = "Run `" .. hints.login_command .. "`"
+        else
+            detail = "Check credentials"
+        end
+        return error_item({
+            label = (hints.service or "Service") .. " auth failed",
+            detail = detail,
+            help_url = hints.login_help_url,
+            retry_action = hints.retry_action,
+        })
+    end
+
+    if lower:find("429", 1, true)
+        or lower:find("rate limit", 1, true)
+        or lower:find("too many requests", 1, true) then
+        local retry_after = stderr:match("[Rr]etry%-[Aa]fter:?%s*(%d+)")
+        local detail
+        if retry_after then
+            detail = "Rate limited — retry in " .. retry_after .. "s"
+        else
+            detail = "Rate limited — try again later"
+        end
+        return error_item({
+            label = (hints.service or "Service") .. " rate limited",
+            detail = detail,
+            help_url = hints.login_help_url,
+            retry_action = hints.retry_action,
+        })
+    end
+
+    if lower:find("could not resolve host", 1, true)
+        or lower:find("getaddrinfo", 1, true)
+        or lower:find("name or service not known", 1, true)
+        or lower:find("connection refused", 1, true)
+        or lower:find("network is unreachable", 1, true)
+        or lower:find("no route to host", 1, true) then
+        return error_item({
+            label = "Network unreachable",
+            detail = "Check your connection",
+            retry_action = hints.retry_action,
+        })
+    end
+
+    return nil
+end
+
 -- SHARED: trim (canonical copy in lib.lua)
 local function trim(text)
     if not text then return nil end
@@ -71,7 +160,11 @@ lark.register({
             if not v1 or not v1:match("docker%-compose") then
                 return {
                     title = "Compose",
-                    items = { { label = "Docker Compose not installed", icon = "!" } },
+                    items = { error_item({
+                        label = "Docker Compose not installed",
+                        detail = "Install: https://docs.docker.com/compose/install/",
+                        help_url = "https://docs.docker.com/compose/",
+                    }) },
                 }
             end
         end
@@ -87,7 +180,12 @@ lark.register({
         if not raw or raw == "" then
             return {
                 title = "Compose",
-                items = { { label = "No Compose projects found", icon = "📭" } },
+                items = { error_item({
+                    label = "No Compose projects found",
+                    detail = "Run `docker compose up` in a project directory first",
+                    icon = "📭",
+                    help_url = "https://docs.docker.com/compose/",
+                }) },
             }
         end
 
@@ -155,7 +253,12 @@ lark.register({
         if #items == 0 then
             return {
                 title = "Compose",
-                items = { { label = "No Compose projects found", icon = "📭" } },
+                items = { error_item({
+                    label = "No Compose projects found",
+                    detail = "Run `docker compose up` in a project directory first",
+                    icon = "📭",
+                    help_url = "https://docs.docker.com/compose/",
+                }) },
             }
         end
 
