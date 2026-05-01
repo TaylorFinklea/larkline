@@ -1,5 +1,16 @@
 -- Manage — add/remove favorites and hidden entities.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
 -- SHARED: get_config template (canonical copy in helpers.lua; only the title literal in error items diverges per file)
 local function get_config()
     local raw_url = lark.store.get("ha_url")
@@ -7,16 +18,51 @@ local function get_config()
     if url and url:sub(1, 1) == '"' then url = url:sub(2, -2) end
     local token = lark.env("HA_TOKEN")
     if not url or url == "" then
-        return nil, nil, { title = "Manage", items = {
-            { label = "HA URL not configured — open Settings (S)", icon = "!" },
-        }}
+        return nil, nil, { title = "Manage", items = { error_item({
+            label = "HA_URL or HA_TOKEN not set",
+            detail = "Add them to ~/.config/larkline/.env",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        }) } }
     end
     if not token or token == "" then
-        return nil, nil, { title = "Manage", items = {
-            { label = "HA_TOKEN not set — lark secret set HA_TOKEN", icon = "!" },
-        }}
+        return nil, nil, { title = "Manage", items = { error_item({
+            label = "HA_URL or HA_TOKEN not set",
+            detail = "Add them to ~/.config/larkline/.env",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        }) } }
     end
     return url:gsub("/$", ""), token, nil
+end
+
+-- SHARED: ha_http_error (canonical copy in helpers.lua)
+local function ha_http_error(resp, url)
+    if not resp then
+        return error_item({
+            label = "Cannot reach Home Assistant",
+            detail = url,
+            help_url = "https://www.home-assistant.io/docs/configuration/remote/",
+        })
+    end
+    local status = resp.status
+    if status == 401 or status == 403 then
+        return error_item({
+            label = "Home Assistant auth failed",
+            detail = "HA_TOKEN may be expired",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        })
+    end
+    if status == 404 then
+        return error_item({
+            label = "HA endpoint not found",
+            detail = "HTTP 404 at " .. tostring(url),
+            help_url = "https://developers.home-assistant.io/docs/api/rest/",
+        })
+    end
+    return error_item({
+        label = "Home Assistant API error",
+        detail = "HTTP " .. tostring(status),
+        help_url = "https://developers.home-assistant.io/docs/api/rest/",
+    })
 end
 
 -- SHARED: ha_headers (canonical copy in helpers.lua)
@@ -69,7 +115,11 @@ lark.register({
             local action = lark.form_values.action or ""
             local entity_id = lark.form_values.entity_id or ""
             if entity_id == "" then
-                return { title = "Manage", items = { { label = "No entity ID provided", icon = "!" } } }
+                return { title = "Manage", items = { error_item({
+                    label = "No entity ID provided",
+                    detail = "Open an entity row and use the Favorite/Hide actions",
+                    help_url = "https://developers.home-assistant.io/docs/api/rest/",
+                }) } }
             end
             if action == "favorite" then
                 local added = toggle_in_list("favorites", entity_id)
@@ -92,12 +142,15 @@ lark.register({
 
         local resp = lark.http.get(url .. "/api/states", { headers = ha_headers(token), timeout = 8 })
         if not resp or resp.status ~= 200 then
-            local code = resp and resp.status or "no response"
-            return { title = "Manage", items = { { label = "HA API error: " .. tostring(code), icon = "!" } } }
+            return { title = "Manage", items = { ha_http_error(resp, url .. "/api/states") } }
         end
         local ok, states = pcall(lark.json.decode, resp.body)
         if not ok or not states then
-            return { title = "Manage", items = { { label = "Invalid JSON from HA", icon = "!" } } }
+            return { title = "Manage", items = { error_item({
+                label = "Invalid JSON from Home Assistant",
+                detail = "Response body could not be parsed",
+                help_url = "https://developers.home-assistant.io/docs/api/rest/",
+            }) } }
         end
 
         -- Build lookup sets.
