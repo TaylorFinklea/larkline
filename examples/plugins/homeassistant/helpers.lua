@@ -1,21 +1,68 @@
 -- Helpers — input_boolean, input_number, input_select, input_text, input_button, input_datetime.
 
+-- SHARED: error_item — canonical copy in examples/plugins/_shared/errors.lua.
+local function error_item(opts)
+    return {
+        label = opts.label,
+        detail = opts.detail,
+        icon = opts.icon or "!",
+        retry_action = opts.retry_action,
+        help_url = opts.help_url,
+    }
+end
+
 local function get_config()
     local raw_url = lark.store.get("ha_url")
     local url = (type(raw_url) == "string" and raw_url ~= "") and raw_url or nil
     if url and url:sub(1, 1) == '"' then url = url:sub(2, -2) end
     local token = lark.env("HA_TOKEN")
     if not url or url == "" then
-        return nil, nil, { title = "Helpers", items = {
-            { label = "HA URL not configured — open Settings (S)", icon = "!" },
-        }}
+        return nil, nil, { title = "Helpers", items = { error_item({
+            label = "HA_URL or HA_TOKEN not set",
+            detail = "Add them to ~/.config/larkline/.env",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        }) } }
     end
     if not token or token == "" then
-        return nil, nil, { title = "Helpers", items = {
-            { label = "HA_TOKEN not set — lark secret set HA_TOKEN", icon = "!" },
-        }}
+        return nil, nil, { title = "Helpers", items = { error_item({
+            label = "HA_URL or HA_TOKEN not set",
+            detail = "Add them to ~/.config/larkline/.env",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        }) } }
     end
     return url:gsub("/$", ""), token, nil
+end
+
+-- SHARED: ha_http_error — translates HA HTTP status into a friendly error item.
+-- Canonical copy in examples/plugins/homeassistant/helpers.lua.
+local function ha_http_error(resp, url)
+    if not resp then
+        return error_item({
+            label = "Cannot reach Home Assistant",
+            detail = url,
+            help_url = "https://www.home-assistant.io/docs/configuration/remote/",
+        })
+    end
+    local status = resp.status
+    if status == 401 or status == 403 then
+        return error_item({
+            label = "Home Assistant auth failed",
+            detail = "HA_TOKEN may be expired",
+            help_url = "https://www.home-assistant.io/docs/authentication/",
+        })
+    end
+    if status == 404 then
+        return error_item({
+            label = "HA endpoint not found",
+            detail = "HTTP 404 at " .. tostring(url),
+            help_url = "https://developers.home-assistant.io/docs/api/rest/",
+        })
+    end
+    return error_item({
+        label = "Home Assistant API error",
+        detail = "HTTP " .. tostring(status),
+        help_url = "https://developers.home-assistant.io/docs/api/rest/",
+    })
 end
 
 local function ha_headers(token)
@@ -64,12 +111,15 @@ lark.register({
 
         local resp = lark.http.get(url .. "/api/states", { headers = ha_headers(token), timeout = 8 })
         if not resp or resp.status ~= 200 then
-            local code = resp and resp.status or "no response"
-            return { title = "Helpers", items = { { label = "HA API error: " .. tostring(code), icon = "!" } } }
+            return { title = "Helpers", items = { ha_http_error(resp, url .. "/api/states") } }
         end
         local ok, states = pcall(lark.json.decode, resp.body)
         if not ok or not states then
-            return { title = "Helpers", items = { { label = "Invalid JSON from HA", icon = "!" } } }
+            return { title = "Helpers", items = { error_item({
+                label = "Invalid JSON from Home Assistant",
+                detail = "Response body could not be parsed",
+                help_url = "https://developers.home-assistant.io/docs/api/rest/",
+            }) } }
         end
 
         local helper_domains = {
