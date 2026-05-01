@@ -8,29 +8,38 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 
 Active items. Trim as completed.
 
-### Now (v0.14.0 — ready to cut after smoke test)
+### Now (v0.14.0 + v0.15.0 — both ready to cut after smoke tests)
 
-Five v0.14.0 commits in larkline (`v0.14.0-prep` branch) + one in lark.nvim (`v0.14.0-prep` branch). Wire-format change is purely additive: `OutputItem.preview: Option<String>`. Telescope's right-hand pane renders the focused row's preview while scrolling.
+**v0.14.0** — five commits in larkline (`v0.14.0-prep`) + one in lark.nvim (`v0.14.0-prep`). Wire-format change: additive `OutputItem.preview: Option<String>`. Telescope renders the focused row's preview.
 
-Pre-tag smoke test against a real nvim + telescope environment, then:
+**v0.15.0** — eleven commits on top of v0.14.0 in larkline (`v0.15.0-prep`). Wire-format change: additive `OutputItem.retry_action` + `help_url`. Error rows in 7 deep-dive plugins now carry `help_url` to troubleshooting docs; status bar surfaces `[r] retry [o] help` hints.
+
+Pre-tag smoke tests, then in order:
 
 ```sh
-bash scripts/release.sh set 0.14.0   # in larkline
-git tag v0.14.0 && git push --tags    # in lark.nvim
+bash scripts/release.sh set 0.14.0     # larkline (smoke v0.14.0 first)
+git -C ~/git/lark.nvim tag v0.14.0 && git -C ~/git/lark.nvim push --tags
+bash scripts/release.sh set 0.15.0     # larkline (after v0.14.0 ships)
 ```
 
-Smoke-test gate covers: telescope `lark` picker preview pane updates smoothly under j/k; Atlassian preview_full toggle on/off; Bitwarden vault preview with redacted passwords; Generate Password form fallback into floating-terminal TUI; Docker Dashboard mini-app fallback. Confluence quality check: if macro-heavy pages render ugly placeholders, gate behind `preview_full_confluence` for v0.14.x.
+v0.14.0 smoke gate (5 scenarios): GitHub PR body in preview pane; Atlassian Jira `preview_full=true`; Confluence quality check; Bitwarden redacted preview; fallback paths for forms / mini-apps.
 
-### Next (open follow-ups, not blocking v0.14.0)
+v0.15.0 smoke gate (per migrated plugin): trigger a known failure (revoke token, break network, kill daemon), verify the focused error row shows the new `[o] help` hint and `o` opens the right docs page. Confirm `[r] retry` is *not* shown on routine error rows (rerun fallback handles them; `retry_action` is intentionally unused in this release).
+
+### Next (open follow-ups, not blocking v0.14.0/v0.15.0)
 
 - Register Atlassian OAuth app (carried from v0.12.0) — Taylor's call.
 - Lazy preview fetching (Approach B) — fetch `preview` on demand via a `preview_action` callback. Worth revisiting once we have data on whether `preview_full=true` Atlassian latency hurts in practice.
 - Treesitter highlighting beyond markdown filetype default.
 - Attachments / images in previews (binary content is silently skipped today).
 - Streaming previews (live-update while reading).
+- **Stderr-aware `lark.exec`** — the v0.15.0 `from_exit(stderr, hints)` translator is dormant in shell plugins because `lark.exec()` returns stdout only. Exposing stderr would activate friendly translation for missing-CLI / auth / rate-limit / network patterns across Docker, k8s, Bitwarden, HA. Cheap when scoped: extend the `lark.exec` host fn to return `(stdout, stderr, exit_code)` (or a struct), keep the existing single-return shape as a backwards-compatible alias.
+- **lark.nvim retry/help keymaps** — wire `<C-r>` / `<C-?>` in the Telescope results picker so v0.15.0 affordances surface there too. Cross-repo sub-step.
 
-### Later (v0.15.0+ candidates)
+### Later (v0.16.0+ candidates)
 
+- **Bitwarden v2** (theme): rbw, Send, organizations, attachments, edit/delete, lock-after-clipboard, TOTP countdown.
+- **lark.nvim v5** (theme): lazy preview fetching + treesitter + open-preview-in-buffer.
 - `cargo-dist` evaluation — replace `scripts/release.sh` + `release.yml`.
 - PagerDuty / 1Password CLI plugin deep-dives (deferred while Taylor isn't using them).
 - Atlassian `switch` for multi-cloud orgs.
@@ -196,6 +205,24 @@ Taylor tags after a manual smoke test.
 - Streaming previews (live-update while reading).
 - "Open preview in main buffer" action.
 
+### v0.15.0 — Plugin Error UX
+
+Error rows now carry actionable affordances. Press `r` to retry the specific
+operation, `o` to open troubleshooting docs — the status bar shows
+`[r] retry` / `[o] help` hints automatically when set. Wire-format change is
+purely additive: `OutputItem.retry_action` + `help_url`.
+
+- [x] Phase A: `OutputItem.retry_action: Option<ItemAction>` + `help_url: Option<String>` with serde tests
+- [x] Phase B: `examples/plugins/_shared/errors.lua` canonical reference + `tests/plugin_error_translator_test.rs` (7 mlua-driven tests covering missing CLI, auth, rate-limit, network, fallback)
+- [x] Phase C: TUI dispatch — `Action::OpenUrl` prefers `help_url`; `Action::RerunCommand` dispatches `retry_action` first; status bar appends conditional `[r] retry` / `[o] help` hints in `ViewOutput` mode
+- [x] Phase D: 7 plugin migrations, one commit each — GitHub, Atlassian, Bitwarden, Linear, Kubernetes, Home Assistant, Docker. All carry SHARED `error_item` (and `from_exit` for shell plugins). Every error row gets a `help_url` to status-aware docs pages.
+- [x] Phase E: Documentation — `docs/LUA_PLUGINS.md` Item Fields + Error Handling sections, `docs/ARCHITECTURE.md` schema + JSON, `CHANGELOG.md`
+- [x] Phase F: Roadmap + handoff + phase report
+
+**Deferred / dormant:**
+- `from_exit(stderr, hints)` is included verbatim in shell plugins (Docker, k8s, Bitwarden, HA) but cannot fire today: `lark.exec()` returns stdout only. Stderr-aware exec API is the activation key — listed in **Next**.
+- `lark.nvim` Telescope keymaps for `<C-r>` retry / `<C-?>` help — cross-repo sub-step. Listed in **Next**.
+
 ### Future (unordered — pick theme per release)
 
 - **lark.nvim v5+:** lazy preview fetching; preview-pane action ("open in
@@ -225,7 +252,7 @@ Taylor tags after a manual smoke test.
 - [x] Compose plugin: `-- SHARED:` markers above 5 duplicated helpers (canonical copy in `docker/lib.lua`)
 - [x] Audit all plugins for missing icons — every plugin must have one <!-- audited 2026-04-26: all 44 manifests have `icon` -->
 - [x] Audit shell plugins for jq safety — no raw `$var` interpolation in JSON strings <!-- audited 2026-04-26: all 5 shell entries clean -->
-- [ ] Improve plugin error output: convert raw stderr to user-friendly messages where feasible in plugin code
+- [x] Improve plugin error output: convert raw stderr to user-friendly messages where feasible in plugin code <!-- v0.15.0 — `error_item` + `help_url` across 7 plugins; `from_exit` stderr translator ready in shell plugins (dormant pending stderr-aware lark.exec) -->
 
 ### Test Coverage
 
