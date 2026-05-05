@@ -9,7 +9,7 @@ class Larkline < Formula
   desc "The line to all your tools — a keyboard-driven terminal command palette"
   homepage "https://github.com/TaylorFinklea/larkline"
   version "0.14.0"
-  license "GPL-3.0-only"
+  license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?

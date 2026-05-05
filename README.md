@@ -134,4 +134,4 @@ jq -n --arg label "$label" --arg detail "$detail" \
 
 ## License
 
-GPL-3.0-only — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
