@@ -35,7 +35,7 @@
           meta = with pkgs.lib; {
             description = cargoToml.package.description;
             homepage = cargoToml.package.homepage;
-            license = licenses.gpl3Only;
+            license = licenses.mit;
             maintainers = [ ];
             mainProgram = "lark";
             platforms = platforms.unix;
