@@ -216,20 +216,20 @@ purely additive: `OutputItem.retry_action` + `help_url`.
 - `from_exit(stderr, hints)` is included verbatim in shell plugins (Docker, k8s, Bitwarden, HA) but cannot fire today: `lark.exec()` returns stdout only. Stderr-aware exec API is the activation key — listed in **Next**.
 - `lark.nvim` Telescope keymaps for `<C-r>` retry / `<C-?>` help — cross-repo sub-step. Listed in **Next**.
 
-### v1.0 — Agent Palette (planned 2026-05-09)
+### v1.0 — Agent Palette (planned 2026-05-09; revised after research pass)
 
 The public-launch milestone. Headline thesis: **a command palette where the AI uses your plugins as tools**. Spotlight launches apps; Raycast fires actions; Larkline lets you speak to your stack — by keyboard or by asking an agent that knows every plugin you've installed.
 
-Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~22 weeks.
+Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~21 weeks.
 
 - [ ] Phase 1: Tag v0.13/v0.14/v0.15 (smoke gate Taylor's manual pass; runbook in [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md))
-- [ ] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, EventKit + MailKit access, JSON-line protocol
-- [ ] Phase 3: Calendar v2 — structured items, Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action
-- [ ] Phase 4: Mail plugin — read/search, triage, compose via `$EDITOR`, multi-account/mailbox switch
-- [ ] Phase 5: AI Provider trait + 4 backends (Anthropic, OpenAI, Codex CLI, OpenRouter)
+- [ ] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, **EventKit only** (MailKit is extension-only / unavailable to third-party CLIs)
+- [ ] Phase 3: Calendar v2 — structured items, `EKVirtualConferenceDescriptor`-based Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action
+- [ ] Phase 4: Mail plugin — **osascript-based** (proven mail-app-cli/apple-mail-mcp pattern); read/search, triage, compose via `$EDITOR` → Mail.app composer, multi-account/mailbox switch
+- [ ] Phase 5: AI Provider trait + 4 backends — **Anthropic Messages, OpenAI Responses, OpenRouter, Ollama**. Codex CLI dropped (would force MCP scope; in-app agent vision doesn't need MCP)
 - [ ] Phase 6: AI single-shot plugin (`ai/ask.lua`)
-- [ ] Phase 7: Tool registry auto-generated from manifests; `agent_callable` + `destructive` schema additions
-- [ ] Phase 8: AI tool-use plugin (`ai/agent.lua`) — agent loop with dry-run plan preview
+- [ ] Phase 7: In-process tool registry auto-generated from manifests; `agent_callable` + `destructive` schema additions
+- [ ] Phase 8: AI tool-use plugin (`ai/agent.lua`) — agent loop with dry-run plan preview, audit log
 - [ ] Phase 9: Web search shortcuts plugin + onboarding wizard
 - [ ] Phase 10: QA pass + bug sweep + theme polish
 - [ ] Phase 11: Beta + Medium draft + launch prep
@@ -238,6 +238,8 @@ Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~22 weeks.
 **Wire-format additions:** manifest `agent_callable` (plugin + command level), command `destructive` boolean. Tool registry generates Anthropic + OpenAI tool schemas from these at engine startup.
 
 **Safety:** three-layer (manifest opt-in, action destructive flag, dry-run plan preview). Curated set of agent-callable plugins ships in v1.0; users opt in additional plugins via settings.
+
+**Reused infrastructure (research-confirmed):** `crate::actions::execute()` dispatcher, `EngineEvent::PartialOutput` streaming, `lark secret` Keychain integration, `FormField` settings UI — all already in place from v0.13/v0.7/v0.10. New Rust modules confined to `src/agent/` (provider/anthropic/openai/loop/planner/audit) — no engine-level changes.
 
 ### Future (post-v1.0)
 
