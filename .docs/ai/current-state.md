@@ -1,16 +1,27 @@
 # Current State
 
-> Updated: 2026-04-30
+> Updated: 2026-05-09
+
+## Next Milestone — v1.0 Agent Palette
+
+Planned 2026-05-09. ~22 weeks (~5 months) horizon. Headline thesis: **a command
+palette where the AI uses your plugins as tools**. Plan in
+[`v1.0-plan.md`](./v1.0-plan.md); roadmap entry in [`roadmap.md`](./roadmap.md)
+under "v1.0 — Agent Palette".
+
+**Phase 1 (current):** tag v0.13/v0.14/v0.15 from existing -prep branches.
+Smoke runbook lives at [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md).
 
 ## Active Branches
 
-- `v0.14.0-prep` (larkline) + `v0.14.0-prep` (lark.nvim) — both unpushed local
-  branches. Six v0.14.0 commits + one in lark.nvim.
-- `v0.15.0-prep` (larkline) — unpushed; branched off `v0.14.0-prep`. Eleven
-  v0.15.0 commits on top.
+- `v0.14.0-prep` (larkline) + `v0.14.0-prep` (lark.nvim) — both pushed to
+  remote; tracking upstream. Six v0.14.0 commits + one in lark.nvim.
+- `v0.15.0-prep` (larkline) — pushed; branched off `v0.14.0-prep`. Eleven
+  v0.15.0 commits on top + MIT relicense (`d874bf7`).
 
 Taylor merges + tags after manual smoke tests, in order: v0.14.0 first, then
-v0.15.0.
+v0.15.0. After both ship, work continues toward v1.0 on a fresh `v1.0-prep`
+branch off `main`.
 
 ## Recent Progress
 

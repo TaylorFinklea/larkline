@@ -8,40 +8,33 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 
 Active items. Trim as completed.
 
-### Now (v0.14.0 + v0.15.0 — both ready to cut after smoke tests)
+### Now — v1.0 Agent Palette (planned 2026-05-09; ~5-month horizon)
 
-**v0.14.0** — five commits in larkline (`v0.14.0-prep`) + one in lark.nvim (`v0.14.0-prep`). Wire-format change: additive `OutputItem.preview: Option<String>`. Telescope renders the focused row's preview.
+**v1.0** is the public-launch milestone. Theme: **a command palette where the AI uses your plugins as tools** — agentic AI calls Larkline plugins via a tool registry built from manifests. Full plan + phase table + risks live in [`v1.0-plan.md`](./v1.0-plan.md).
 
-**v0.15.0** — eleven commits on top of v0.14.0 in larkline (`v0.15.0-prep`). Wire-format change: additive `OutputItem.retry_action` + `help_url`. Error rows in 7 deep-dive plugins now carry `help_url` to troubleshooting docs; status bar surfaces `[r] retry [o] help` hints.
+v1.0 scope (12 phases, ~22 weeks):
+- **Tag backlog**: v0.13/v0.14/v0.15 ship under existing -prep branches; smoke gate in [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md).
+- **macOS Swift helper** (`larkline-macos-helper`) — single binary, EventKit + MailKit, JSON-line protocol.
+- **Calendar v2** — structured items, Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action + 4 secondary actions.
+- **Mail plugin** — read/search, triage (archive/flag/delete), compose via `$EDITOR` handoff, multi-account/mailbox switch.
+- **AI Provider trait** — Anthropic Claude, OpenAI Responses, Codex CLI subprocess (free fallback), OpenRouter.
+- **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
+- **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
 
-Pre-tag smoke tests, then in order:
+Phase 1 (current): tag v0.13/v0.14/v0.15 from their existing -prep branches.
 
-```sh
-bash scripts/release.sh set 0.14.0     # larkline (smoke v0.14.0 first)
-git -C ~/git/lark.nvim tag v0.14.0 && git -C ~/git/lark.nvim push --tags
-bash scripts/release.sh set 0.15.0     # larkline (after v0.14.0 ships)
-```
+### Next (after v1.0 ships)
 
-v0.14.0 smoke gate (5 scenarios): GitHub PR body in preview pane; Atlassian Jira `preview_full=true`; Confluence quality check; Bitwarden redacted preview; fallback paths for forms / mini-apps.
+- **v1.1** — promote AI single-shot to chat mini-app; explore mail compose mini-app editor.
+- **Stderr-aware `lark.exec`** — activates the dormant v0.15.0 `from_exit` translator across shell plugins (Docker, k8s, Bitwarden, HA).
+- **lark.nvim retry/help keymaps** — wire `<C-r>` / `<C-?>` in Telescope results picker.
+- Lazy preview fetching (Approach B); treesitter beyond markdown; attachments/streaming previews.
+- Register Atlassian OAuth app (carried from v0.12.0).
 
-v0.15.0 smoke gate (per migrated plugin): trigger a known failure (revoke token, break network, kill daemon), verify the focused error row shows the new `[o] help` hint and `o` opens the right docs page. Confirm `[r] retry` is *not* shown on routine error rows (rerun fallback handles them; `retry_action` is intentionally unused in this release).
+### Later (post-v1.0)
 
-### Next (open follow-ups, not blocking v0.14.0/v0.15.0)
-
-- Register Atlassian OAuth app (carried from v0.12.0) — Taylor's call.
-- Lazy preview fetching (Approach B) — fetch `preview` on demand via a `preview_action` callback. Worth revisiting once we have data on whether `preview_full=true` Atlassian latency hurts in practice.
-- Treesitter highlighting beyond markdown filetype default.
-- Attachments / images in previews (binary content is silently skipped today).
-- Streaming previews (live-update while reading).
-- **Stderr-aware `lark.exec`** — the v0.15.0 `from_exit(stderr, hints)` translator is dormant in shell plugins because `lark.exec()` returns stdout only. Exposing stderr would activate friendly translation for missing-CLI / auth / rate-limit / network patterns across Docker, k8s, Bitwarden, HA. Cheap when scoped: extend the `lark.exec` host fn to return `(stdout, stderr, exit_code)` (or a struct), keep the existing single-return shape as a backwards-compatible alias.
-- **lark.nvim retry/help keymaps** — wire `<C-r>` / `<C-?>` in the Telescope results picker so v0.15.0 affordances surface there too. Cross-repo sub-step.
-
-### Later (v0.16.0+ candidates)
-
-- **Bitwarden v2** (theme): rbw, Send, organizations, attachments, edit/delete, lock-after-clipboard, TOTP countdown.
-- **lark.nvim v5** (theme): lazy preview fetching + treesitter + open-preview-in-buffer.
 - `cargo-dist` evaluation — replace `scripts/release.sh` + `release.yml`.
-- PagerDuty / 1Password CLI plugin deep-dives (deferred while Taylor isn't using them).
+- PagerDuty / 1Password CLI plugin deep-dives.
 - Atlassian `switch` for multi-cloud orgs.
 
 ## Completed Milestones
@@ -223,13 +216,34 @@ purely additive: `OutputItem.retry_action` + `help_url`.
 - `from_exit(stderr, hints)` is included verbatim in shell plugins (Docker, k8s, Bitwarden, HA) but cannot fire today: `lark.exec()` returns stdout only. Stderr-aware exec API is the activation key — listed in **Next**.
 - `lark.nvim` Telescope keymaps for `<C-r>` retry / `<C-?>` help — cross-repo sub-step. Listed in **Next**.
 
-### Future (unordered — pick theme per release)
+### v1.0 — Agent Palette (planned 2026-05-09)
 
-- **lark.nvim v5+:** lazy preview fetching; preview-pane action ("open in
-  main buffer", attachments). Two-way streaming so `on_action` can update a
-  Neovim buffer in real time.
+The public-launch milestone. Headline thesis: **a command palette where the AI uses your plugins as tools**. Spotlight launches apps; Raycast fires actions; Larkline lets you speak to your stack — by keyboard or by asking an agent that knows every plugin you've installed.
+
+Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~22 weeks.
+
+- [ ] Phase 1: Tag v0.13/v0.14/v0.15 (smoke gate Taylor's manual pass; runbook in [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md))
+- [ ] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, EventKit + MailKit access, JSON-line protocol
+- [ ] Phase 3: Calendar v2 — structured items, Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action
+- [ ] Phase 4: Mail plugin — read/search, triage, compose via `$EDITOR`, multi-account/mailbox switch
+- [ ] Phase 5: AI Provider trait + 4 backends (Anthropic, OpenAI, Codex CLI, OpenRouter)
+- [ ] Phase 6: AI single-shot plugin (`ai/ask.lua`)
+- [ ] Phase 7: Tool registry auto-generated from manifests; `agent_callable` + `destructive` schema additions
+- [ ] Phase 8: AI tool-use plugin (`ai/agent.lua`) — agent loop with dry-run plan preview
+- [ ] Phase 9: Web search shortcuts plugin + onboarding wizard
+- [ ] Phase 10: QA pass + bug sweep + theme polish
+- [ ] Phase 11: Beta + Medium draft + launch prep
+- [ ] Phase 12: Tag v1.0 + Medium post + Show HN
+
+**Wire-format additions:** manifest `agent_callable` (plugin + command level), command `destructive` boolean. Tool registry generates Anthropic + OpenAI tool schemas from these at engine startup.
+
+**Safety:** three-layer (manifest opt-in, action destructive flag, dry-run plan preview). Curated set of agent-callable plugins ships in v1.0; users opt in additional plugins via settings.
+
+### Future (post-v1.0)
+
+- **v1.1:** promote AI single-shot to chat mini-app; explore mail compose mini-app editor; Bitwarden v2 (rbw, Send, organizations); lark.nvim v5 (lazy preview, treesitter).
 - **Release tooling:** evaluate `cargo-dist`; SBOM / `cargo-auditable` for published binaries.
-- **More plugin deep-dives:** PagerDuty, 1Password CLI (deferred — Taylor doesn't use these).
+- **More plugin deep-dives:** PagerDuty, 1Password CLI.
 - **Atlassian polish:** `lark atlassian switch` for multi-cloud orgs; register the OAuth app under Taylor's developer account so OAuth path works without `LARKLINE_ATLASSIAN_CLIENT_ID` override.
 
 ---
