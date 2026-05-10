@@ -28,6 +28,7 @@ Phase 1 (current): tag v0.13/v0.14/v0.15 from their existing -prep branches.
 - **v1.1** — promote AI single-shot to chat mini-app; explore mail compose mini-app editor.
 - **Stderr-aware `lark.exec`** — activates the dormant v0.15.0 `from_exit` translator across shell plugins (Docker, k8s, Bitwarden, HA).
 - **lark.nvim retry/help keymaps** — wire `<C-r>` / `<C-?>` in Telescope results picker.
+- **lark.nvim loading UX flicker** — when invoking a slow plugin from the catalog picker, the inner results picker opens empty, then re-renders when `lark invoke` returns. Should show a loading spinner / placeholder row while invoking. Surfaced during v0.14.0 smoke (Taylor 2026-05-10). Fix lives in `lua/lark/results.lua`'s `invoke_and_show` — wrap in async (`vim.system` or `plenary.job`), show a transient placeholder picker until the JSON arrives.
 - Lazy preview fetching (Approach B); treesitter beyond markdown; attachments/streaming previews.
 - Register Atlassian OAuth app (carried from v0.12.0).
 
