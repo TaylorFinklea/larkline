@@ -8,7 +8,7 @@
 class Larkline < Formula
   desc "The line to all your tools — a keyboard-driven terminal command palette"
   homepage "https://github.com/TaylorFinklea/larkline"
-  version "0.14.0"
+  version "0.15.0"
   license "MIT"
 
   on_macos do
