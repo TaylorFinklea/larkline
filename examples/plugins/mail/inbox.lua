@@ -119,6 +119,15 @@ local function format_triage_row(msg)
     local acc = msg.account or ""
 
     local actions = {}
+    -- "View body" is a chain action: it pushes a fullscreen markdown
+    -- render of the message body on top of the current view. Esc/Back
+    -- pops back to the inbox. Uses the body already in the row (no
+    -- second JXA call). Empty body falls through to a placeholder.
+    table.insert(actions, {
+        label = "View body",
+        kind = "chain",
+        args = { "view_body", msg.body or "", msg.subject or "(no subject)", msg.sender or "" },
+    })
     if id ~= "" then
         local mail_url = "message:" .. urlencode("<" .. id .. ">")
         table.insert(actions, { label = "Open in Mail.app", kind = "open", args = { mail_url } })
@@ -209,5 +218,31 @@ lark.register({
             table.insert(items, format_triage_row(msg))
         end
         return { title = "Inbox", items = items }
+    end,
+
+    -- Chain callback for "View body" -- drills into a fullscreen markdown
+    -- render of the message body. raw_text + output_format = markdown
+    -- triggers the TUI's Markdown OutputMode where j/k scrolls the body.
+    on_action = function(callback_id, args)
+        if callback_id == "view_body" then
+            local body = args[1] or ""
+            local subject = args[2] or "(no subject)"
+            local sender = args[3] or ""
+            local md = "# " .. subject .. "\n\n"
+            if sender ~= "" then md = md .. "**From:** " .. sender .. "\n\n" end
+            md = md .. "---\n\n"
+            if body ~= "" then
+                local cleaned = body:gsub("\r\n", "\n"):gsub("\n\n\n+", "\n\n")
+                md = md .. cleaned
+            else
+                md = md .. "*(empty body)*"
+            end
+            return {
+                title = subject,
+                raw_text = md,
+                output_format = "markdown",
+            }
+        end
+        return nil
     end,
 })
