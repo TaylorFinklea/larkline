@@ -28,6 +28,18 @@ class Larkline < Formula
 
   def install
     bin.install "lark"
+    # macOS bundle includes the EventKit helper for the Calendar plugin.
+    # Linux tarball does not contain it; calendar plugin falls back to icalbuddy.
+    bin.install "larkline-macos-helper" if OS.mac?
+  end
+
+  def caveats
+    <<~EOS
+      Run `lark plugin sync` to install the standard plugin library.
+      On macOS, the Calendar plugin uses larkline-macos-helper for rich event
+      data. macOS will prompt for Calendar access on first use; grant via
+      System Settings → Privacy & Security → Calendars.
+    EOS
   end
 
   test do

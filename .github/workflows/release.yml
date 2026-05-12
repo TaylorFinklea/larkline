@@ -9,8 +9,36 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  build-helper:
+    name: Build macOS helper (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build helper for arm64 + x86_64
+        run: |
+          cd macos-helper
+          swift build -c release --arch arm64
+          swift build -c release --arch x86_64
+          lipo -create \
+            .build/arm64-apple-macosx/release/larkline-macos-helper \
+            .build/x86_64-apple-macosx/release/larkline-macos-helper \
+            -output ../larkline-macos-helper
+          lipo -info ../larkline-macos-helper
+
+      - name: Ad-hoc codesign
+        run: codesign --sign - --force larkline-macos-helper
+
+      - name: Upload helper artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: larkline-macos-helper
+          path: larkline-macos-helper
+          if-no-files-found: error
+
   build:
     name: Build ${{ matrix.target }}
+    needs: build-helper
     strategy:
       matrix:
         include:
@@ -45,6 +73,13 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Download macOS helper (macOS targets only)
+        if: contains(matrix.target, 'apple-darwin')
+        uses: actions/download-artifact@v4
+        with:
+          name: larkline-macos-helper
+          path: target/${{ matrix.target }}/release
+
       - name: Package binary
         shell: bash
         env:
@@ -52,7 +87,12 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           ARCHIVE="lark-${VERSION}-${TARGET}.tar.gz"
-          tar czf "${ARCHIVE}" -C "target/${TARGET}/release" lark
+          if [[ "${TARGET}" == *apple-darwin* ]]; then
+              chmod +x "target/${TARGET}/release/larkline-macos-helper"
+              tar czf "${ARCHIVE}" -C "target/${TARGET}/release" lark larkline-macos-helper
+          else
+              tar czf "${ARCHIVE}" -C "target/${TARGET}/release" lark
+          fi
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -182,7 +222,7 @@ jobs:
               '  desc "The line to all your tools — a keyboard-driven terminal command palette"',
               '  homepage "https://github.com/TaylorFinklea/larkline"',
               `  version "${version}"`,
-              '  license "GPL-3.0-only"',
+              '  license "MIT"',
               '',
               '  on_macos do',
               '    if Hardware::CPU.arm?',
@@ -201,11 +241,17 @@ jobs:
               '',
               '  def install',
               '    bin.install "lark"',
+              '    # macOS bundle includes the EventKit helper for the Calendar plugin.',
+              '    # Linux tarball does not contain it; calendar plugin falls back to icalbuddy.',
+              '    bin.install "larkline-macos-helper" if OS.mac?',
               '  end',
               '',
               '  def caveats',
               '    <<~EOS',
               '      Run `lark plugin sync` to install the standard plugin library.',
+              '      On macOS, the Calendar plugin uses larkline-macos-helper for rich event',
+              '      data. macOS will prompt for Calendar access on first use; grant via',
+              '      System Settings → Privacy & Security → Calendars.',
               '    EOS',
               '  end',
               '',
