@@ -1,18 +1,21 @@
--- Mail: Inbox -- recent messages across all accounts via osascript+JXA.
+-- Mail: Inbox -- recent messages across all accounts with full action set.
 --
--- v1.0: read-only inbox view. Each row carries the message body in its
--- preview field (so Telescope previewer shows it without round-trips)
--- and a single "Open in Mail.app" action. Mutating actions (mark read,
--- archive, flag) land in the Triage command (Phase 4.D).
+-- Same data load as Inbox but each row carries an extended action set
+-- for keyboard-driven cleanup:
+--   * Open in Mail.app (default)
+--   * Toggle read (Mark read / Mark unread)
+--   * Toggle flag
+--   * Archive
+--   * Delete (confirm-gated)
+--   * Reply / Forward (open composer window)
 --
--- Performance: single JXA call returns the last 30 messages per account
--- with bodies inline (~3s warm-cache). Cold-cache first invocation can
--- take 10-15s while Mail.app indexes; subsequent calls are fast.
+-- All mutations dispatch via osascript -l JavaScript -e '...' shell actions
+-- scoped to the specific (account, mailbox, messageId) so they don't scan
+-- all of Mail. JXA's whose({messageId: ...}) filter is the lookup.
 --
--- Canonical helpers live in lib.lua; inlined here with SHARED markers
--- since the mlua sandbox has no require().
+-- Canonical helpers in lib.lua; inlined here with SHARED markers.
 
--- SHARED: jxa_run (canonical in lib.lua)
+-- SHARED: jxa_run / time_ago / icon_for_message / format_preview / urlencode (from inbox.lua / lib.lua)
 local function jxa_run(script)
     local r = lark.exec_io("osascript", { "-l", "JavaScript" }, { stdin = script })
     if r.exit_code ~= 0 then
@@ -28,7 +31,6 @@ local function jxa_run(script)
     return data, nil
 end
 
--- SHARED: time_ago
 local function time_ago(iso)
     if not iso or iso == "" then return "" end
     local now_s = tonumber(lark.exec("date", { "+%s" }):match("%d+") or "0")
@@ -43,12 +45,12 @@ local function time_ago(iso)
     return iso:sub(1, 10)
 end
 
--- SHARED: icon_for_message / format_preview / urlencode / format_message_row
 local function icon_for_message(msg)
     if msg.flagged then return "🚩" end
     if not msg.readStatus then return "📨" end
     return "📧"
 end
+
 local function format_preview(msg)
     local lines = {}
     table.insert(lines, "## " .. (msg.subject ~= "" and msg.subject or "(no subject)"))
@@ -67,22 +69,79 @@ local function format_preview(msg)
     end
     return table.concat(lines, "\n")
 end
+
 local function urlencode(s)
     return (s:gsub("([^A-Za-z0-9%-_.~])", function(c)
         return string.format("%%%02X", string.byte(c))
     end))
 end
-local function format_message_row(msg)
+
+local function error_item(message, help_url)
+    return { icon = "!", label = message, help_url = help_url, actions = {} }
+end
+
+-- SHARED: js_str -- encode a Lua string as a JS string literal via JSON.
+local function js_str(s)
+    local enc, _ = lark.json.encode(s)
+    return enc or ('"' .. tostring(s):gsub('"', '\\"') .. '"')
+end
+
+-- SHARED: mutation_script -- build a JXA one-liner that looks up the
+-- message by (account, mailbox, messageId) and runs `op` against it.
+local function mutation_script(account, mbx, id, op)
+    return string.format(
+        'const m=Application("Mail").accounts.byName(%s).mailboxes.byName(%s).messages.whose({messageId:%s})()[0];if(m){%s}',
+        js_str(account), js_str(mbx), js_str(id), op
+    )
+end
+
+local function mutation_action(label, account, mbx, id, op, opts)
+    opts = opts or {}
+    return {
+        label = label,
+        kind = "shell",
+        args = { "osascript", "-l", "JavaScript", "-e", mutation_script(account, mbx, id, op) },
+        confirm = opts.confirm or false,
+    }
+end
+
+-- Build OutputItem for a triage row -- same as inbox but with the
+-- mutating action set appended after "Open in Mail.app".
+local function format_triage_row(msg)
     local sender_short = (msg.sender or ""):gsub(" <.->", "")
     if #sender_short > 30 then sender_short = sender_short:sub(1, 27) .. "..." end
     local label = (msg.subject ~= "" and msg.subject or "(no subject)")
     if #label > 70 then label = label:sub(1, 67) .. "..." end
     local detail = sender_short .. " · " .. time_ago(msg.dateReceived)
+
+    local mbx = msg.mailboxName or "INBOX"
+    local id = msg.id or ""
+    local acc = msg.account or ""
+
     local actions = {}
-    if msg.id then
-        local mail_url = "message:" .. urlencode("<" .. msg.id .. ">")
+    if id ~= "" then
+        local mail_url = "message:" .. urlencode("<" .. id .. ">")
         table.insert(actions, { label = "Open in Mail.app", kind = "open", args = { mail_url } })
     end
+    if id ~= "" and acc ~= "" then
+        if msg.readStatus then
+            table.insert(actions, mutation_action("Mark unread", acc, mbx, id, "m.readStatus = false"))
+        else
+            table.insert(actions, mutation_action("Mark read",   acc, mbx, id, "m.readStatus = true"))
+        end
+        local flag_label = msg.flagged and "Unflag" or "Flag"
+        local flag_op = msg.flagged and "m.flaggedStatus = false" or "m.flaggedStatus = true"
+        table.insert(actions, mutation_action(flag_label, acc, mbx, id, flag_op))
+        table.insert(actions, mutation_action("Archive",
+            acc, mbx, id, 'Application("Mail").archive(m)'))
+        table.insert(actions, mutation_action("Delete",
+            acc, mbx, id, 'Application("Mail").delete(m)', { confirm = true }))
+        table.insert(actions, mutation_action("Reply",
+            acc, mbx, id, 'Application("Mail").reply(m)'))
+        table.insert(actions, mutation_action("Forward",
+            acc, mbx, id, 'Application("Mail").forward(m)'))
+    end
+
     return {
         icon = icon_for_message(msg),
         label = label,
@@ -93,13 +152,7 @@ local function format_message_row(msg)
     }
 end
 
--- SHARED: error_item
-local function error_item(message, help_url)
-    return { icon = "!", label = message, help_url = help_url, actions = {} }
-end
-
--- JXA: fetch recent INBOX messages across all enabled accounts.
--- Returns array of message objects sorted newest-first.
+-- JXA: same as inbox.lua, plus emit mailboxName so mutations can scope correctly.
 local JXA_INBOX = [[
 ObjC.import('Foundation');
 const Mail = Application("Mail");
@@ -119,6 +172,7 @@ for (let a = 0; a < accounts.length; a++) {
       result.push({
         id: m.messageId(),
         account: acc.name(),
+        mailboxName: "INBOX",
         subject: m.subject() || "",
         sender: m.sender() || "",
         dateReceived: m.dateReceived().toISOString(),
@@ -129,7 +183,6 @@ for (let a = 0; a < accounts.length; a++) {
     } catch(e) {}
   }
 }
-// Sort all messages newest-first across accounts.
 result.sort((a, b) => b.dateReceived.localeCompare(a.dateReceived));
 JSON.stringify(result);
 ]]
@@ -153,7 +206,7 @@ lark.register({
 
         local items = {}
         for _, msg in ipairs(messages) do
-            table.insert(items, format_message_row(msg))
+            table.insert(items, format_triage_row(msg))
         end
         return { title = "Inbox", items = items }
     end,

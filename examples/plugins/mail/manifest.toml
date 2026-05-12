@@ -22,13 +22,6 @@ quickkey = "ms"
 timeout_seconds = 60
 
 [[commands]]
-name = "Triage"
-description = "Inbox with archive/delete/flag actions"
-entry = "triage.lua"
-quickkey = "mt"
-timeout_seconds = 30
-
-[[commands]]
 name = "New Mail"
 description = "Open a Mail.app composer pre-filled with recipient and subject"
 entry = "compose.lua"
