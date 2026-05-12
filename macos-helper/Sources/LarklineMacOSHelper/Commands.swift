@@ -31,6 +31,8 @@ func dispatch(_ req: Request) throws -> any Encodable {
         return pingHandler()
     case "list_calendars":
         return try listCalendarsHandler(req)
+    case "events_for_range":
+        return try eventsForRangeHandler(req)
     default:
         throw HelperError.bad("unknown command: \(req.command)")
     }
