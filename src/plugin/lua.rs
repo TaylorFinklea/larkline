@@ -110,6 +110,65 @@ impl LuaPlugin {
         lark.set("exec", exec_fn)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.exec_io(cmd, args?, opts?) -> { stdout, stderr, exit_code }
+        //
+        // Richer subprocess primitive than lark.exec. Adds:
+        //   - opts.stdin: string piped to the subprocess's stdin (used by the
+        //     calendar plugin to send JSON requests to larkline-macos-helper)
+        //   - stderr in the return table (activates the v0.15.0 from_exit
+        //     translator across shell plugins when they migrate)
+        //   - exit_code (handlers can branch on non-zero without parsing stderr)
+        //
+        // Both stdout and stderr are returned as UTF-8 strings (lossy decode).
+        // Exit code defaults to -1 if the process was killed by a signal.
+        let exec_io_fn = lua
+            .create_async_function(
+                |lua, (cmd, args, opts): (String, Option<Vec<String>>, Option<mlua::Table>)| async move {
+                    use tokio::io::AsyncWriteExt;
+                    let mut command = tokio::process::Command::new(&cmd);
+                    if let Some(ref args) = args {
+                        command.args(args);
+                    }
+                    let stdin_payload: Option<String> = match opts {
+                        Some(ref t) => t.get("stdin").ok(),
+                        None => None,
+                    };
+                    if stdin_payload.is_some() {
+                        command.stdin(std::process::Stdio::piped());
+                    }
+                    command.stdout(std::process::Stdio::piped());
+                    command.stderr(std::process::Stdio::piped());
+
+                    let mut child = command.spawn().map_err(LuaError::external)?;
+                    if let Some(payload) = stdin_payload {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            stdin
+                                .write_all(payload.as_bytes())
+                                .await
+                                .map_err(LuaError::external)?;
+                            // Drop closes stdin so the child sees EOF.
+                            drop(stdin);
+                        }
+                    }
+                    let output = child
+                        .wait_with_output()
+                        .await
+                        .map_err(LuaError::external)?;
+                    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                    let exit_code = output.status.code().unwrap_or(-1);
+
+                    let result = lua.create_table()?;
+                    result.set("stdout", stdout)?;
+                    result.set("stderr", stderr)?;
+                    result.set("exit_code", exit_code)?;
+                    Ok(result)
+                },
+            )
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        lark.set("exec_io", exec_io_fn)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // lark.json — encode/decode sub-table.
         let json_table = lua
             .create_table()
@@ -850,5 +909,50 @@ lark.register({
         );
         let output = plugin.execute().await.expect("execution failed");
         assert_eq!(output.title, "hello from exec");
+    }
+
+    #[tokio::test]
+    async fn lark_exec_io_pipes_stdin_and_returns_struct() {
+        // `cat` echoes stdin to stdout. We pipe a known JSON payload and
+        // assert the round-trip plus that stderr is empty and exit_code is 0.
+        let plugin = lua_plugin_from_source(
+            "exec-io-stdin-test",
+            r#"
+lark.register({
+    on_run = function()
+        local r = lark.exec_io("cat", nil, { stdin = "hello-io\n" })
+        return {
+            title = string.format("stdout=%s|stderr=%s|code=%d",
+                r.stdout:match("^(.-)%s*$"), r.stderr, r.exit_code),
+            items = {}
+        }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution failed");
+        assert_eq!(output.title, "stdout=hello-io|stderr=|code=0");
+    }
+
+    #[tokio::test]
+    async fn lark_exec_io_captures_stderr_and_nonzero_exit() {
+        // `sh -c 'echo err >&2; exit 7'` writes to stderr and exits non-zero.
+        let plugin = lua_plugin_from_source(
+            "exec-io-stderr-test",
+            r#"
+lark.register({
+    on_run = function()
+        local r = lark.exec_io("sh", { "-c", "echo my-stderr >&2; exit 7" })
+        return {
+            title = string.format("stdout=%s|stderr=%s|code=%d",
+                r.stdout, r.stderr:match("^(.-)%s*$"), r.exit_code),
+            items = {}
+        }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution failed");
+        assert_eq!(output.title, "stdout=|stderr=my-stderr|code=7");
     }
 }
