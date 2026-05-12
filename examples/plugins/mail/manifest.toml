@@ -1,0 +1,36 @@
+[plugin]
+name = "Mail"
+description = "Apple Mail integration via osascript"
+version = "0.1.0"
+author = "larkline"
+icon = "📬"
+icon_nerd = "󰇮"
+category = "tools"
+
+[[commands]]
+name = "Inbox"
+description = "Recent messages across all accounts"
+entry = "inbox.lua"
+quickkey = "mi"
+timeout_seconds = 30
+
+[[commands]]
+name = "Mail Search"
+description = "Full-text search across all mailboxes"
+entry = "search.lua"
+quickkey = "ms"
+timeout_seconds = 60
+
+[[commands]]
+name = "Triage"
+description = "Inbox with archive/delete/flag actions"
+entry = "triage.lua"
+quickkey = "mt"
+timeout_seconds = 30
+
+[[commands]]
+name = "Compose"
+description = "New mail draft via $EDITOR"
+entry = "compose.lua"
+quickkey = "mc"
+timeout_seconds = 600
