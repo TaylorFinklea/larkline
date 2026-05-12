@@ -1140,6 +1140,13 @@ impl App {
                 {
                     return;
                 }
+                // Action palette is its own list — navigate within it, not
+                // the rows behind it. Must come before mode-based branches
+                // since the palette renders over ViewOutput.
+                if let Some(ref mut palette) = self.state.action_palette {
+                    palette.selected = palette.selected.saturating_sub(1);
+                    return;
+                }
                 if let Some(ref mut pm) = self.state.plugin_manager {
                     if self.state.mode == Mode::PluginManager {
                         pm.selected = pm.selected.saturating_sub(1);
@@ -1203,6 +1210,16 @@ impl App {
                     && self.state.theme_picker.is_none()
                 {
                     self.state.widget_focused = false;
+                    return;
+                }
+                // Action palette is its own list — navigate within it, not
+                // the rows behind it. Must come before mode-based branches
+                // since the palette renders over ViewOutput.
+                if let Some(ref mut palette) = self.state.action_palette {
+                    let max = palette.filtered_indices.len().saturating_sub(1);
+                    if palette.selected < max {
+                        palette.selected += 1;
+                    }
                     return;
                 }
                 if let Some(ref mut pm) = self.state.plugin_manager {
@@ -2871,6 +2888,77 @@ mod tests {
         app.state.output_mode = OutputMode::RawText;
         app.handle_action(Action::Back);
         assert_eq!(app.state.output_mode, OutputMode::List);
+    }
+
+    #[test]
+    fn move_up_down_navigates_action_palette_not_underlying_list() {
+        // Regression: action palette had no MoveUp/Down branch, so j/k
+        // navigated the rows behind it instead of the palette itself.
+        // Hit when a row carried many actions (Mail Inbox: 7 actions/row).
+        use crate::plugin::traits::{ActionKind, ItemAction};
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.output_mode = OutputMode::List;
+        let actions = vec![
+            ItemAction {
+                id: None,
+                label: "First".to_string(),
+                kind: ActionKind::Open,
+                args: vec!["a".to_string()],
+                confirm: false,
+            },
+            ItemAction {
+                id: None,
+                label: "Second".to_string(),
+                kind: ActionKind::Open,
+                args: vec!["b".to_string()],
+                confirm: false,
+            },
+            ItemAction {
+                id: None,
+                label: "Third".to_string(),
+                kind: ActionKind::Open,
+                args: vec!["c".to_string()],
+                confirm: false,
+            },
+        ];
+        let mut palette = ActionPaletteState {
+            actions,
+            selected: 0,
+            query: String::new(),
+            filtered_indices: vec![0, 1, 2],
+        };
+        palette.rebuild_filter();
+        app.state.action_palette = Some(palette);
+        let underlying_selected = app.state.output_selected;
+
+        app.handle_action(Action::MoveDown);
+        assert_eq!(
+            app.state.action_palette.as_ref().unwrap().selected,
+            1,
+            "MoveDown should advance palette selection",
+        );
+        app.handle_action(Action::MoveDown);
+        assert_eq!(app.state.action_palette.as_ref().unwrap().selected, 2);
+        // Clamp at the last filtered index.
+        app.handle_action(Action::MoveDown);
+        assert_eq!(app.state.action_palette.as_ref().unwrap().selected, 2);
+
+        app.handle_action(Action::MoveUp);
+        assert_eq!(app.state.action_palette.as_ref().unwrap().selected, 1);
+        app.handle_action(Action::MoveUp);
+        app.handle_action(Action::MoveUp);
+        assert_eq!(
+            app.state.action_palette.as_ref().unwrap().selected,
+            0,
+            "MoveUp should clamp at 0",
+        );
+
+        // Critically: the row selection behind the palette should NOT have moved.
+        assert_eq!(
+            app.state.output_selected, underlying_selected,
+            "palette navigation must not leak through to ViewOutput rows",
+        );
     }
 
     #[test]
