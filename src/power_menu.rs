@@ -231,18 +231,55 @@ pub fn build_power_menu_categories(state: &AppState) -> Vec<PowerMenuCategory> {
                 }],
             },
         ],
-        Mode::ViewOutput => vec![
-            {
-                let has_settings = state
-                    .viewing_plugin_index
-                    .and_then(|i| state.plugins.get(i))
-                    .is_some_and(|p| !p.settings_spec.is_empty());
+        Mode::ViewOutput => {
+            let has_settings = state
+                .viewing_plugin_index
+                .and_then(|i| state.plugins.get(i))
+                .is_some_and(|p| !p.settings_spec.is_empty());
 
+            // "This item" category lists the focused item's actions inline
+            // with digit keys (1-9). Discoverable without remembering `:`
+            // to open the searchable palette. Falls through to lowercase
+            // letters if the row carries more than 9 actions.
+            let item_category =
+                crate::app_output::selected_output_item(state).and_then(|item| {
+                    if item.actions.is_empty() {
+                        return None;
+                    }
+                    let items = item
+                        .actions
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, action)| {
+                            // 1-9, then a-z for overflow.
+                            let key = if idx < 9 {
+                                char::from_digit(u32::try_from(idx + 1).ok()?, 10)?
+                            } else if idx - 9 < 26 {
+                                let off = u8::try_from(idx - 9).ok()?;
+                                (b'a' + off) as char
+                            } else {
+                                return None;
+                            };
+                            Some(PowerMenuItem {
+                                key,
+                                key_hint: key.to_string(),
+                                label: action.label.clone(),
+                                action: Action::RunFocusedItemAt(idx),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    Some(PowerMenuCategory {
+                        name: "This item".to_string(),
+                        items,
+                    })
+                });
+
+            let actions_category = {
                 let mut action_items = vec![
                     PowerMenuItem {
                         key: ':',
                         key_hint: ":".to_string(),
-                        label: "Palette".to_string(),
+                        label: "Palette (search)".to_string(),
                         action: Action::PaletteOpen,
                     },
                     PowerMenuItem {
@@ -276,7 +313,14 @@ pub fn build_power_menu_categories(state: &AppState) -> Vec<PowerMenuCategory> {
                     name: "Actions".to_string(),
                     items: action_items,
                 }
-            },
+            };
+
+            let mut cats: Vec<PowerMenuCategory> = Vec::new();
+            if let Some(c) = item_category {
+                cats.push(c);
+            }
+            cats.push(actions_category);
+            cats.extend(vec![
             PowerMenuCategory {
                 name: "Display".to_string(),
                 items: vec![
@@ -329,7 +373,9 @@ pub fn build_power_menu_categories(state: &AppState) -> Vec<PowerMenuCategory> {
                     },
                 ],
             },
-        ],
+            ]);
+            cats
+        }
         Mode::MiniApp => vec![], // TODO(Phase D): mini app power menu
     }
 }

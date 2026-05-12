@@ -2083,6 +2083,20 @@ impl App {
                     self.state.warnings = vec![format!("Refresh failed: {e}")];
                 }
             },
+
+            Action::RunFocusedItemAt(idx) => {
+                // Power menu fires this when the user picks a "This item"
+                // entry. Look up the focused output item and run its
+                // action at the given index. Power menu is auto-dismissed
+                // by the surrounding handler (see line ~1124).
+                if self.state.mode == Mode::ViewOutput {
+                    let action_clone = crate::app_output::selected_output_item(&self.state)
+                        .and_then(|item| item.actions.get(idx).cloned());
+                    if let Some(action) = action_clone {
+                        self.execute_item_action(&action);
+                    }
+                }
+            },
         }
     }
 
@@ -2888,6 +2902,61 @@ mod tests {
         app.state.output_mode = OutputMode::RawText;
         app.handle_action(Action::Back);
         assert_eq!(app.state.output_mode, OutputMode::List);
+    }
+
+    #[test]
+    fn power_menu_in_view_output_includes_focused_item_actions() {
+        // Space-power-menu shows the focused item's actions as a "This
+        // item" category with digit keys. Keeps the per-item shortcuts
+        // discoverable without needing to remember `:` to open the
+        // searchable palette.
+        use crate::plugin::traits::{
+            ActionKind, ItemAction, OutputItem, PluginOutput,
+        };
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.output_mode = OutputMode::List;
+        app.state.plugin_output = Some(PluginOutput {
+            title: "Test".to_string(),
+            items: vec![OutputItem {
+                label: "Row".to_string(),
+                actions: vec![
+                    ItemAction {
+                        id: None,
+                        label: "First action".to_string(),
+                        kind: ActionKind::Open,
+                        args: vec!["x".to_string()],
+                        confirm: false,
+                    },
+                    ItemAction {
+                        id: None,
+                        label: "Second action".to_string(),
+                        kind: ActionKind::Open,
+                        args: vec!["y".to_string()],
+                        confirm: false,
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        app.state.output_selected = 0;
+
+        let cats = crate::power_menu::build_power_menu_categories(&app.state);
+        let first = cats.first().expect("at least one category");
+        assert_eq!(first.name, "This item");
+        assert_eq!(first.items.len(), 2);
+        assert_eq!(first.items[0].key, '1');
+        assert_eq!(first.items[0].label, "First action");
+        assert_eq!(first.items[1].key, '2');
+        assert!(matches!(
+            first.items[0].action,
+            crate::action::Action::RunFocusedItemAt(0)
+        ));
+        assert!(matches!(
+            first.items[1].action,
+            crate::action::Action::RunFocusedItemAt(1)
+        ));
     }
 
     #[test]

@@ -72,6 +72,9 @@ pub enum Action {
     PaletteOpen,
     /// Select the highlighted action in the palette.
     PaletteSelect,
+    /// Fire the focused output item's action at the given index. Used by
+    /// the Space power menu to expose per-item actions inline.
+    RunFocusedItemAt(usize),
     /// Dismiss the action palette.
     PaletteDismiss,
     /// Append a character to the action palette search query.
