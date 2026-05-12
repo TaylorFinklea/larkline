@@ -1487,10 +1487,20 @@ fn render_status_bar(
                             }
                             spans.extend(key_hint("j/k", "nav", theme));
                             spans.extend(key_hint("⏎", "action", theme));
-                            spans.extend(key_hint("SPC", "menu", theme));
+                            // Reads "actions" when the focused row has multiple
+                            // actions (Space opens a numbered menu of them via
+                            // the "This item" power-menu category) and falls
+                            // back to "menu" otherwise.
+                            let item = crate::app_output::selected_output_item(state);
+                            let space_label = if item.is_some_and(|i| i.actions.len() > 1) {
+                                "actions"
+                            } else {
+                                "menu"
+                            };
+                            spans.extend(key_hint("SPC", space_label, theme));
                             spans.extend(key_hint("Esc", "back", theme));
                             // Surface error-item affordances when the focused row has them.
-                            if let Some(item) = crate::app_output::selected_output_item(state) {
+                            if let Some(item) = item {
                                 if item.retry_action.is_some() {
                                     spans.extend(key_hint("r", "retry", theme));
                                 }
