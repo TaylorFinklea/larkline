@@ -588,6 +588,105 @@ The contract between script plugins and the host. Plugins write this JSON to std
 
 ---
 
+## macOS Helper (v1.0+)
+
+`larkline-macos-helper` is a Swift CLI bundled alongside `lark` in macOS
+release tarballs. It exposes EventKit (Calendar) over a line-delimited
+JSON protocol on stdin/stdout. Plugins shell out to it for rich event
+data (meeting URLs, attendees, calendar source) that `icalbuddy` cannot
+provide.
+
+**Wire protocol**
+
+One JSON object per line:
+
+- Server → Client on startup:
+  `{"kind":"hello","helper_version":"0.1.0","protocol_version":1}`
+- Client → Server request:
+  `{"id":"<correlation>","command":"<name>","args":{...}}`
+- Server → Client response:
+  `{"id":"<echo>","ok":true,"data":{...}}` or
+  `{"id":"<echo>","ok":false,"error":"<reason>"}`
+
+`id` is opaque to the helper; callers correlate concurrent requests
+(though the helper itself is sequential — responses come back in
+request order). `args` is optional. Empty input lines are silently
+skipped. Malformed JSON yields `{"ok":false,"error":"..."}` with the
+id field omitted.
+
+**Commands (v1.0)**
+
+| Command | Args | Response shape |
+|---|---|---|
+| `version` | — | `{helper_version, protocol_version}` |
+| `ping` | — | `{pong: true}` |
+| `list_calendars` | — | `{calendars: [{id, title, source, allowsModifications, color}]}` |
+| `events_for_range` | `{start_iso, end_iso, calendar_ids?}` | `{events: [{id, title, start_iso, end_iso, allDay, location, notes, meetingURL, calendarId, calendarTitle, calendarSource, attendees: [{name, email, status, role, isCurrentUser}]}]}` |
+
+**Permissions (TCC)**
+
+`list_calendars` and `events_for_range` trigger macOS's Calendar
+permission prompt on first run. The helper requests full access via
+`requestFullAccessToEvents` (macOS 14+) or `requestAccess(to:.event)`
+(macOS 13). If access is denied, the handler returns
+`{"ok":false,"error":"calendar access denied — grant in System Settings → Privacy & Security → Calendars, then retry"}`.
+Calendar plugins surface this as an error row with a `help_url` to the
+macOS docs.
+
+**Meeting URL extraction**
+
+`extractMeetingURL(_:)` in `Events.swift` uses three-tier fallback:
+1. `EKEvent.url` matching a known meeting-URL regex (Teams, Zoom, Meet, Webex)
+2. Regex scan over `event.location`
+3. Regex scan over `event.notes`
+
+EKVirtualConferenceDescriptor is intentionally not used — its
+public Swift API surface for synchronous reads is unstable across SDK
+versions. Calendar.app already extracts `conferenceData` into
+`event.url` for modern calendar sources, so step 1 covers the
+common case; the regex fallback covers Outlook-imported events that
+stuff the join URL in notes.
+
+**Programmatic RSVP is unsupported**
+
+`EKParticipant.participantStatus` is read-only across iOS and macOS
+(verified via Apple docs + WWDC23 Discover Calendar and EventKit).
+Calendar v2's "RSVP" action shells out to `/usr/bin/open ical://event/<id>`
+from the Lua plugin — the user RSVPs via Calendar.app's UI. The
+helper does not expose a respond-to-invite command.
+
+**Distribution**
+
+Built as a universal binary (arm64 + x86_64) via:
+```sh
+swift build -c release --arch arm64
+swift build -c release --arch x86_64
+lipo -create .build/{arm64,x86_64}-apple-macosx/release/larkline-macos-helper \
+  -output larkline-macos-helper
+codesign --sign - --force larkline-macos-helper
+```
+
+Bundled into macOS release tarballs by `.github/workflows/release.yml`
+(`build-helper` job). Homebrew formula installs the helper alongside
+`lark` via `bin.install "larkline-macos-helper" if OS.mac?`. Linux
+release tarballs do not contain the helper; the calendar plugin
+falls back to `icalbuddy`.
+
+**Source layout**
+
+```
+macos-helper/
+├── Package.swift                                   # Swift 5.9, macOS 13+
+└── Sources/LarklineMacOSHelper/
+    ├── main.swift                                  # Startup hello + stdin/stdout loop
+    ├── Protocol.swift                              # Request/Response/JSONValue
+    ├── Commands.swift                              # Dispatcher + version/ping
+    ├── Calendar.swift                              # list_calendars + TCC handling
+    └── Events.swift                                # events_for_range + URL extraction
+```
+
+---
+
 ## Non-Goals
 
 These are explicitly out of scope:

@@ -223,9 +223,9 @@ The public-launch milestone. Headline thesis: **a command palette where the AI u
 
 Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~21 weeks.
 
-- [ ] Phase 1: Tag v0.13/v0.14/v0.15 (smoke gate Taylor's manual pass; runbook in [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md))
-- [ ] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, **EventKit only** (MailKit is extension-only / unavailable to third-party CLIs)
-- [ ] Phase 3: Calendar v2 — structured items, `EKVirtualConferenceDescriptor`-based Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action
+- [x] Phase 1: Tag v0.13/v0.14/v0.15 (✅ 2026-05-10; v0.14.0 + v0.15.0 on Homebrew tap)
+- [x] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, **EventKit only** (✅ 2026-05-12; 5 commits on `v1.0-prep`. Sub-phase 2.E dropped — `EKParticipant.participantStatus` is read-only on macOS. Report: [`phases/v1.0-phase-2-macos-helper-report.md`](./phases/v1.0-phase-2-macos-helper-report.md))
+- [ ] Phase 3: Calendar v2 — structured items, regex-extracted Teams/Zoom/Meet URL (helper's three-tier fallback over event.url + location + notes), primary `[Enter] Join` action
 - [ ] Phase 4: Mail plugin — **osascript-based** (proven mail-app-cli/apple-mail-mcp pattern); read/search, triage, compose via `$EDITOR` → Mail.app composer, multi-account/mailbox switch
 - [ ] Phase 5: AI Provider trait + 4 backends — **Anthropic Messages, OpenAI Responses, OpenRouter, Ollama**. Codex CLI dropped (would force MCP scope; in-app agent vision doesn't need MCP)
 - [ ] Phase 6: AI single-shot plugin (`ai/ask.lua`)
