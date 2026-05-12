@@ -16,8 +16,8 @@ under "v1.0 — Agent Palette".
 | 1 — Tag v0.13/v0.14/v0.15 | ✅ Done (2026-05-10) | v0.14.0 + v0.15.0 tagged + on Homebrew tap |
 | 2 — macOS Swift helper (EventKit) | ✅ Done (2026-05-12) | 5 commits on `v1.0-prep`. Sub-phase 2.E dropped (no programmatic RSVP). Report at [`phases/v1.0-phase-2-macos-helper-report.md`](./phases/v1.0-phase-2-macos-helper-report.md) |
 | 3 — Calendar v2 plugin | ✅ Done (2026-05-12) | 4 commits on `v1.0-prep`. Added `lark.exec_io` host fn for stdin piping. Report at [`phases/v1.0-phase-3-calendar-v2-report.md`](./phases/v1.0-phase-3-calendar-v2-report.md) |
-| 4 — Mail plugin (osascript) | 🔜 Next | 4w budget — biggest unknown |
-| 5 — AI Provider trait + 4 backends | Pending | Anthropic + OpenAI + OpenRouter + Ollama |
+| 4 — Mail plugin (osascript) | ✅ Done (2026-05-12) | 2 commits on `v1.0-prep`. 4 of 5 sub-phases shipped; 4.E (mailbox switcher chain) deferred to v1.x. Smoke runbook needs Taylor's pass on mutating actions ([`phases/v1.0-phase-4-mail-smoke-runbook.md`](./phases/v1.0-phase-4-mail-smoke-runbook.md)). Report at [`phases/v1.0-phase-4-mail-report.md`](./phases/v1.0-phase-4-mail-report.md) |
+| 5 — AI Provider trait + 4 backends | 🔜 Next | Anthropic + OpenAI + OpenRouter + Ollama |
 | 6 — AI single-shot plugin | Pending | |
 | 7 — Tool registry + manifest schema | Pending | `agent_callable` + `destructive` |
 | 8 — AI tool-use plugin + dry-run plan | Pending | Headline feature |
@@ -29,7 +29,7 @@ under "v1.0 — Agent Palette".
 ## Active Branches
 
 - `main` — at `bbbe3b2` (Release v0.15.0); pushed to origin
-- `v1.0-prep` — branched off main; 6 Phase 2 commits + 4 Phase 3 commits + Phase 3.F handoff (pending). Local-only until v1.0 ships.
+- `v1.0-prep` — branched off main; 6 Phase 2 + 4 Phase 3 + 2 Phase 4 + Phase 4.G handoff (pending) = ~13 commits. Local-only until v1.0 ships.
 
 ## Phase 2 outcome — macOS helper
 
