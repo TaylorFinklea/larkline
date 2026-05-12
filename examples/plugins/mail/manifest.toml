@@ -29,8 +29,8 @@ quickkey = "mt"
 timeout_seconds = 30
 
 [[commands]]
-name = "Compose"
-description = "New mail draft via $EDITOR"
+name = "New Mail"
+description = "Open a Mail.app composer pre-filled with recipient and subject"
 entry = "compose.lua"
 quickkey = "mc"
-timeout_seconds = 600
+timeout_seconds = 60
