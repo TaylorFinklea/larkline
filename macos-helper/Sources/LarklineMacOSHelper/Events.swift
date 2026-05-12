@@ -190,7 +190,13 @@ private func mapAttendee(_ p: EKParticipant) -> EventAttendee {
 
 private let iso8601: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
+    // .withInternetDateTime emits the RFC 3339 form "YYYY-MM-DDTHH:MM:SS±HH:MM".
+    // Setting timeZone = .current makes the offset reflect the user's local
+    // zone so downstream Lua plugins can display HH:MM directly without
+    // timezone math. EventKit dates are timezone-naive (absolute moments);
+    // the formatter does the zone application.
     f.formatOptions = [.withInternetDateTime]
+    f.timeZone = TimeZone.current
     return f
 }()
 

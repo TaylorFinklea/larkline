@@ -1,158 +1,203 @@
--- Calendar: My Schedule — threaded timeline view of upcoming events.
+-- Calendar: My Schedule -- structured timeline of upcoming events (14 days).
+--
+-- v1.0+: returns items[] with per-event actions (Join meeting, Open in
+-- Calendar.app, Copy meeting link). Day headers are passive rows. Falls
+-- back to icalbuddy text rendering when larkline-macos-helper isn't on
+-- PATH. Canonical helpers live in lib.lua and are inlined here with
+-- SHARED markers since the mlua sandbox has no require().
 
-local function check_icalbuddy()
-    local path = lark.exec("which", { "icalbuddy" })
-    return path and path:match("%S") ~= nil
+-- SHARED: has_helper / helper_call (canonical in lib.lua)
+local HELPER = "larkline-macos-helper"
+local function has_helper()
+    local r = lark.exec("which", { HELPER })
+    return r ~= nil and r:match("%S") ~= nil
 end
-
-local function parse_events(raw)
-    local events = {}
-    local current = nil
-
-    for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
-        if line:match("^EVENT:") then
-            if current then events[#events + 1] = current end
-            current = { title = line:sub(7), date = "", time = "", location = "" }
-        elseif current and line:match("^%s") then
-            local prop = line:gsub("^%s+", "")
-            local d, t_start, t_end = prop:match("^(%d%d%d%d%-%d%d%-%d%d) at (%d+:%d+) %- (%d+:%d+)")
-            if d then
-                current.date = d
-                current.time = t_start .. " – " .. t_end
-            else
-                local d_only = prop:match("^(%d%d%d%d%-%d%d%-%d%d)")
-                if d_only then
-                    current.date = d_only
-                    current.time = "All day"
-                elseif current.location == "" and prop ~= "" then
-                    current.location = prop
-                end
+local function helper_call(command, args)
+    local req = { id = "1", command = command, args = args }
+    local req_json, err = lark.json.encode(req)
+    if not req_json then return nil, "encode error: " .. tostring(err) end
+    local r = lark.exec_io(HELPER, nil, { stdin = req_json .. "\n" })
+    if r.exit_code ~= 0 then
+        return nil, "helper exit " .. r.exit_code .. ": " .. (r.stderr ~= "" and r.stderr or "no stderr")
+    end
+    for line in (r.stdout .. "\n"):gmatch("([^\n]*)\n") do
+        if line ~= "" then
+            local ok, parsed = pcall(lark.json.decode, line)
+            if ok and parsed and parsed.kind ~= "hello" then
+                if parsed.ok then return parsed.data, nil end
+                return nil, parsed.error or "unknown helper error"
             end
         end
     end
-    if current then events[#events + 1] = current end
-    return events
+    return nil, "no response from helper"
 end
 
-local function date_label(date_str, today, tomorrow)
-    if date_str == today then return "Today" end
-    if date_str == tomorrow then return "Tomorrow" end
-    local y, m, d = date_str:match("(%d+)-(%d+)-(%d+)")
+-- SHARED: format_time / format_date / date_label / iso_for_offset
+local function format_time(iso, all_day)
+    if all_day then return "all day" end
+    local h, m = iso:match("T(%d%d):(%d%d):")
+    if h then return h .. ":" .. m end
+    return iso:sub(1, 16)
+end
+local function format_date(iso) return iso:sub(1, 10) end
+local function date_label(date_str, today_str, tomorrow_str)
+    if date_str == today_str then return "Today" end
+    if date_str == tomorrow_str then return "Tomorrow" end
+    local y, mo, d = date_str:match("(%d+)-(%d+)-(%d+)")
     if not y then return date_str end
     local months = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
-    local month_name = months[tonumber(m)] or m
-    -- Get day of week.
     local dow = lark.exec("date", { "-jf", "%Y-%m-%d", date_str, "+%a" })
     dow = dow and dow:match("%a+") or ""
-    return dow .. " " .. month_name .. " " .. tonumber(d)
+    return dow .. " " .. (months[tonumber(mo)] or mo) .. " " .. tonumber(d)
+end
+local function iso_for_offset(days)
+    local sign = days >= 0 and "+" or ""
+    local d = lark.exec("date", { "-v" .. sign .. days .. "d", "+%Y-%m-%dT00:00:00%z" })
+    return d and d:match("[^\n]+") or nil
+end
+
+-- SHARED: icon_for_event / format_preview / format_event_row
+local function icon_for_event(event)
+    if event.meetingURL then return "📹" end
+    if event.allDay then return "📌" end
+    return "🗓 "
+end
+local function format_preview(event)
+    local lines = {}
+    table.insert(lines, "## " .. (event.title or "(no title)"))
+    table.insert(lines, "")
+    if event.allDay then
+        table.insert(lines, "**Time:** all day · " .. format_date(event.start_iso))
+    else
+        table.insert(lines, "**Time:** " .. event.start_iso:sub(1, 16) .. " → " .. event.end_iso:sub(1, 16))
+    end
+    if event.location and event.location ~= "" then
+        table.insert(lines, "**Location:** " .. event.location)
+    end
+    if event.calendarTitle then
+        table.insert(lines, "**Calendar:** " .. event.calendarTitle ..
+            (event.calendarSource and " (" .. event.calendarSource .. ")" or ""))
+    end
+    if event.meetingURL then
+        table.insert(lines, "**Meeting:** " .. event.meetingURL)
+    end
+    if event.attendees and #event.attendees > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "### Attendees")
+        for _, a in ipairs(event.attendees) do
+            local who = a.name or a.email or "?"
+            local marker = a.isCurrentUser and " *(you)*" or ""
+            local status = (a.status and a.status ~= "needs_action") and " — " .. a.status or ""
+            table.insert(lines, "- " .. who .. marker .. status)
+        end
+    end
+    if event.notes and event.notes ~= "" then
+        table.insert(lines, "")
+        table.insert(lines, "### Notes")
+        table.insert(lines, event.notes)
+    end
+    return table.concat(lines, "\n")
+end
+local function format_event_row(event)
+    local time_str = format_time(event.start_iso, event.allDay)
+    local label = time_str .. "  " .. (event.title or "(no title)")
+    local detail = (event.location ~= nil and event.location ~= "") and event.location
+        or (event.calendarTitle or nil)
+    local actions = {}
+    if event.meetingURL then
+        table.insert(actions, { label = "Join meeting", kind = "open", args = { event.meetingURL } })
+    end
+    table.insert(actions, {
+        label = "Open in Calendar.app", kind = "open",
+        args = { "ical://event/" .. event.id },
+    })
+    if event.meetingURL then
+        table.insert(actions, {
+            label = "Copy meeting link", kind = "clipboard",
+            args = { event.meetingURL },
+        })
+    end
+    return {
+        icon = icon_for_event(event),
+        label = label,
+        detail = detail,
+        preview = format_preview(event),
+        copy_text = event.meetingURL or event.title,
+        actions = actions,
+    }
+end
+
+-- SHARED: error_item / icalbuddy_fallback
+local function error_item(message, help_url)
+    return { icon = "!", label = message, help_url = help_url, actions = {} }
+end
+local function icalbuddy_fallback(range)
+    local r = lark.exec("which", { "icalbuddy" })
+    if not r or r:match("%S") == nil then
+        return { error_item("Neither larkline-macos-helper nor icalbuddy installed",
+                            "https://hasseg.org/icalBuddy/") }
+    end
+    local raw = lark.exec("icalbuddy", {
+        "-n", "-nc", "-b", "EVENT: ",
+        "-iep", "title,datetime,location",
+        "-npn", "-nrd", range or "eventsToday+14",
+    })
+    if not raw or raw:match("^%s*$") then
+        return { { icon = "🎉", label = "No upcoming events", actions = {} } }
+    end
+    return { { icon = "📋", label = "Calendar (icalbuddy fallback)", preview = raw, actions = {} } }
 end
 
 lark.register({
     on_run = function()
-        if not check_icalbuddy() then
-            return {
-                title = "My Schedule",
-                raw_text = "  ⚠  ical-buddy not installed\n\n  Run: brew install ical-buddy",
-            }
+        if not has_helper() then
+            return { title = "My Schedule", items = icalbuddy_fallback("eventsToday+14") }
         end
 
-        local raw = lark.exec("icalbuddy", {
-            "-n", "-nc",
-            "-b", "EVENT:",
-            "-ab", "  ",
-            "-iep", "title,datetime,location",
-            "-df", "%Y-%m-%d",
-            "-tf", "%H:%M",
-            "-npn", "-nrd",
-            "eventsToday+14",
+        local start_iso = iso_for_offset(0)
+        local end_iso = iso_for_offset(14)
+        if not start_iso or not end_iso then
+            return { title = "My Schedule", items = { error_item("date(1) shell command failed") } }
+        end
+
+        local data, err = helper_call("events_for_range", {
+            start_iso = start_iso,
+            end_iso = end_iso,
         })
-
-        if not raw or raw:match("^%s*$") then
-            return {
-                title = "My Schedule",
-                raw_text = "  🎉  No upcoming events in the next 2 weeks\n\n  Enjoy the free time!",
-            }
+        if err then
+            local help = err:find("calendar access denied", 1, true)
+                and "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"
+                or nil
+            return { title = "My Schedule", items = { error_item(err, help) } }
         end
 
-        local events = parse_events(raw)
+        local events = data and data.events or {}
         if #events == 0 then
             return {
                 title = "My Schedule",
-                raw_text = "  🎉  No upcoming events\n",
+                items = { { icon = "🎉", label = "No events in the next 2 weeks", actions = {} } },
             }
         end
 
-        local today = (lark.exec("date", { "+%Y-%m-%d" }) or ""):match("%d%d%d%d%-%d%d%-%d%d") or ""
-        local tomorrow = (lark.exec("date", { "-v+1d", "+%Y-%m-%d" }) or ""):match("%d%d%d%d%-%d%d%-%d%d") or ""
+        local today_date = format_date(start_iso)
+        local tomorrow_date = format_date(iso_for_offset(1))
 
-        -- Group events by date.
-        local days = {}
-        local day_order = {}
-        for _, ev in ipairs(events) do
-            local d = ev.date ~= "" and ev.date or "Unknown"
-            if not days[d] then
-                days[d] = {}
-                day_order[#day_order + 1] = d
+        local items = {}
+        local current_date = nil
+        for _, event in ipairs(events) do
+            local d = format_date(event.start_iso)
+            if d ~= current_date then
+                current_date = d
+                table.insert(items, {
+                    icon = "─",
+                    label = date_label(d, today_date, tomorrow_date) .. " · " .. d,
+                    actions = {},
+                })
             end
-            days[d][#days[d] + 1] = ev
+            table.insert(items, format_event_row(event))
         end
 
-        -- Build threaded timeline with ANSI colors.
-        local lines = {}
-        local dim = "\027[2m"
-        local reset = "\027[0m"
-        local bold = "\027[1m"
-        local cyan = "\027[36m"
-        local yellow = "\027[33m"
-        local green = "\027[32m"
-        local magenta = "\027[35m"
-
-        for i, d in ipairs(day_order) do
-            local label = date_label(d, today, tomorrow)
-            local is_today = (d == today)
-            local header_color = is_today and green or cyan
-
-            -- Spacing between days.
-            if i > 1 then
-                lines[#lines + 1] = dim .. "  │" .. reset
-            end
-
-            -- Day header.
-            lines[#lines + 1] = header_color .. bold .. "  ── " .. label .. " " .. dim .. d .. reset
-
-            local day_events = days[d]
-            for _, ev in ipairs(day_events) do
-                lines[#lines + 1] = dim .. "  │" .. reset
-
-                local title = ev.title or "?"
-                if ev.time == "All day" then
-                    lines[#lines + 1] = yellow .. "  ◆ " .. reset
-                        .. dim .. "all day   " .. reset
-                        .. title
-                else
-                    local time_display = ev.time ~= "" and ev.time or "??:??"
-                    lines[#lines + 1] = yellow .. "  ● " .. reset
-                        .. cyan .. time_display .. reset
-                        .. "  " .. title
-                end
-
-                if ev.location and ev.location ~= "" then
-                    lines[#lines + 1] = dim .. "  │  " .. magenta .. "📍 " .. ev.location .. reset
-                end
-            end
-        end
-
-        -- Summary footer.
-        local total = #events
-        lines[#lines + 1] = dim .. "  │" .. reset
-        lines[#lines + 1] = dim .. "  ╰── " .. total .. " event"
-            .. (total == 1 and "" or "s") .. " · "
-            .. #day_order .. " day" .. (#day_order == 1 and "" or "s") .. reset
-
-        return {
-            title = "My Schedule",
-            raw_text = table.concat(lines, "\n"),
-        }
+        return { title = "My Schedule", items = items }
     end,
 })
