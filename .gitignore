@@ -1,2 +1,5 @@
 /target
 .worktrees/
+macos-helper/.build/
+macos-helper/.swiftpm/
+macos-helper/Package.resolved
