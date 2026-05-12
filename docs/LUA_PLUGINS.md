@@ -100,6 +100,38 @@ local hostname = lark.exec("hostname"):match("^(.-)%s*$")
 local df = lark.exec("df", { "-h", "/" })
 ```
 
+
+### `lark.exec_io(command, args?, opts?) -> { stdout, stderr, exit_code }` (v1.0+)
+
+Richer subprocess primitive than `lark.exec`. Returns a table with all three
+streams the caller might want to inspect:
+
+- `stdout` — captured standard output as a UTF-8 string (lossy decode)
+- `stderr` — captured standard error as a UTF-8 string (also lossy decode)
+- `exit_code` — process exit code, or `-1` if killed by signal
+
+The optional `opts` table accepts:
+- `stdin` — string piped to the subprocess's standard input
+
+```lua
+-- Pipe JSON to a subprocess that reads from stdin (the macos-helper pattern):
+local r = lark.exec_io("larkline-macos-helper", nil, {
+    stdin = lark.json.encode({ id = "1", command = "version" }) .. "\n",
+})
+if r.exit_code ~= 0 then
+    return error_item("helper failed: " .. r.stderr)
+end
+
+-- Distinguish exit codes for translator wiring (v0.15.0 from_exit):
+local r = lark.exec_io("bw", { "list", "items" })
+if r.exit_code == 1 and r.stderr:find("locked", 1, true) then
+    return error_item("Vault is locked", "https://bitwarden.com/help/cli")
+end
+```
+
+Use `lark.exec_io` when you need stdin, stderr, or exit-code introspection.
+For simple "run a command and grab stdout" cases, `lark.exec` is shorter.
+
 ### `lark.json.encode(table) -> string`
 
 Serialize a Lua table to a JSON string.
