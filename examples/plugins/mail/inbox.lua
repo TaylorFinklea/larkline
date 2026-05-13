@@ -123,10 +123,19 @@ local function format_triage_row(msg)
     -- render of the message body on top of the current view. Esc/Back
     -- pops back to the inbox. Uses the body already in the row (no
     -- second JXA call). Empty body falls through to a placeholder.
+    --
+    -- The engine joins args[1..] with spaces into a single context
+    -- string before handing it to on_action, so we pack everything
+    -- we need as one JSON-encoded arg. on_action decodes.
+    local ctx_json, _ = lark.json.encode({
+        body = msg.body or "",
+        subject = msg.subject or "",
+        sender = msg.sender or "",
+    })
     table.insert(actions, {
         label = "View body",
         kind = "chain",
-        args = { "view_body", msg.body or "", msg.subject or "(no subject)", msg.sender or "" },
+        args = { "view_body", ctx_json or "{}" },
     })
     if id ~= "" then
         local mail_url = "message:" .. urlencode("<" .. id .. ">")
@@ -223,11 +232,19 @@ lark.register({
     -- Chain callback for "View body" -- drills into a fullscreen markdown
     -- render of the message body. raw_text + output_format = markdown
     -- triggers the TUI's Markdown OutputMode where j/k scrolls the body.
-    on_action = function(callback_id, args)
+    --
+    -- The engine hands us `context` as a single string (args[1..] joined
+    -- with spaces by execute_chain). We pack body/subject/sender as JSON
+    -- in format_message_row to survive the round-trip; decode here.
+    on_action = function(callback_id, context)
         if callback_id == "view_body" then
-            local body = args[1] or ""
-            local subject = args[2] or "(no subject)"
-            local sender = args[3] or ""
+            local ok, data = pcall(lark.json.decode, context or "{}")
+            if not ok or type(data) ~= "table" then
+                data = { body = "", subject = "(no subject)", sender = "" }
+            end
+            local subject = data.subject ~= "" and data.subject or "(no subject)"
+            local sender = data.sender or ""
+            local body = data.body or ""
             local md = "# " .. subject .. "\n\n"
             if sender ~= "" then md = md .. "**From:** " .. sender .. "\n\n" end
             md = md .. "---\n\n"
