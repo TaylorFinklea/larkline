@@ -222,6 +222,10 @@ pub struct AppState {
     pub pending_g: bool,
     /// Whether the sidebar is hidden in `ViewOutput` mode.
     pub sidebar_hidden: bool,
+    /// User-locked layout profile override. `None` = auto-detect from
+    /// terminal width every frame. Set via `:layout phone|narrow|medium
+    /// |wide` and cleared via `:layout auto`.
+    pub layout_profile_override: Option<crate::tui::profile::LayoutProfile>,
     /// Sidebar width percentage in browse mode (20-80).
     pub sidebar_ratio: u16,
     /// History stack for back-navigation through `ViewOutput` states.
@@ -1762,11 +1766,39 @@ impl App {
                 let cmd = self.state.command_input.trim().to_string();
                 self.state.vim_mode = VimMode::Normal;
                 self.state.command_input.clear();
-                match cmd.as_str() {
+                // Split off the verb so `:layout phone` etc work; verbs
+                // without args keep their original branches.
+                let (verb, rest) = cmd
+                    .split_once(' ')
+                    .map_or((cmd.as_str(), ""), |(v, r)| (v, r.trim()));
+                match verb {
                     "q" | "quit" => self.state.should_quit = true,
                     "r" | "refresh" => {
                         // Re-use the RefreshPlugins logic by recursing.
                         self.handle_action(Action::RefreshPlugins);
+                    }
+                    "layout" => {
+                        // `:layout auto` clears the override; any other
+                        // name sets a fixed profile. Unknown names flash
+                        // the available options to the status bar.
+                        if rest.is_empty() || rest.eq_ignore_ascii_case("auto") {
+                            self.state.layout_profile_override = None;
+                            self.state.status_message = Some((
+                                "layout: auto".to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        } else if let Some(p) = crate::tui::profile::LayoutProfile::parse(rest) {
+                            self.state.layout_profile_override = Some(p);
+                            self.state.status_message = Some((
+                                format!("layout: {}", p.label()),
+                                std::time::Instant::now(),
+                            ));
+                        } else {
+                            self.state.status_message = Some((
+                                "layout: phone|narrow|medium|wide|auto".to_string(),
+                                std::time::Instant::now(),
+                            ));
+                        }
                     }
                     _ => {
                         // Unknown command — ignore silently for now.

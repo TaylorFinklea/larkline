@@ -2,6 +2,7 @@
 
 pub mod highlight;
 pub mod markdown;
+pub mod profile;
 pub mod ui;
 
 use anyhow::Result;

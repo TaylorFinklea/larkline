@@ -29,8 +29,16 @@ const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     let area = frame.area();
 
+    // Width-based layout profile gates widgets / preview pane / status
+    // hints when the terminal isn't wide enough to show them legibly.
+    // User can lock via `:layout <profile>` when auto-detection lies.
+    let profile = state.layout_profile_override
+        .unwrap_or_else(|| crate::tui::profile::LayoutProfile::from_width(area.width));
+
     // Vertical split: search bar | [widgets] | content area | status bar
-    let has_widgets = state.widgets_visible && !state.widget_indices.is_empty();
+    let has_widgets = state.widgets_visible
+        && !state.widget_indices.is_empty()
+        && profile.allows_widget_row();
     let widget_height = if has_widgets { 6 } else { 0 };
 
     let chunks = Layout::default()
@@ -63,10 +71,14 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     // Content area is now chunks[2] instead of chunks[1].
     let content_area = chunks[2];
 
-    let show_right_pane = state.mode == Mode::ViewOutput
-        || (state.mode == Mode::Unified
-            && state.preview_plugin_index.is_some()
-            && content_area.width >= 80);
+    // Right pane (preview in Unified, output in ViewOutput) needs Medium+
+    // width. Below that, the list takes the full content area and the
+    // user reaches the output via Enter, returning via Esc -- mobile.
+    let show_right_pane = profile.allows_right_pane()
+        && (state.mode == Mode::ViewOutput
+            || (state.mode == Mode::Unified
+                && state.preview_plugin_index.is_some()
+                && content_area.width >= 80));
 
     // Mini app mode: full content area for split panes.
     if state.mode == Mode::MiniApp {
@@ -78,8 +90,13 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
         if let Some(ref pm) = state.plugin_manager {
             render_plugin_manager(frame, pm, theme, content_area);
         }
-    // Sidebar hidden: ViewOutput gets full width, Unified hides preview.
-    } else if state.sidebar_hidden && state.mode == Mode::ViewOutput {
+    // Sidebar hidden OR profile too narrow for split: ViewOutput gets
+    // full width, Unified hides preview. Narrow profile forces the
+    // ViewOutput pane to fill the content area so the user can read
+    // their drilled-in output on a phone.
+    } else if (state.sidebar_hidden || !profile.allows_right_pane())
+        && state.mode == Mode::ViewOutput
+    {
         render_output_pane(frame, state, theme, content_area);
     } else if state.sidebar_hidden && state.mode == Mode::Unified {
         render_unified_list(frame, state, theme, content_area);
@@ -1098,8 +1115,16 @@ fn render_widget_row(
         return;
     }
 
-    // Split horizontally into equal-width cards.
-    let card_count = indices.len().min(6); // max 6 cards
+    // Per-profile cap keeps each card at >= ~25 cols so the title and
+    // first line are legible. The user's pin order chooses which cards
+    // survive when the profile cap drops below the pinned count.
+    let profile = state.layout_profile_override
+        .unwrap_or_else(|| crate::tui::profile::LayoutProfile::from_width(area.width));
+    let cap = profile.max_widget_cards();
+    if cap == 0 {
+        return;
+    }
+    let card_count = indices.len().min(cap);
     let constraints: Vec<Constraint> = (0..card_count)
         .map(|_| Constraint::Percentage(100 / u16::try_from(card_count).unwrap_or(1)))
         .collect();
@@ -1414,30 +1439,39 @@ fn render_status_bar(
 
                 match state.mode {
                     Mode::Unified => {
+                        // Build hints into a Vec first so the profile cap
+                        // can trim the tail before flattening into spans.
+                        // Ordered by importance -- navigation and search
+                        // come first; widgets / quit fall off on phones.
+                        let mut hints: Vec<(&str, &str)> = Vec::new();
                         if state.widget_focused {
-                            // Widget row is focused — show widget-specific keys.
-                            spans.extend(key_hint("h/l", "reorder", theme));
-                            spans.extend(key_hint("⏎", "open", theme));
-                            spans.extend(key_hint("A", "add/remove", theme));
-                            spans.extend(key_hint("D", "disable", theme));
-                            spans.extend(key_hint("W", "hide all", theme));
-                            spans.extend(key_hint("j/Esc", "back to list", theme));
+                            hints.push(("h/l", "reorder"));
+                            hints.push(("⏎", "open"));
+                            hints.push(("A", "add/remove"));
+                            hints.push(("D", "disable"));
+                            hints.push(("W", "hide all"));
+                            hints.push(("j/Esc", "back to list"));
                         } else {
-                            spans.extend(key_hint("j/k", "nav", theme));
-                            spans.extend(key_hint("⏎", "run", theme));
-                            spans.extend(key_hint("/", "search", theme));
-                            spans.extend(key_hint(":", "cmd", theme));
-                            spans.extend(key_hint("SPC", "menu", theme));
-                            spans.extend(key_hint("q", "quit", theme));
+                            hints.push(("j/k", "nav"));
+                            hints.push(("⏎", "run"));
+                            hints.push(("/", "search"));
+                            hints.push((":", "cmd"));
+                            hints.push(("SPC", "menu"));
+                            hints.push(("q", "quit"));
                             if !state.widget_indices.is_empty() {
                                 if state.widgets_visible {
-                                    // Widgets showing — hint how to focus them.
-                                    spans.extend(key_hint("K", "widgets", theme));
+                                    hints.push(("K", "widgets"));
                                 } else {
-                                    // Widgets hidden — hint how to show them.
-                                    spans.extend(key_hint("W", "show widgets", theme));
+                                    hints.push(("W", "show widgets"));
                                 }
                             }
+                        }
+                        let profile = state.layout_profile_override
+                            .unwrap_or_else(|| {
+                                crate::tui::profile::LayoutProfile::from_width(area.width)
+                            });
+                        for (key, label) in hints.iter().take(profile.max_status_hints()) {
+                            spans.extend(key_hint(key, label, theme));
                         }
                         if state.sort_mode != crate::app::SortMode::Alpha {
                             spans.push(Span::styled(
@@ -1485,28 +1519,34 @@ fn render_status_bar(
                                     Style::default().fg(theme.text),
                                 ));
                             }
-                            spans.extend(key_hint("j/k", "nav", theme));
-                            spans.extend(key_hint("⏎", "action", theme));
-                            // Reads "actions" when the focused row has multiple
-                            // actions (Space opens a numbered menu of them via
-                            // the "This item" power-menu category) and falls
-                            // back to "menu" otherwise.
+                            // Build hints into a Vec so the profile cap
+                            // can trim the tail in narrow terminals.
                             let item = crate::app_output::selected_output_item(state);
                             let space_label = if item.is_some_and(|i| i.actions.len() > 1) {
                                 "actions"
                             } else {
                                 "menu"
                             };
-                            spans.extend(key_hint("SPC", space_label, theme));
-                            spans.extend(key_hint("Esc", "back", theme));
-                            // Surface error-item affordances when the focused row has them.
+                            let mut hints: Vec<(&str, &str)> = vec![
+                                ("j/k", "nav"),
+                                ("⏎", "action"),
+                                ("SPC", space_label),
+                                ("Esc", "back"),
+                            ];
                             if let Some(item) = item {
                                 if item.retry_action.is_some() {
-                                    spans.extend(key_hint("r", "retry", theme));
+                                    hints.push(("r", "retry"));
                                 }
                                 if item.help_url.is_some() {
-                                    spans.extend(key_hint("o", "help", theme));
+                                    hints.push(("o", "help"));
                                 }
+                            }
+                            let profile = state.layout_profile_override
+                                .unwrap_or_else(|| {
+                                    crate::tui::profile::LayoutProfile::from_width(area.width)
+                                });
+                            for (key, label) in hints.iter().take(profile.max_status_hints()) {
+                                spans.extend(key_hint(key, label, theme));
                             }
                         }
                     }
