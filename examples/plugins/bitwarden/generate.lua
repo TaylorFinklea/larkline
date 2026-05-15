@@ -141,6 +141,15 @@ lark.register({
             end
             local pw = raw:gsub("%s+$", "")
 
+            -- Pack the exact bw args (minus the leading "generate" verb) into
+            -- the chain context so "Generate another" repeats the user's
+            -- options instead of falling back to defaults. The engine joins
+            -- chain args[1..] with spaces into one context string, so encode
+            -- as JSON to round-trip cleanly.
+            local repeat_args = {}
+            for i = 2, #args do repeat_args[#repeat_args + 1] = args[i] end
+            local ctx_json, _ = lark.json.encode({ mode = mode, args = repeat_args })
+
             return {
                 title = mode == "passphrase" and "Generated Passphrase" or "Generated Password",
                 items = {
@@ -157,7 +166,7 @@ lark.register({
                         label = "Generate another",
                         detail = "Re-run with the same settings",
                         icon = "🔄",
-                        actions = { { label = "Regenerate", kind = "chain", args = { "regenerate", "" } } },
+                        actions = { { label = "Regenerate", kind = "chain", args = { "regenerate", ctx_json or "{}" } } },
                     },
                 },
             }
@@ -200,9 +209,24 @@ lark.register({
         }
     end,
 
-    on_action = function(callback_id, _context)
+    on_action = function(callback_id, context)
         if callback_id == "regenerate" then
-            local raw = lark.exec("bw", { "generate", "--length", "20", "--uppercase", "--lowercase", "--number" })
+            -- Decode the original options packed in the chain context. Falls
+            -- back to bw defaults only when the context is missing/garbled.
+            local ok, decoded = pcall(lark.json.decode, context or "{}")
+            local mode = "password"
+            local bw_args = { "generate" }
+            if ok and type(decoded) == "table" and type(decoded.args) == "table" then
+                mode = decoded.mode or "password"
+                for _, a in ipairs(decoded.args) do bw_args[#bw_args + 1] = a end
+            else
+                -- Legacy fallback: 20-char password with standard charset.
+                for _, a in ipairs({ "--length", "20", "--uppercase", "--lowercase", "--number" }) do
+                    bw_args[#bw_args + 1] = a
+                end
+            end
+
+            local raw = lark.exec("bw", bw_args)
             local pw = (raw or ""):gsub("%s+$", "")
             if pw == "" then
                 local translated = from_exit(raw or "", {
@@ -213,20 +237,40 @@ lark.register({
                 })
                 return { title = "Regenerate", items = { translated or error_item({ label = "bw generate returned no output", help_url = BW_HELP_URL }) } }
             end
+
+            -- Derive a detail line that reflects the actual options used so
+            -- the user can see at a glance that their settings were honored.
+            local detail
+            if mode == "passphrase" then
+                local words, sep
+                for i, a in ipairs(bw_args) do
+                    if a == "--words" then words = bw_args[i + 1] end
+                    if a == "--separator" then sep = bw_args[i + 1] end
+                end
+                detail = (words or "?") .. " words, separator `" .. (sep or "-") .. "`"
+            else
+                local length
+                for i, a in ipairs(bw_args) do
+                    if a == "--length" then length = bw_args[i + 1] end
+                end
+                detail = (length or "?") .. " chars"
+            end
+
             return {
-                title = "Generated Password",
+                title = mode == "passphrase" and "Generated Passphrase" or "Generated Password",
                 items = {
                     {
                         label = pw,
-                        detail = "20 chars",
+                        detail = detail,
                         icon = "🔑",
                         copy_text = pw,
                         actions = { { label = "Copy to clipboard", kind = "clipboard", args = { pw } } },
                     },
                     {
                         label = "Generate another",
+                        detail = "Re-run with the same settings",
                         icon = "🔄",
-                        actions = { { label = "Regenerate", kind = "chain", args = { "regenerate", "" } } },
+                        actions = { { label = "Regenerate", kind = "chain", args = { "regenerate", context or "{}" } } },
                     },
                 },
             }

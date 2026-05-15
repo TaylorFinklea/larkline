@@ -14,6 +14,12 @@
 -- all of Mail. JXA's whose({messageId: ...}) filter is the lookup.
 --
 -- Canonical helpers in lib.lua; inlined here with SHARED markers.
+--
+-- Perf note: the listing JXA deliberately does NOT call m.content() for
+-- every message -- that's the slowest single op in Mail.app scripting
+-- and pulling it for 30 messages routinely blew past the 30s plugin
+-- timeout on real-world inboxes. Body is fetched on demand by the
+-- "View body" chain action via a single-message lookup.
 
 -- SHARED: jxa_run / time_ago / icon_for_message / format_preview / urlencode (from inbox.lua / lib.lua)
 local function jxa_run(script)
@@ -61,12 +67,7 @@ local function format_preview(msg)
     if msg.readStatus then table.insert(lines, "**Status:** read") end
     if msg.flagged then table.insert(lines, "**Flagged:** yes") end
     table.insert(lines, "")
-    if msg.body and msg.body ~= "" then
-        table.insert(lines, "---")
-        table.insert(lines, "")
-        local body = msg.body:gsub("\r\n", "\n"):gsub("\n\n\n+", "\n\n")
-        table.insert(lines, body)
-    end
+    table.insert(lines, "_Press Space → View body for full message text._")
     return table.concat(lines, "\n")
 end
 
@@ -121,22 +122,27 @@ local function format_triage_row(msg)
     local actions = {}
     -- "View body" is a chain action: it pushes a fullscreen markdown
     -- render of the message body on top of the current view. Esc/Back
-    -- pops back to the inbox. Uses the body already in the row (no
-    -- second JXA call). Empty body falls through to a placeholder.
+    -- pops back to the inbox. The body is fetched on demand in
+    -- on_action via a single-message JXA lookup so the inbox listing
+    -- itself stays fast (see perf note at the top of this file).
     --
     -- The engine joins args[1..] with spaces into a single context
-    -- string before handing it to on_action, so we pack everything
-    -- we need as one JSON-encoded arg. on_action decodes.
-    local ctx_json, _ = lark.json.encode({
-        body = msg.body or "",
-        subject = msg.subject or "",
-        sender = msg.sender or "",
-    })
-    table.insert(actions, {
-        label = "View body",
-        kind = "chain",
-        args = { "view_body", ctx_json or "{}" },
-    })
+    -- string before handing it to on_action, so we pack the lookup
+    -- keys + display fields as one JSON-encoded arg.
+    if id ~= "" and acc ~= "" then
+        local ctx_json, _ = lark.json.encode({
+            account = acc,
+            mailbox = mbx,
+            id = id,
+            subject = msg.subject or "",
+            sender = msg.sender or "",
+        })
+        table.insert(actions, {
+            label = "View body",
+            kind = "chain",
+            args = { "view_body", ctx_json or "{}" },
+        })
+    end
     if id ~= "" then
         local mail_url = "message:" .. urlencode("<" .. id .. ">")
         table.insert(actions, { label = "Open in Mail.app", kind = "open", args = { mail_url } })
@@ -170,7 +176,7 @@ local function format_triage_row(msg)
     }
 end
 
--- JXA: same as inbox.lua, plus emit mailboxName so mutations can scope correctly.
+-- JXA listing: metadata only, no m.content() -- see perf note at top of file.
 local JXA_INBOX = [[
 ObjC.import('Foundation');
 const Mail = Application("Mail");
@@ -196,7 +202,6 @@ for (let a = 0; a < accounts.length; a++) {
         dateReceived: m.dateReceived().toISOString(),
         readStatus: m.readStatus(),
         flagged: m.flaggedStatus(),
-        body: (m.content() || "").slice(0, 5000),
       });
     } catch(e) {}
   }
@@ -234,17 +239,33 @@ lark.register({
     -- triggers the TUI's Markdown OutputMode where j/k scrolls the body.
     --
     -- The engine hands us `context` as a single string (args[1..] joined
-    -- with spaces by execute_chain). We pack body/subject/sender as JSON
-    -- in format_message_row to survive the round-trip; decode here.
+    -- with spaces by execute_chain). We pack lookup keys + display fields
+    -- as JSON in format_triage_row to survive the round-trip; decode
+    -- here and run a single-message JXA fetch for the body content.
     on_action = function(callback_id, context)
         if callback_id == "view_body" then
             local ok, data = pcall(lark.json.decode, context or "{}")
             if not ok or type(data) ~= "table" then
-                data = { body = "", subject = "(no subject)", sender = "" }
+                data = {}
             end
-            local subject = data.subject ~= "" and data.subject or "(no subject)"
+            local subject = (data.subject ~= nil and data.subject ~= "") and data.subject or "(no subject)"
             local sender = data.sender or ""
-            local body = data.body or ""
+            local id = data.id or ""
+            local acc = data.account or ""
+            local mbx = data.mailbox or "INBOX"
+
+            local body = ""
+            if id ~= "" and acc ~= "" then
+                local script = string.format(
+                    'const m=Application("Mail").accounts.byName(%s).mailboxes.byName(%s).messages.whose({messageId:%s})()[0];m?(m.content()||""):"";',
+                    js_str(acc), js_str(mbx), js_str(id)
+                )
+                local r = lark.exec_io("osascript", { "-l", "JavaScript" }, { stdin = script })
+                if r.exit_code == 0 then
+                    body = (r.stdout or ""):gsub("%s+$", "")
+                end
+            end
+
             local md = "# " .. subject .. "\n\n"
             if sender ~= "" then md = md .. "**From:** " .. sender .. "\n\n" end
             md = md .. "---\n\n"
