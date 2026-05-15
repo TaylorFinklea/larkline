@@ -63,10 +63,16 @@ impl LuaPlugin {
     fn register_api(
         lua: &Lua,
         plugin_name: String,
+        plugin_dir: &std::path::Path,
         store: std::sync::Arc<std::sync::Mutex<crate::plugin::store::PluginStore>>,
     ) -> Result<(), PluginError> {
         let lark = lua
             .create_table()
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
+        // lark.plugin_dir — absolute path to the plugin's source directory.
+        // Lets a plugin invoke sibling helper scripts (mail/mail_render.py etc).
+        lark.set("plugin_dir", plugin_dir.to_string_lossy().into_owned())
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
         // lark.env(name) -> string? — read from .env secrets first, then process env.
@@ -519,6 +525,7 @@ impl LuaPlugin {
 
         let plugin_name = self.metadata.name.clone();
         let plugin_name_for_save = self.metadata.name.clone();
+        let plugin_dir = self.plugin_dir.clone();
         let timeout = self.metadata.timeout;
 
         // Load the plugin's persistent store.
@@ -534,7 +541,7 @@ impl LuaPlugin {
         // Run the entire Lua execution inside a timeout.
         tokio::time::timeout(timeout, async move {
             let lua = Self::create_vm()?;
-            Self::register_api(&lua, plugin_name, store)?;
+            Self::register_api(&lua, plugin_name, &plugin_dir, store)?;
 
             // Inject form values as lark.form_values table (if present).
             if let Some(values) = form_values {
@@ -626,6 +633,7 @@ impl LuaPlugin {
 
         let plugin_name = self.metadata.name.clone();
         let plugin_name_for_save = self.metadata.name.clone();
+        let plugin_dir = self.plugin_dir.clone();
         let timeout = self.metadata.timeout;
         let callback_id = callback_id.to_string();
         let context = context.to_string();
@@ -641,7 +649,7 @@ impl LuaPlugin {
 
         tokio::time::timeout(timeout, async move {
             let lua = Self::create_vm()?;
-            Self::register_api(&lua, plugin_name, store)?;
+            Self::register_api(&lua, plugin_name, &plugin_dir, store)?;
 
             // Load the plugin script.
             lua.load(&script)
