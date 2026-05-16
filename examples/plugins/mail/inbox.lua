@@ -453,8 +453,24 @@ lark.register({
             for i, img in ipairs(images) do
                 table.insert(out, string.format("[%d/%d] %s (%s)",
                     i, #images, img.filename, img.mime))
-                local rr = lark.exec_io("chafa",
-                    { "--format=symbols", "--size=80x24", "--animate=off", img.path })
+                -- Three flags matter for embedding chafa output in lark:
+                --   --probe=off       suppress OSC 10/11 color queries
+                --                     (they would echo into lark's stdin
+                --                     and end up typed into the search bar)
+                --   --polite=on       inhibit other terminal-confusing
+                --                     escapes (cursor moves, mode sets)
+                --   --relative=off    newline-separated rows, no cursor
+                --                     positioning -- friendly for embedding
+                --                     in a ratatui Paragraph via ansi_to_tui
+                local rr = lark.exec_io("chafa", {
+                    "--format=symbols",
+                    "--size=80x24",
+                    "--animate=off",
+                    "--probe=off",
+                    "--polite=on",
+                    "--relative=off",
+                    img.path,
+                })
                 if rr.exit_code == 0 then
                     table.insert(out, rr.stdout or "")
                 else
