@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-05-12
+> Updated: 2026-05-17
 
 ## Next Milestone — v1.0 Agent Palette
 
@@ -17,6 +17,7 @@ under "v1.0 — Agent Palette".
 | 2 — macOS Swift helper (EventKit) | ✅ Done (2026-05-12) | 5 commits on `v1.0-prep`. Sub-phase 2.E dropped (no programmatic RSVP). Report at [`phases/v1.0-phase-2-macos-helper-report.md`](./phases/v1.0-phase-2-macos-helper-report.md) |
 | 3 — Calendar v2 plugin | ✅ Done (2026-05-12) | 4 commits on `v1.0-prep`. Added `lark.exec_io` host fn for stdin piping. Report at [`phases/v1.0-phase-3-calendar-v2-report.md`](./phases/v1.0-phase-3-calendar-v2-report.md) |
 | 4 — Mail plugin (osascript) | ✅ Done (2026-05-12) | 2 commits on `v1.0-prep`. 4 of 5 sub-phases shipped; 4.E (mailbox switcher chain) deferred to v1.x. Smoke runbook needs Taylor's pass on mutating actions ([`phases/v1.0-phase-4-mail-smoke-runbook.md`](./phases/v1.0-phase-4-mail-smoke-runbook.md)). Report at [`phases/v1.0-phase-4-mail-report.md`](./phases/v1.0-phase-4-mail-report.md) |
+| 4.5 — Mail UX polish + TUI per-row actions + mobile layout | ✅ Done (2026-05-17) | 10 commits on `v1.0-prep`. Dogfood-driven: HTML body rendering (w3m/pandoc), inline image preview (chafa), Inbox perf fix (30s→7s), View body chain action, Space power menu "This item" category, `LayoutProfile` for narrow terminals, `lark.plugin_dir` host fn. Report at [`phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md`](./phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md) |
 | 5 — AI Provider trait + 4 backends | 🔜 Next | Anthropic + OpenAI + OpenRouter + Ollama |
 | 6 — AI single-shot plugin | Pending | |
 | 7 — Tool registry + manifest schema | Pending | `agent_callable` + `destructive` |
@@ -29,7 +30,7 @@ under "v1.0 — Agent Palette".
 ## Active Branches
 
 - `main` — at `bbbe3b2` (Release v0.15.0); pushed to origin
-- `v1.0-prep` — branched off main; 6 Phase 2 + 4 Phase 3 + 2 Phase 4 + Phase 4.G handoff (pending) = ~13 commits. Local-only until v1.0 ships.
+- `v1.0-prep` — branched off main; 5 Phase 2 + 4 Phase 3 + 2 Phase 4 + Phase 4.G handoff + 10 Phase 4.5 = ~23 commits. Local-only until v1.0 ships.
 
 ## Phase 2 outcome — macOS helper
 
@@ -65,6 +66,32 @@ Architecture summary in [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) "ma
 
 Smoke runbook for Phase 2: [`phases/v1.0-phase-2-macos-helper-smoke-runbook.md`](./phases/v1.0-phase-2-macos-helper-smoke-runbook.md). Three sections: protocol (no TCC), EventKit (TCC required), universal binary (only when verifying CI release artifacts).
 
+## Phase 4.5 outcome — Mail UX polish, TUI per-row actions, mobile layout
+
+10 commits on `v1.0-prep`, all reactive to Taylor's Mail plugin
+dogfooding. Three threads:
+
+| Thread | Headline | Commits |
+|---|---|---|
+| Mail UX | View body via w3m/pandoc, View images via chafa, Inbox listing perf (30s timeout → 7s) | `8163196` `c33e110` `b830b12` `7de4985` `a999041` `6450ea0` |
+| TUI per-row actions | Space power menu "This item" category with digit shortcuts; `[SPC] actions` hint; palette nav bug fix | `eae7532` `8e48396` `f6dde38` |
+| Responsive layout | `LayoutProfile` (Phone / Narrow / Medium / Wide) auto-detected from terminal width; `:layout <profile>` override | `7ba697e` |
+
+New host-side surface:
+- `lark.plugin_dir` global (absolute path to plugin source dir; enables sibling helper scripts like `mail_render.py`)
+- `AppState.layout_profile_override` field
+- `Action::RunFocusedItemAt(usize)` variant
+
+Phase 4.5 report: [`phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md`](./phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md).
+
+## Validation (Phase 4.5 baseline)
+
+- `cargo test --bin lark` → **147 passed** (+4 from Phase 4 baseline: palette nav, RunFocusedItemAt, power-menu construction, LayoutProfile)
+- `cargo test --lib` → 58 passed
+- `cargo clippy --bin lark -- -D warnings` → clean
+- `luac -p` on modified plugins → clean
+- End-to-end smoke (Taylor's machine): Inbox listing on real ~200-msg iCloud inbox ≈ 7s; View body via w3m renders cleanly; View images downloads + chafa-renders 11 remote images; `:layout phone` confirmed list-only on 200-col terminal
+
 ## Next
 
-See the **Now / Next / Later** section in `.docs/ai/roadmap.md`. Phase 3 (Calendar v2 plugin) is queued.
+See the **Now / Next / Later** section in `.docs/ai/roadmap.md`. Phase 5 (AI Provider trait + 4 backends: Anthropic, OpenAI Responses, OpenRouter, Ollama) is queued. Taylor is smoke-testing Phase 4.5 in parallel — Mail compose, Mail mutating actions, and mobile-width thresholds need his confirmation.

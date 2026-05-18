@@ -21,7 +21,7 @@ v1.0 scope (12 phases, ~22 weeks):
 - **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
 - **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
 
-Phase 1 (current): tag v0.13/v0.14/v0.15 from their existing -prep branches.
+Phases 1-4.5 done (2026-05-17). Current focus: Phase 5 (AI Provider trait + 4 backends — Anthropic, OpenAI Responses, OpenRouter, Ollama). Taylor smoke-testing Mail + mobile-layout in parallel.
 
 ### Next (after v1.0 ships)
 
