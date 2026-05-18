@@ -166,7 +166,9 @@ pub enum ProviderEvent {
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Human-readable provider name for logging and status display.
-    fn name(&self) -> &str;
+    /// Returns a `&'static str` because every implementation we ship
+    /// returns a string literal — saves consumers from lifetime juggling.
+    fn name(&self) -> &'static str;
 
     /// Stream a response to the given request. Events arrive on
     /// `events` in arrival order; the channel is closed when the

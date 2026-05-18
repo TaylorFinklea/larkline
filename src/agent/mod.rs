@@ -27,6 +27,7 @@
 //! when the model wants to call one. Phase 7 builds the tool registry
 //! from plugin manifests; Phase 8 runs the agent loop.
 
+pub mod anthropic;
 pub mod error;
 pub mod provider;
 
