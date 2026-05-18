@@ -2090,10 +2090,11 @@ impl App {
                     let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
                     // Reload secrets on refresh (with keychain fallback).
                     self.secrets = crate::config::load_secrets();
-                    let declared_keys: Vec<&str> = plugins
+                    let mut declared_keys: Vec<&str> = plugins
                         .iter()
                         .flat_map(|p| p.metadata().secrets.iter().map(String::as_str))
                         .collect();
+                    declared_keys.extend(crate::config::AI_SECRET_KEYS);
                     crate::config::resolve_keychain_secrets(&mut self.secrets, &declared_keys);
                     self.engine = PluginEngine::new(plugins, tx, self.secrets.clone());
                     self.rx = rx;

@@ -26,6 +26,8 @@ pub struct Config {
     pub favorites: FavoritesConfig,
     /// Keybinding overrides.
     pub keybindings: KeybindingsConfig,
+    /// AI provider settings (Phase 5+).
+    pub ai: AiConfig,
 }
 
 /// General application settings.
@@ -444,6 +446,144 @@ pub struct FavoritesConfig {
     pub pinned: Vec<String>,
 }
 
+/// AI provider identifiers. Selects which backend implements
+/// [`crate::agent::Provider`] at startup based on `[ai] provider = "..."`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProviderName {
+    /// Anthropic Messages API (default — supports prompt caching for
+    /// tool definitions, which saves ~40-70% on multi-turn agent loops).
+    #[default]
+    Anthropic,
+    /// `OpenAI` Responses API (the forward-direction successor to Chat
+    /// Completions).
+    Openai,
+    /// `OpenRouter` (`OpenAI`-compatible Chat Completions transport with a
+    /// different base URL). Model capability varies — Larkline filters
+    /// at startup via `/models`.
+    Openrouter,
+    /// Ollama local server (OpenAI-compatible at `localhost:11434/v1`).
+    /// No API key. Tool-use requires a recent OSS model (Llama 3.2,
+    /// Mistral 7B Instruct v0.3+, Qwen 2.5 7B+).
+    Ollama,
+}
+
+#[allow(dead_code)] // wired in Phase 5.C+ by provider implementations
+impl AiProviderName {
+    /// Stable string identifier used in config files and CLI flags.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::Openai => "openai",
+            Self::Openrouter => "openrouter",
+            Self::Ollama => "ollama",
+        }
+    }
+
+    /// Conventional Keychain key holding this provider's API key. Ollama
+    /// returns `None` because the local server doesn't require auth.
+    #[must_use]
+    pub const fn api_key_env(self) -> Option<&'static str> {
+        match self {
+            Self::Anthropic => Some("ANTHROPIC_API_KEY"),
+            Self::Openai => Some("OPENAI_API_KEY"),
+            Self::Openrouter => Some("OPENROUTER_API_KEY"),
+            Self::Ollama => None,
+        }
+    }
+
+    /// Provider-recommended default model. Used when the user hasn't
+    /// configured one. Tuned for the launch thesis (Anthropic Opus 4.7
+    /// for the headline experience; `OpenAI` 4o-mini for cost-conscious
+    /// users; Ollama Llama 3.2 as a viable local default).
+    #[must_use]
+    pub const fn default_model(self) -> &'static str {
+        match self {
+            Self::Anthropic => "claude-opus-4-7",
+            Self::Openai => "gpt-4o",
+            Self::Openrouter => "anthropic/claude-3.5-sonnet",
+            Self::Ollama => "llama3.2",
+        }
+    }
+}
+
+/// AI provider configuration. Selects the active provider and per-provider
+/// model + base URL overrides. API keys come from the secrets pipeline
+/// (Keychain / `.env`), not from this struct — the file lives in the
+/// repo and shouldn't carry credentials.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiConfig {
+    /// Active provider. Defaults to Anthropic.
+    pub provider: AiProviderName,
+    /// Model identifier passed to the active provider. Empty string ⇒
+    /// use the provider's [`AiProviderName::default_model`].
+    pub model: String,
+    /// Override for the `OpenRouter` base URL. Empty ⇒
+    /// `https://openrouter.ai/api/v1`.
+    pub openrouter_base_url: String,
+    /// Override for the Ollama base URL. Empty ⇒ `http://localhost:11434/v1`.
+    pub ollama_base_url: String,
+    /// Hard cap on output tokens per request. 0 ⇒ provider default.
+    pub max_tokens: u32,
+}
+
+#[allow(dead_code)] // wired in Phase 5.C+ by provider implementations
+impl AiConfig {
+    /// Resolved model name for the active provider. Falls back to the
+    /// provider default when the user hasn't set one.
+    #[must_use]
+    pub fn resolved_model(&self) -> &str {
+        if self.model.is_empty() {
+            self.provider.default_model()
+        } else {
+            self.model.as_str()
+        }
+    }
+
+    /// Resolved `OpenRouter` base URL.
+    #[must_use]
+    pub fn resolved_openrouter_base_url(&self) -> &str {
+        if self.openrouter_base_url.is_empty() {
+            "https://openrouter.ai/api/v1"
+        } else {
+            self.openrouter_base_url.as_str()
+        }
+    }
+
+    /// Resolved Ollama base URL.
+    #[must_use]
+    pub fn resolved_ollama_base_url(&self) -> &str {
+        if self.ollama_base_url.is_empty() {
+            "http://localhost:11434/v1"
+        } else {
+            self.ollama_base_url.as_str()
+        }
+    }
+
+    /// `Some` token cap when the user set one, else `None` for provider
+    /// default. Kept as the on-disk `u32` so an unset field round-trips
+    /// as `0` instead of disappearing.
+    #[must_use]
+    pub const fn resolved_max_tokens(&self) -> Option<u32> {
+        if self.max_tokens == 0 {
+            None
+        } else {
+            Some(self.max_tokens)
+        }
+    }
+}
+
+/// All AI-provider Keychain/env keys we want resolved at startup. Passed
+/// to [`resolve_keychain_secrets`] so users can store credentials with
+/// `lark secret set <KEY>` and never see them in plaintext config files.
+pub const AI_SECRET_KEYS: [&str; 3] = [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+];
+
 /// Color theme configuration.
 ///
 /// Colors can be ratatui named colors (e.g. `"cyan"`) or hex strings (e.g. `"#89b4fa"`).
@@ -761,6 +901,17 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 # [keybindings.launch]
 # "Ctrl+g" = "GitHub PRs"
 # "Ctrl+s" = "System Info"
+
+# AI provider (Phase 5+) — used by the AI plugins shipped in v1.0.
+# API keys come from the secrets pipeline: run `lark secret set
+# ANTHROPIC_API_KEY` (or OPENAI_API_KEY / OPENROUTER_API_KEY) once and
+# they're stored in macOS Keychain, never on disk.
+# [ai]
+# provider             = "anthropic"            # anthropic | openai | openrouter | ollama
+# model                = ""                     # blank = provider default
+# max_tokens           = 0                      # 0 = provider default
+# openrouter_base_url  = ""                     # blank = https://openrouter.ai/api/v1
+# ollama_base_url      = ""                     # blank = http://localhost:11434/v1
 "#;
 
 /// Write the default commented config file if none exists.

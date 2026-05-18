@@ -10,6 +10,7 @@ use tracing::info;
 
 mod action;
 mod actions;
+mod agent;
 mod app;
 mod app_output;
 mod atlassian;
@@ -320,10 +321,13 @@ fn build_plugin_context() -> Result<PluginContext> {
     // Mirror the TUI's secrets pipeline so plugins invoked headlessly see the
     // same `lark.env(KEY)` results as inside the TUI.
     let mut secrets = config::load_secrets();
-    let declared_keys: Vec<&str> = discovered
+    let mut declared_keys: Vec<&str> = discovered
         .iter()
         .flat_map(|d| d.metadata.secrets.iter().map(String::as_str))
         .collect();
+    // AI provider keys (Phase 5) are resolved alongside plugin-declared
+    // ones so `lark secret set ANTHROPIC_API_KEY` works the same way.
+    declared_keys.extend(config::AI_SECRET_KEYS);
     config::resolve_keychain_secrets(&mut secrets, &declared_keys);
     inject_lark_binary(&mut secrets);
 
@@ -1018,10 +1022,11 @@ async fn main() -> Result<()> {
         discovered.into_iter().map(plugin::build_plugin).collect();
 
     let mut secrets = config::load_secrets();
-    let declared_keys: Vec<&str> = plugins
+    let mut declared_keys: Vec<&str> = plugins
         .iter()
         .flat_map(|p| p.metadata().secrets.iter().map(String::as_str))
         .collect();
+    declared_keys.extend(config::AI_SECRET_KEYS);
     config::resolve_keychain_secrets(&mut secrets, &declared_keys);
     inject_lark_binary(&mut secrets);
 
