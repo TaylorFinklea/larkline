@@ -162,9 +162,11 @@ pub enum ProviderEvent {
 
 /// The provider abstraction. Each backend (Anthropic, OpenAI, OpenRouter,
 /// Ollama) implements this. The trait is object-safe so `Box<dyn
-/// Provider>` works for runtime selection.
+/// Provider>` works for runtime selection. `Debug` is a supertrait so
+/// the agent loop and `AppState` can log a `Box<dyn Provider>` without
+/// downcasting.
 #[async_trait]
-pub trait Provider: Send + Sync {
+pub trait Provider: Send + Sync + std::fmt::Debug {
     /// Human-readable provider name for logging and status display.
     /// Returns a `&'static str` because every implementation we ship
     /// returns a string literal — saves consumers from lifetime juggling.
