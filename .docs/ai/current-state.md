@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-05-17
+> Updated: 2026-05-18
 
 ## Next Milestone — v1.0 Agent Palette
 
@@ -18,8 +18,8 @@ under "v1.0 — Agent Palette".
 | 3 — Calendar v2 plugin | ✅ Done (2026-05-12) | 4 commits on `v1.0-prep`. Added `lark.exec_io` host fn for stdin piping. Report at [`phases/v1.0-phase-3-calendar-v2-report.md`](./phases/v1.0-phase-3-calendar-v2-report.md) |
 | 4 — Mail plugin (osascript) | ✅ Done (2026-05-12) | 2 commits on `v1.0-prep`. 4 of 5 sub-phases shipped; 4.E (mailbox switcher chain) deferred to v1.x. Smoke runbook needs Taylor's pass on mutating actions ([`phases/v1.0-phase-4-mail-smoke-runbook.md`](./phases/v1.0-phase-4-mail-smoke-runbook.md)). Report at [`phases/v1.0-phase-4-mail-report.md`](./phases/v1.0-phase-4-mail-report.md) |
 | 4.5 — Mail UX polish + TUI per-row actions + mobile layout | ✅ Done (2026-05-17) | 10 commits on `v1.0-prep`. Dogfood-driven: HTML body rendering (w3m/pandoc), inline image preview (chafa), Inbox perf fix (30s→7s), View body chain action, Space power menu "This item" category, `LayoutProfile` for narrow terminals, `lark.plugin_dir` host fn. Report at [`phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md`](./phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md) |
-| 5 — AI Provider trait + 4 backends | 🔜 Next | Anthropic + OpenAI + OpenRouter + Ollama |
-| 6 — AI single-shot plugin | Pending | |
+| 5 — AI Provider trait + 4 backends | ✅ Done (2026-05-18) | 6 commits on `v1.0-prep`. Provider trait + AskRequest/Message/ToolDefinition/ProviderEvent shared types, Anthropic Messages, OpenAI Responses, OpenRouter + Ollama (shared Chat Completions transport), `agent::build_provider` factory, `[ai]` config section, 38 new unit tests. Real-API smoke pending Taylor's runbook pass. Report at [`phases/v1.0-phase-5-ai-provider-report.md`](./phases/v1.0-phase-5-ai-provider-report.md); smoke runbook at [`phases/v1.0-phase-5-ai-provider-smoke-runbook.md`](./phases/v1.0-phase-5-ai-provider-smoke-runbook.md) |
+| 6 — AI single-shot plugin | 🔜 Next | builds on agent::build_provider from Phase 5 |
 | 7 — Tool registry + manifest schema | Pending | `agent_callable` + `destructive` |
 | 8 — AI tool-use plugin + dry-run plan | Pending | Headline feature |
 | 9 — Web search shortcuts + onboarding wizard | Pending | |
@@ -92,6 +92,37 @@ Phase 4.5 report: [`phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md`](./p
 - `luac -p` on modified plugins → clean
 - End-to-end smoke (Taylor's machine): Inbox listing on real ~200-msg iCloud inbox ≈ 7s; View body via w3m renders cleanly; View images downloads + chafa-renders 11 remote images; `:layout phone` confirmed list-only on 200-col terminal
 
+## Phase 5 outcome — AI Provider trait + 4 backends
+
+6 commits on `v1.0-prep`. The agent layer foundation that Phases 6-8
+build on:
+
+| Sub-phase | Commit | Summary |
+|---|---|---|
+| 5.A+B | `fdbab95` | `src/agent/` module scaffold (Provider trait + ProviderEvent/Message/ToolDefinition types + ProviderError) and `[ai]` config section with Keychain wiring (AI_SECRET_KEYS const, AiConfig struct) |
+| 5.C | `88cdbf7` | AnthropicProvider — Messages API, SSE streaming, input_json_delta buffering, prompt caching on last tool |
+| 5.D | `b94e512` | OpenAiResponsesProvider — Responses API (the newer endpoint), function_call_arguments.done emits ToolUse without buffering |
+| 5.E | `dff5187` | OpenAiChatProvider — Chat Completions transport shared by OpenRouter + Ollama, factory methods for each, tool-call accumulation across `data:` chunks |
+| 5.factory | `70ce391` | `agent::build_provider` reads `[ai] provider = "..."` + Keychain secrets and returns Box<dyn Provider>; Debug supertrait on Provider |
+
+New host-side surface:
+
+* `agent::Provider` trait + `Provider::ask` async method streaming `ProviderEvent` over `mpsc::UnboundedSender`
+* `agent::build_provider(ai_config, secrets) -> Box<dyn Provider>` factory
+* `config::AiConfig` + `config::AiProviderName` + `config::AI_SECRET_KEYS`
+* `[ai]` section in default config template
+
+No TUI surface yet — Phase 6 wires the AI plugin.
+
+## Validation (Phase 5 baseline)
+
+* `cargo test --bin lark` → **188 passed** (+38 from Phase 4.5: 9 Anthropic + 12 OpenAI Responses + 13 OpenAI Chat + 4 factory)
+* `cargo test --lib` → 58 passed
+* `cargo clippy --bin lark -- -D warnings` → clean
+* Real-API end-to-end smoke pending Taylor's runbook pass ([phases/v1.0-phase-5-ai-provider-smoke-runbook.md](./phases/v1.0-phase-5-ai-provider-smoke-runbook.md))
+
+New deps: `reqwest "stream"` feature + `futures-util` (default-feature-less).
+
 ## Next
 
-See the **Now / Next / Later** section in `.docs/ai/roadmap.md`. Phase 5 (AI Provider trait + 4 backends: Anthropic, OpenAI Responses, OpenRouter, Ollama) is queued. Taylor is smoke-testing Phase 4.5 in parallel — Mail compose, Mail mutating actions, and mobile-width thresholds need his confirmation.
+See the **Now / Next / Later** section in `.docs/ai/roadmap.md`. Phase 6 (AI single-shot plugin — `examples/plugins/ai/ask.lua` surfacing `agent::build_provider` in the TUI) is queued. Taylor is still smoke-testing Phase 4.5 (Mail compose, Mail mutating actions, mobile-width thresholds) and Phase 5 (real-API provider calls) in parallel.
