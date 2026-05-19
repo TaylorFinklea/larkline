@@ -30,6 +30,7 @@
 pub mod anthropic;
 pub mod error;
 pub mod openai;
+pub mod openai_chat;
 pub mod provider;
 
 pub use error::ProviderError;
