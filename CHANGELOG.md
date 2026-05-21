@@ -1,5 +1,73 @@
 # Changelog
 
+## v1.0 — Agent Palette (in progress, unreleased)
+
+Larkline's v1.0 launch is a public Show-HN moment with the headline
+thesis: **a command palette where the AI uses your plugins as
+tools**. Work happens on the `v1.0-prep` branch; tagged + released
+when all phases land. Until then, this section accumulates entries
+per phase.
+
+### Phase 5 — AI Provider trait + 4 backends (2026-05-18)
+
+New `src/agent/` module abstracts over four AI provider backends
+behind a single object-safe trait:
+
+- **Anthropic Messages** (`anthropic.rs`) — `claude-opus-4-7` default,
+  named SSE events, input_json_delta buffering for tool args, prompt
+  caching marker on the last tool definition (~40-70% token savings
+  on multi-turn agent loops).
+- **OpenAI Responses** (`openai.rs`) — the newer endpoint
+  (`/v1/responses`), `function_call_arguments.done` carries the
+  complete args string + name so no buffering is required.
+- **OpenRouter + Ollama** (`openai_chat.rs`) — shared OpenAI Chat
+  Completions transport (anonymous `data:` chunks ending with
+  `[DONE]`, `finish_reason` drives stop_reason); factory functions
+  for each backend; tool calls accumulated across chunks until
+  `finish_reason: "tool_calls"`.
+
+Provider selection is config-driven via a new `[ai]` section in
+`config.toml`. API keys flow through the existing secrets pipeline
+(`lark secret set ANTHROPIC_API_KEY` etc.). Streaming events arrive
+over `mpsc::UnboundedSender<ProviderEvent>` — mirrors the existing
+`EngineEvent::PartialOutput` pattern so the TUI can interleave AI
+streaming with plugin output.
+
+`agent::build_provider(ai_config, secrets) -> Box<dyn Provider>`
+reads the config and constructs the matching backend. Missing API
+keys surface as `ProviderError::Auth` with the exact `lark secret
+set` invocation in the error message.
+
+No TUI surface yet — Phase 6 wires the AI plugin on top. Provider
+docs in [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md); phase
+report and real-API smoke runbook in `.docs/ai/phases/`.
+
+### Phase 4.5 — Mail UX polish + responsive layout (2026-05-17)
+
+Dogfood-driven interstitial between Phase 4 (Mail plugin) and
+Phase 5 (AI providers). Three threads:
+
+- **Mail UX**: HTML body rendering via `w3m`/`pandoc` fallback chain,
+  inline image preview via `chafa` (downloads remote `<img>`
+  references with tracking-pixel filter), Inbox listing perf fix
+  (30s timeout → 7s by deferring `m.content()` to on-demand fetch),
+  View body chain action with markdown render, chafa OSC-leak fix
+  (`--probe=off --polite=on --relative=off`).
+- **TUI per-row actions**: Space power menu now surfaces the focused
+  row's plugin-provided actions as a "This item" category with
+  digit shortcuts (1-9 then a-z); status bar advertises this via
+  an `[SPC] actions` hint when the row has multiple actions;
+  action-palette navigation bug fix.
+- **Responsive layout**: width-based `LayoutProfile` (Phone < 60 /
+  Narrow 60-99 / Medium 100-159 / Wide ≥ 160) gates widget row,
+  right preview pane, and status hint count. `:layout
+  phone|narrow|medium|wide|auto` command for manual override when
+  terminal width detection lies.
+
+New host fn: `lark.plugin_dir` (absolute path to plugin source
+directory; enables sibling helper scripts like the Mail plugin's
+Python MIME parser).
+
 ## v0.15.0 — Plugin Error UX (unreleased)
 
 Error rows produced by plugins (auth missing, API down, missing CLI, parse

@@ -18,8 +18,11 @@
 6. [Plugin Interface Design](#plugin-interface-design)
 7. [JSON Schema Specification](#json-schema-specification)
 8. [Phased Roadmap](#phased-roadmap)
-9. [Non-Goals](#non-goals)
-10. [Resolved Questions](#resolved-questions)
+9. [macOS Helper (v1.0+)](#macos-helper-v10)
+10. [AI Agent Layer (v1.0+)](#ai-agent-layer-v10)
+11. [Non-Goals](#non-goals)
+12. [Resolved Questions](#resolved-questions)
+13. [Appendix: Config File Reference](#appendix-config-file-reference)
 
 ---
 
@@ -687,6 +690,91 @@ macos-helper/
 
 ---
 
+## AI Agent Layer (v1.0+)
+
+The `agent` module abstracts over four AI provider backends
+(Anthropic Messages, OpenAI Responses, OpenRouter, Ollama) behind
+a single trait so the in-app agent built in Phases 6-8 doesn't
+have to know which backend it's talking to. Provider selection is
+config-driven via the `[ai]` section.
+
+Full reference lives in [`docs/AI_INTEGRATION.md`](AI_INTEGRATION.md);
+this section is the architecture overview.
+
+**Source layout**
+
+```
+src/agent/
+├── mod.rs             pub fn build_provider(ai_config, secrets) -> Box<dyn Provider>
+├── provider.rs        Provider trait + shared types (AskRequest,
+│                      Message, ContentBlock, ToolDefinition,
+│                      ProviderEvent, StopReason, Role)
+├── error.rs           ProviderError { Auth, RateLimited, Api,
+│                                      Network, Malformed, Config }
+├── anthropic.rs       Messages API; named SSE events; tool-use args
+│                      buffered across input_json_delta chunks;
+│                      prompt caching marker on the last tool def
+├── openai.rs          Responses API; named SSE events;
+│                      function_call_arguments.done carries the full
+│                      args string + name (no buffering needed)
+└── openai_chat.rs     Chat Completions transport shared by
+                       OpenRouter + Ollama; anonymous SSE chunks
+                       ending with `data: [DONE]`; tool-call accumulation
+```
+
+**Provider trait shape**
+
+```rust
+#[async_trait]
+pub trait Provider: Send + Sync + Debug {
+    fn name(&self) -> &'static str;
+    async fn ask(
+        &self,
+        request: AskRequest,
+        events: tokio::sync::mpsc::UnboundedSender<ProviderEvent>,
+    ) -> Result<(), ProviderError>;
+}
+```
+
+Object-safe so `Box<dyn Provider>` works for runtime selection.
+Streaming flows over `mpsc::UnboundedSender<ProviderEvent>` —
+mirrors the existing `EngineEvent::PartialOutput` pattern so the
+TUI can interleave AI streaming with plugin output rendering.
+
+**ProviderEvent taxonomy**
+
+* `TextDelta(String)` — assistant text streaming, concatenate to
+  build full response.
+* `ToolUse { id, name, args }` — model wants to invoke a tool. The
+  `id` is the provider-issued call ID that must accompany the
+  matching `ContentBlock::ToolResult` on the next turn.
+* `Usage { input_tokens, output_tokens }` — emitted once per
+  stream for cost tracking.
+* `Done { stop_reason }` — terminal event with normalized
+  `StopReason` (`EndTurn` / `ToolUse` / `MaxTokens` /
+  `StopSequence` / `Other(String)`).
+
+**Configuration**
+
+`[ai]` in `~/.config/larkline/config.toml` selects the provider,
+model, and per-provider base URLs. API keys flow through the
+existing secrets pipeline (Keychain → `.env` → process env). See
+[AI_INTEGRATION.md](AI_INTEGRATION.md) for the full reference.
+
+**Phases that depend on this layer**
+
+* **Phase 6** — single-shot AI plugin (`examples/plugins/ai/ask.lua`)
+  surfacing one provider response in the TUI.
+* **Phase 7** — tool registry built from plugin manifests; uses
+  the `ToolDefinition` shape.
+* **Phase 8** — agent loop running the full
+  prompt → tool-use → tool-result cycle with dry-run plan approval
+  and an audit log.
+
+Phase 5 ships the provider layer only; no TUI surface yet.
+
+---
+
 ## Non-Goals
 
 These are explicitly out of scope:
@@ -784,4 +872,22 @@ level = "warn"
 
 # Log file path (default: no file logging)
 # file = "~/.config/larkline/larkline.log"
+
+[ai]
+# Active AI provider (Phase 5+). Used by AI plugins shipped in v1.0.
+# API keys come from the secrets pipeline -- run
+#   lark secret set ANTHROPIC_API_KEY
+# (or OPENAI_API_KEY / OPENROUTER_API_KEY) once and they're stored
+# in macOS Keychain. Ollama is a local server with no auth.
+provider = "anthropic"     # anthropic | openai | openrouter | ollama
+model    = ""              # blank = provider default
+max_tokens = 0             # 0 = provider default
+
+# Optional base URL overrides
+# openrouter_base_url = ""   # blank = https://openrouter.ai/api/v1
+# ollama_base_url     = ""   # blank = http://localhost:11434/v1
 ```
+
+See [AI_INTEGRATION.md](AI_INTEGRATION.md) for the full AI provider
+reference, including per-provider quirks and the agent safety
+architecture planned for Phases 7-8.
