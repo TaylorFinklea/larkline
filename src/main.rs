@@ -85,7 +85,15 @@ Commands:
   plugin sync [--force]   Install/update standard plugins from GitHub
                           --force prompts before overwriting user-modified plugins
   plugin list             List installed plugins
-  plugin remove <NAME>    Remove an installed plugin"
+  plugin remove <NAME>    Remove an installed plugin
+  ai-ask <PROMPT>         Send a single prompt to the configured [ai] provider;
+                          stream the response to stdout
+    --system <TEXT>       Override the system prompt
+    --model <ID>          Override the configured model
+    --max-tokens <N>      Cap on output tokens (default: provider default)
+  agent-ask <PROMPT>      Multi-turn AI agent that calls plugins as tools
+    --system / --model / --max-tokens   (same as ai-ask)
+    --yes                 Auto-approve destructive tools (default: block)"
     );
 }
 
@@ -252,6 +260,332 @@ async fn handle_action_command(args: &[String]) -> Result<()> {
         actions::ActionResult::Chained(output) => ActionWireOutcome::Chained { output },
     };
     println!("{}", serde_json::to_string_pretty(&outcome)?);
+    Ok(())
+}
+
+/// Handle `lark ai-ask [--system TEXT] [--model ID] [--max-tokens N] <PROMPT>`.
+///
+/// Single-shot AI prompt against the configured `[ai]` provider. Streams
+/// the response to stdout as it arrives (plain text — no envelope). Tokens
+/// and usage stats go to stderr on completion. Errors return non-zero with
+/// a human-readable message on stderr.
+///
+/// This is the Phase 6 smoke surface: it lets us exercise the Provider
+/// trait + factory end-to-end without the TUI or any plugin layer. The
+/// shape mirrors pi-mono's `pi -p "..."` non-interactive mode.
+// Long because flag parsing + provider wiring + event drain naturally live
+// together; splitting them out would hide the control flow.
+#[allow(clippy::too_many_lines)]
+async fn handle_ai_ask_command(args: &[String]) -> Result<()> {
+    use std::io::Write;
+
+    let mut system: Option<String> = None;
+    let mut model_override: Option<String> = None;
+    let mut max_tokens_override: Option<u32> = None;
+    let mut prompt_parts: Vec<String> = Vec::new();
+
+    // Hand-rolled flag parsing matches the existing pattern in main.rs (no clap).
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--system" => {
+                system = Some(
+                    args.get(i + 1)
+                        .ok_or_else(|| anyhow::anyhow!("--system requires a value"))?
+                        .clone(),
+                );
+                i += 2;
+            }
+            "--model" => {
+                model_override = Some(
+                    args.get(i + 1)
+                        .ok_or_else(|| anyhow::anyhow!("--model requires a value"))?
+                        .clone(),
+                );
+                i += 2;
+            }
+            "--max-tokens" => {
+                let raw = args
+                    .get(i + 1)
+                    .ok_or_else(|| anyhow::anyhow!("--max-tokens requires a value"))?;
+                max_tokens_override = Some(
+                    raw.parse::<u32>()
+                        .with_context(|| format!("invalid --max-tokens: {raw}"))?,
+                );
+                i += 2;
+            }
+            "--help" | "-h" => {
+                println!(
+                    "\
+lark ai-ask — single-shot AI prompt against the configured [ai] provider
+
+Usage: lark ai-ask [OPTIONS] <PROMPT...>
+
+Options:
+  --system <TEXT>       System prompt override
+  --model <ID>          Model identifier override
+  --max-tokens <N>      Output token cap"
+                );
+                return Ok(());
+            }
+            other => {
+                prompt_parts.push(other.to_string());
+                i += 1;
+            }
+        }
+    }
+
+    if prompt_parts.is_empty() {
+        anyhow::bail!("Usage: lark ai-ask [OPTIONS] <PROMPT...>");
+    }
+    let prompt = prompt_parts.join(" ");
+
+    let (cfg, _) = config::load().unwrap_or_else(|e| {
+        eprintln!("larkline: config error ({e}), using defaults");
+        (config::Config::default(), Vec::new())
+    });
+
+    // Mirror the TUI's secrets pipeline so `lark secret set` keys resolve
+    // identically across both entry points.
+    let mut secrets = config::load_secrets();
+    let declared_keys: Vec<&str> = config::AI_SECRET_KEYS.to_vec();
+    config::resolve_keychain_secrets(&mut secrets, &declared_keys);
+
+    let provider = agent::build_provider(&cfg.ai, &secrets)
+        .with_context(|| "failed to build AI provider")?;
+
+    let model = model_override.unwrap_or_else(|| cfg.ai.resolved_model().to_string());
+    let max_tokens = max_tokens_override.or_else(|| cfg.ai.resolved_max_tokens());
+
+    let request = agent::AskRequest {
+        system,
+        messages: vec![agent::Message::user(prompt)],
+        tools: Vec::new(),
+        model,
+        max_tokens,
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<agent::ProviderEvent>();
+
+    // Spawn the provider request on its own task so we can drain the
+    // receiver concurrently. The provider drops `tx` when done, closing
+    // the channel — that's how the receiver loop terminates.
+    let provider_task = tokio::spawn(async move { provider.ask(request, tx).await });
+
+    let mut usage: Option<(u32, u32)> = None;
+    let mut stop_reason: Option<agent::StopReason> = None;
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            agent::ProviderEvent::TextDelta(chunk) => {
+                out.write_all(chunk.as_bytes())?;
+                out.flush()?;
+            }
+            agent::ProviderEvent::ToolUse { name, .. } => {
+                // Phase 6 doesn't pass tools; tool-use shouldn't arrive.
+                // Surface it on stderr if a provider does anyway (e.g.
+                // Ollama returning a function call from a tool-capable
+                // model when we didn't ask).
+                eprintln!("\n[unexpected tool_use: {name}]");
+            }
+            agent::ProviderEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => {
+                usage = Some((input_tokens, output_tokens));
+            }
+            agent::ProviderEvent::Done { stop_reason: sr } => {
+                stop_reason = Some(sr);
+            }
+        }
+    }
+    writeln!(out)?;
+    out.flush()?;
+
+    // Provider task should have returned by now (channel close = it dropped tx).
+    let ask_result = provider_task
+        .await
+        .map_err(|e| anyhow::anyhow!("provider task panicked: {e}"))?;
+    ask_result.with_context(|| "provider request failed")?;
+
+    if let Some((input, output)) = usage {
+        eprintln!("[tokens in={input} out={output}]");
+    }
+    if let Some(sr) = stop_reason
+        && !matches!(sr, agent::StopReason::EndTurn)
+    {
+        eprintln!("[stop_reason={sr:?}]");
+    }
+    Ok(())
+}
+
+/// Handle `lark agent-ask` — multi-turn AI agent that calls plugins as tools.
+///
+/// Args: `[--system X] [--model Y] [--max-tokens N] [--yes] <PROMPT>`.
+/// Uses the same provider + secrets pipeline as `lark ai-ask` but builds
+/// an `AgentHarness` so tool cycles + the dry-run approval hook are active.
+///
+/// `--yes` swaps the default `DefaultApprovalHook` (which blocks
+/// destructive plans) for nothing — destructive tools auto-dispatch.
+/// Without `--yes` the CLI is safe-by-default: destructive plans surface
+/// as a hook-rejection message and the agent finishes verbally.
+//
+// The CLI path is the canonical entry point for the agent (matching the
+// `lark ai-ask` pattern). The TUI plugin (`examples/plugins/ai/agent.lua`)
+// shells out to this same subcommand. One code path; consistent behavior.
+#[allow(clippy::too_many_lines)]
+async fn handle_agent_ask_command(args: &[String]) -> Result<()> {
+    use std::io::Write;
+
+    let mut system: Option<String> = None;
+    let mut model_override: Option<String> = None;
+    let mut max_tokens_override: Option<u32> = None;
+    let mut auto_yes = false;
+    let mut prompt_parts: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--system" => {
+                system = Some(
+                    args.get(i + 1)
+                        .ok_or_else(|| anyhow::anyhow!("--system requires a value"))?
+                        .clone(),
+                );
+                i += 2;
+            }
+            "--model" => {
+                model_override = Some(
+                    args.get(i + 1)
+                        .ok_or_else(|| anyhow::anyhow!("--model requires a value"))?
+                        .clone(),
+                );
+                i += 2;
+            }
+            "--max-tokens" => {
+                let raw = args
+                    .get(i + 1)
+                    .ok_or_else(|| anyhow::anyhow!("--max-tokens requires a value"))?;
+                max_tokens_override = Some(
+                    raw.parse::<u32>()
+                        .with_context(|| format!("invalid --max-tokens: {raw}"))?,
+                );
+                i += 2;
+            }
+            "--yes" => {
+                auto_yes = true;
+                i += 1;
+            }
+            "--help" | "-h" => {
+                println!(
+                    "\
+lark agent-ask — multi-turn AI agent that calls plugins as tools
+
+Usage: lark agent-ask [OPTIONS] <PROMPT...>
+
+Options:
+  --system <TEXT>       System prompt override
+  --model <ID>          Model identifier override
+  --max-tokens <N>      Output token cap (default: provider default)
+  --yes                 Auto-approve destructive tool calls (default: block them)
+
+Tools are sourced from manifests with `agent_callable = true`. Destructive
+commands are blocked by default; use --yes to allow them, or run safe-only.
+Audit log: $XDG_STATE_HOME/larkline/agent-audit.log.
+Session: $XDG_STATE_HOME/larkline/sessions/<uuid>.jsonl."
+                );
+                return Ok(());
+            }
+            other => {
+                prompt_parts.push(other.to_string());
+                i += 1;
+            }
+        }
+    }
+
+    if prompt_parts.is_empty() {
+        anyhow::bail!("Usage: lark agent-ask [OPTIONS] <PROMPT...>");
+    }
+    let prompt = prompt_parts.join(" ");
+
+    let ctx = build_plugin_context()?;
+    let (cfg, _) = config::load().unwrap_or_else(|e| {
+        eprintln!("larkline: config error ({e}), using defaults");
+        (config::Config::default(), Vec::new())
+    });
+
+    let provider = agent::build_provider(&cfg.ai, &ctx.secrets)
+        .with_context(|| "failed to build AI provider")?;
+
+    let model = model_override.unwrap_or_else(|| cfg.ai.resolved_model().to_string());
+    let max_tokens = max_tokens_override.or_else(|| cfg.ai.resolved_max_tokens());
+
+    let agent_cfg = agent::AgentConfig {
+        system_prompt: system,
+        model,
+        max_tokens,
+        thinking_level: agent::ThinkingLevel::Off,
+        tools: Vec::new(), // populated by with_plugins
+    };
+
+    // Sessions + audit log under $XDG_STATE_HOME/larkline.
+    let state_dir = resolve_log_file_dir(
+        std::env::var("XDG_STATE_HOME").ok(),
+        std::env::var("HOME").ok(),
+    );
+    let sessions_dir = state_dir.join("sessions");
+    let audit_path = state_dir.join("agent-audit.log");
+    let audit = agent::AuditLog::open(&audit_path)
+        .with_context(|| format!("failed to open audit log at {}", audit_path.display()))?;
+
+    let mut harness = agent::AgentHarness::create_in(agent_cfg, provider, &sessions_dir)
+        .with_context(|| "failed to create agent session")?
+        .with_plugins(&ctx.plugins)
+        .with_audit(audit);
+
+    if auto_yes {
+        // Replace the default block-destructive hook with no-op (allow-all).
+        harness = harness.with_no_default_hooks();
+    }
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+
+    let outcomes = harness
+        .prompt(agent::Message::user(prompt), |ev| match ev {
+            agent::ProviderEvent::TextDelta(chunk) => {
+                let _ = out.write_all(chunk.as_bytes());
+                let _ = out.flush();
+            }
+            agent::ProviderEvent::ToolUse { name, .. } => {
+                let _ = writeln!(out, "\n→ tool: {name}");
+            }
+            agent::ProviderEvent::Usage { .. } | agent::ProviderEvent::Done { .. } => {}
+        })
+        .await
+        .with_context(|| "agent harness failed")?;
+
+    writeln!(out)?;
+    out.flush()?;
+
+    let (total_in, total_out) = outcomes.iter().fold((0u32, 0u32), |(i, o), oc| {
+        if let agent::TurnOutcome::Completed { usage, .. } = oc {
+            let (a, b) = usage.unwrap_or((0, 0));
+            (i + a, o + b)
+        } else {
+            (i, o)
+        }
+    });
+    eprintln!(
+        "[turns={} tokens in={} out={} session={}]",
+        outcomes.len(),
+        total_in,
+        total_out,
+        harness.session_id()
+    );
     Ok(())
 }
 
@@ -945,6 +1279,8 @@ async fn dispatch_subcommand(args: &[String]) -> Result<Option<()>> {
         "atlassian" => atlassian::handle_command(&args[2..]).await.map(Some),
         "list" => handle_list_command(&args[2..]).map(Some),
         "action" => handle_action_command(&args[2..]).await.map(Some),
+        "ai-ask" => handle_ai_ask_command(&args[2..]).await.map(Some),
+        "agent-ask" => handle_agent_ask_command(&args[2..]).await.map(Some),
         _ => Ok(None),
     }
 }

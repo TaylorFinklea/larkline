@@ -28,10 +28,15 @@
 //! from plugin manifests; Phase 8 runs the agent loop.
 
 pub mod anthropic;
+pub mod audit;
 pub mod error;
+pub mod harness;
+pub mod hooks;
 pub mod openai;
 pub mod openai_chat;
 pub mod provider;
+pub mod registry;
+pub mod session;
 
 use std::collections::HashMap;
 
@@ -145,7 +150,16 @@ mod tests {
     }
 }
 
+pub use audit::{AuditError, AuditKind, AuditLog, AuditRecord};
+pub use hooks::{
+    AgentHook, BeforeToolCallCtx, BlockDecision, DefaultApprovalHook, PlannedCall, ToolCallPlan,
+};
+pub use registry::{build_tools, tool_name_for};
 pub use error::ProviderError;
+pub use harness::{
+    AgentConfig, AgentError, AgentHarness, AgentPhase, ThinkingLevel, TurnOutcome, TurnSnapshot,
+};
 pub use provider::{
     AskRequest, ContentBlock, Message, Provider, ProviderEvent, Role, StopReason, ToolDefinition,
 };
+pub use session::{SessionEntry, SessionError, SessionLog, SESSION_VERSION};

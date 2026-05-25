@@ -1,0 +1,30 @@
+[plugin]
+name = "AI"
+description = "AI single-shot + multi-turn agent against the configured provider"
+icon = "🤖"
+icon_nerd = "󰚩"
+version = "0.2.0"
+author = "larkline"
+# AI calls are slow. 120s covers most multi-turn agent runs; the harness
+# itself caps inner iterations at 32 to prevent runaway loops.
+timeout_seconds = 120
+category = "ai"
+prefetch = false
+
+[[commands]]
+name = "AI Ask"
+description = "Single-shot prompt against the configured AI provider"
+entry = "ask.lua"
+quickkey = "ai"
+
+[[commands]]
+name = "AI Agent"
+description = "Multi-turn agent that calls safe agent-callable plugins as tools"
+entry = "agent.lua"
+quickkey = "ag"
+timeout_seconds = 180
+
+# v1.0 safety: this plugin (and its commands) is NOT itself agent-callable —
+# it would be circular to let the agent invoke itself as a tool. Plugins
+# that want to be agent-callable opt in via `agent_callable = true` in
+# their own manifest. See docs/AI_INTEGRATION.md for examples.

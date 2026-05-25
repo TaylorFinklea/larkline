@@ -49,3 +49,46 @@
 **Decision:** Add a centered popup overlay (like theme picker) showing all widget-eligible commands with [x]/[ ] checkboxes. Triggered by `A` in Normal mode. Space toggles. Persists to existing `plugin-manager.json` disabled_widgets list. Also added contextual status bar hints: `K widgets` / `W show widgets` / `A add/remove`.
 
 **Consequences:** Widget management is now discoverable from the status bar without reading docs. Reuses existing PluginManagerConfig persistence — no new state file.
+
+## ADR-008: Phase 6 AI plugin shells out to `lark ai-ask` CLI; Phase 8 architecture borrowed from pi-mono (2026-05-23)
+
+**Context:** Phase 6 (AI single-shot plugin) needed a way to expose `agent::Provider::ask` to Lua plugins. Two options: (a) add a `lark.ai_ask(prompt)` Lua host fn that runs the provider in-process, or (b) ship a `lark ai-ask` CLI subcommand and have the Lua plugin shell out to it via `lark.exec_io`. Additionally, after studying earendil-works/pi (the only mature open-source agent harness with overlapping scope), we wanted to lock in Phase 8 architecture before writing code.
+
+**Decision:**
+
+1. **Phase 6 plugin shells out to the CLI.** No in-process `lark.ai_ask` host fn. One code path for provider/key/streaming.
+2. **`lark ai-ask` CLI is the canonical single-shot entry point.** Mirrors pi-mono's `pi -p "..."` pattern. Streams plain text to stdout, usage to stderr. Usable standalone outside the TUI.
+3. **Phase 8 architecture spec written *before* Phase 6/7 code lands.** Locks in: explicit `AgentPhase` state machine, per-turn `TurnSnapshot` (config changes apply NEXT turn), two-queue model (steering + follow-up), `AgentHook` trait with built-in `DryRunApprovalHook` (the "dry-run plan preview" IS a hook, not a special case), append-only JSONL session log at `$XDG_STATE_HOME/larkline/sessions/<id>.jsonl`, separate audit log capturing only safe metadata by default.
+
+**Consequences:**
+
+- **Phase 6 plugin is ~50 lines of Lua** with two clear TODO blocks for UX choices; CLI is ~116 LOC of Rust. Total surface is minimal.
+- **Streaming UX inside the TUI plugin is deferred to Phase 6.5** (the CLI streams, but the plugin blocks on `lark.exec_io`). Acceptable for v1.0 — power users get streaming via the terminal CLI.
+- **Phase 8 won't churn structure.** The spec is the source of truth. Sub-phases 8.A through 8.F map directly to spec sections.
+- **In-process `lark.ai_ask` host fn is deferred to Phase 8** when the agent loop needs fine-grained event control that subprocess JSON-line streaming can't give. Likely added during 8.E (TUI plugin).
+- **Pi-mono's `Skill` construct is explicitly NOT adopted** — Larkline's plugin manifest + commands already fill that role; Pi needed Skills because it lacked a plugin registry. Avoids a parallel system.
+- **Linear sessions only in v1.0** — tree branching / `/fork` / `/clone` (pi has them) deferred to v1.1 despite the `parent_id` field being stored from day one.
+- **Compaction deferred to v1.1.** Long sessions in v1.0 fail with a token-limit error surfaced cleanly. Pi's compaction algorithm is the v1.1 implementation target.
+
+**Open questions resolved 2026-05-24** (via harness-deck `20260523-pi-mono-study`):
+
+1. **CancellationToken plumbing → Phase 7.** Phase 7 lands the breaking-but-additive trait change to `Plugin::execute()`. Every impl adds the param, ignored if unused. Agent must be able to abort slow tools. **Implementation deviated — see ADR-009.**
+2. **`thinking_level` scaffolded in `TurnSnapshot` from day one.** Anthropic provider reads it; other providers no-op. Avoids restructure when Anthropic extended thinking ships.
+3. **Approval UX: all-or-nothing for v1.0.** One Enter approves the full plan; per-tool toggles deferred to v1.1. Matches pi-mono.
+4. **Session IDs are UUID v7.** `features = ["v7"]` on the `uuid` dep. Time-ordered → newest-first session listing is free.
+
+## ADR-009: Task-local CANCEL_TOKEN instead of `Plugin::execute(&self, cancel)` trait change (2026-05-25)
+
+**Context:** ADR-008 captured the locked decision that Phase 7 would land cancellation via a breaking-but-additive trait parameter on `Plugin::execute()`. Implementing it revealed the surface cost: ~10 files touched (LuaPlugin, ScriptPlugin, MockPlugin, FailPlugin, PanicPlugin, StubPlugin, AgentToolPlugin) + every call site (engine, actions, main, tests). The user's vote in `phase8-cancellation` was binary ("land in Phase 7" vs "defer to v1.1") — they wanted cancellation to work, not the specific implementation surface.
+
+**Decision:** Ship cancellation via a `CANCEL_TOKEN` `tokio::task_local!` in `src/plugin/engine.rs`, matching the existing `SECRETS` / `PLUGIN_LIST` / `INVOKE_DEPTH` pattern. The harness scopes a `CancellationToken` per tool dispatch; Lua plugins poll via a new `lark.is_cancelled()` host fn.
+
+**Consequences:**
+
+- **Same outcome.** Lua plugins can early-exit when the agent aborts a tool. The user-visible behavior matches what ADR-008 promised.
+- **1/10th the surface area.** Two files touched (`engine.rs` adds the task_local, `lua.rs` adds the host fn). No plugin impls churn. No call sites change.
+- **Pattern-consistent.** Matches how Larkline already plumbs ambient context through plugin invocation. New maintainers don't have to learn two patterns.
+- **Deviation from the literal text of ADR-008.** Reasonable judgment call given user intent; documented here so the deviation is auditable.
+- **Limitation:** Plugins outside Lua (shell scripts, future Python plugins) can't observe the token. v1.x can add cancellation via SIGINT to subprocess plugins if demand surfaces.
+
+The trait-change route remains available if v1.x wants explicit per-call cancellation observability that task-local can't provide (e.g. for async-await cancellation propagation through plugin code). For v1.0 the polling primitive suffices.

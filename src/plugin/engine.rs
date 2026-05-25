@@ -14,6 +14,19 @@ tokio::task_local! {
     pub static PLUGIN_LIST: Arc<Vec<Arc<dyn Plugin>>>;
     /// Secrets loaded from `~/.config/larkline/.env`.
     pub static SECRETS: Arc<std::collections::HashMap<String, String>>;
+    /// Cancellation token observed by long-running plugin code. Lua
+    /// plugins poll it via `lark.is_cancelled()`; Rust code can `await`
+    /// `.cancelled()` directly. Outside the agent loop this stays
+    /// un-cancelled forever — the existing TUI/CLI paths use a fresh
+    /// `CancellationToken::new()` per execution.
+    ///
+    /// Design note (Phase 7): we use a task-local rather than a
+    /// `Plugin::execute(&self, cancel)` trait parameter because it
+    /// achieves the same outcome (Lua poll → early-exit) without
+    /// touching every existing plugin impl. Departs from the literal
+    /// "trait change" wording in ADR-008 in favor of the same outcome
+    /// with one-tenth the surface area. See ADR-009.
+    pub static CANCEL_TOKEN: tokio_util::sync::CancellationToken;
 }
 
 /// Indicates whether a plugin execution was triggered by the user or by prefetch.
@@ -458,6 +471,8 @@ mod tests {
             widget: false,
             widget_refresh_secs: 0,
             mini_app: false,
+            agent_callable: false,
+            destructive: false,
         }
     }
 

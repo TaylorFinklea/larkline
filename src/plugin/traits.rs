@@ -64,6 +64,17 @@ pub struct PluginMetadata {
     pub widget_refresh_secs: u64,
     /// Whether this plugin supports mini app mode (full-screen split panes).
     pub mini_app: bool,
+    /// Whether this command (or every command in a multi-command plugin)
+    /// is exposed to the in-app AI agent as a callable tool. Default `false`
+    /// — agent-callable plugins explicitly opt in via the manifest. The
+    /// agent's tool registry (see `crate::agent::registry`) builds a
+    /// `ToolDefinition` per callable command at startup.
+    pub agent_callable: bool,
+    /// Whether this command mutates state (deletes files, sends mail,
+    /// archives messages, etc.). Drives the agent's dry-run plan preview:
+    /// destructive tools render with a `[!]` marker and the entire plan
+    /// requires user approval before any tool runs. Default `false`.
+    pub destructive: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +652,8 @@ mod tests {
             widget: false,
             widget_refresh_secs: 0,
             mini_app: false,
+            agent_callable: false,
+            destructive: false,
         };
         accepts_dyn(Box::new(MockPlugin(meta)));
     }

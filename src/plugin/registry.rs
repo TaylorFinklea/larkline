@@ -99,6 +99,15 @@ struct ManifestPlugin {
     widget_refresh_secs: Option<u64>,
     /// Whether this plugin supports mini app mode (full-screen split panes).
     mini_app: Option<bool>,
+    /// Whether this plugin (and every command in multi-command form) is
+    /// exposed to the in-app AI agent as a callable tool. Default false;
+    /// agent-callable plugins must opt in explicitly via the manifest.
+    agent_callable: Option<bool>,
+    /// Whether this plugin mutates state (delete files, send mail, etc.).
+    /// For single-command plugins applies directly; for multi-command
+    /// plugins it's the default for any command that doesn't set its own.
+    /// Drives the agent's dry-run plan preview safety gate.
+    destructive: Option<bool>,
 }
 
 /// A single command within a multi-command plugin manifest.
@@ -120,6 +129,10 @@ struct ManifestCommand {
     widget_refresh_secs: Option<u64>,
     /// Whether this command supports mini app mode.
     mini_app: Option<bool>,
+    /// Per-command override for `agent_callable`; falls back to plugin-level.
+    agent_callable: Option<bool>,
+    /// Per-command override for `destructive`; falls back to plugin-level.
+    destructive: Option<bool>,
 }
 
 /// Which backend should execute this plugin.
@@ -227,6 +240,8 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                 widget: p.widget.unwrap_or(false),
                 widget_refresh_secs: p.widget_refresh_secs.unwrap_or(60),
                 mini_app: p.mini_app.unwrap_or(false),
+                agent_callable: p.agent_callable.unwrap_or(false),
+                destructive: p.destructive.unwrap_or(false),
             },
             plugin_dir: plugin_dir_buf,
             entry,
@@ -245,6 +260,8 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
         let plugin_default_streaming = p.streaming.unwrap_or(false);
         let plugin_default_prefetch = p.prefetch.unwrap_or(false); // commands default lazy
         let plugin_default_cache = p.cache.unwrap_or(true);
+        let plugin_default_agent_callable = p.agent_callable.unwrap_or(false);
+        let plugin_default_destructive = p.destructive.unwrap_or(false);
         let settings_spec: Vec<_> = manifest
             .settings
             .iter()
@@ -282,6 +299,10 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                             .widget_refresh_secs
                             .unwrap_or(p.widget_refresh_secs.unwrap_or(60)),
                         mini_app: cmd.mini_app.unwrap_or(p.mini_app.unwrap_or(false)),
+                        agent_callable: cmd
+                            .agent_callable
+                            .unwrap_or(plugin_default_agent_callable),
+                        destructive: cmd.destructive.unwrap_or(plugin_default_destructive),
                     },
                     plugin_dir: plugin_dir_buf.clone(),
                     entry: cmd.entry,

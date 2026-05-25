@@ -441,6 +441,29 @@ impl LuaPlugin {
         lark.set("clipboard_read", clipboard_read_fn)
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
 
+        // lark.is_cancelled() -> bool — true when the agent has signaled
+        // this plugin should abort. Long-running plugin code should poll
+        // this between iterations and return early when true.
+        //
+        // Outside the agent loop (TUI/CLI normal execution) the
+        // task-local `CANCEL_TOKEN` is never cancelled, so this always
+        // returns false. Plugins that ignore it work fine; they just
+        // won't be agent-cancellable. v1.1 may expose a richer cancel
+        // surface (deadline, reason).
+        let is_cancelled_fn = lua
+            .create_function(|_, ()| {
+                // try_with returns Err if the task-local isn't set
+                // (e.g. plugin invoked outside the engine's scope —
+                // tests, fixtures). Treat that as "not cancelled".
+                let cancelled = crate::plugin::engine::CANCEL_TOKEN
+                    .try_with(tokio_util::sync::CancellationToken::is_cancelled)
+                    .unwrap_or(false);
+                Ok(cancelled)
+            })
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+        lark.set("is_cancelled", is_cancelled_fn)
+            .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
+
         // lark.nvim_exec(cmd) -> bool — send an ex command to the parent nvim
         // via $NVIM socket. Returns false when not running under Neovim so
         // plugins can feature-detect.

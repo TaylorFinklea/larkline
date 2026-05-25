@@ -1,6 +1,6 @@
 # Current State
 
-> Updated: 2026-05-18
+> Updated: 2026-05-25
 
 ## Next Milestone — v1.0 Agent Palette
 
@@ -19,9 +19,9 @@ under "v1.0 — Agent Palette".
 | 4 — Mail plugin (osascript) | ✅ Done (2026-05-12) | 2 commits on `v1.0-prep`. 4 of 5 sub-phases shipped; 4.E (mailbox switcher chain) deferred to v1.x. Smoke runbook needs Taylor's pass on mutating actions ([`phases/v1.0-phase-4-mail-smoke-runbook.md`](./phases/v1.0-phase-4-mail-smoke-runbook.md)). Report at [`phases/v1.0-phase-4-mail-report.md`](./phases/v1.0-phase-4-mail-report.md) |
 | 4.5 — Mail UX polish + TUI per-row actions + mobile layout | ✅ Done (2026-05-17) | 10 commits on `v1.0-prep`. Dogfood-driven: HTML body rendering (w3m/pandoc), inline image preview (chafa), Inbox perf fix (30s→7s), View body chain action, Space power menu "This item" category, `LayoutProfile` for narrow terminals, `lark.plugin_dir` host fn. Report at [`phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md`](./phases/v1.0-phase-4.5-mail-polish-tui-mobile-report.md) |
 | 5 — AI Provider trait + 4 backends | ✅ Done (2026-05-18) | 6 commits on `v1.0-prep`. Provider trait + AskRequest/Message/ToolDefinition/ProviderEvent shared types, Anthropic Messages, OpenAI Responses, OpenRouter + Ollama (shared Chat Completions transport), `agent::build_provider` factory, `[ai]` config section, 38 new unit tests. Real-API smoke pending Taylor's runbook pass. Report at [`phases/v1.0-phase-5-ai-provider-report.md`](./phases/v1.0-phase-5-ai-provider-report.md); smoke runbook at [`phases/v1.0-phase-5-ai-provider-smoke-runbook.md`](./phases/v1.0-phase-5-ai-provider-smoke-runbook.md) |
-| 6 — AI single-shot plugin | 🔜 Next | builds on agent::build_provider from Phase 5 |
-| 7 — Tool registry + manifest schema | Pending | `agent_callable` + `destructive` |
-| 8 — AI tool-use plugin + dry-run plan | Pending | Headline feature |
+| 6 — AI single-shot plugin | 🟡 Code done (pending smoke) | `lark ai-ask` CLI + `examples/plugins/ai/{manifest,ask.lua}`. Phase report + smoke runbook at [`phases/v1.0-phase-6-report.md`](./phases/v1.0-phase-6-report.md). Pending: real-provider smoke pass + commit |
+| 7 — Tool registry + manifest schema | 🟡 Code done (pending smoke) | `agent_callable` + `destructive` manifest fields + `crate::agent::registry` builder + CANCEL_TOKEN task-local + `lark.is_cancelled()` host fn. Cancellation via task-local instead of trait change — see **ADR-009**. Report: [`phases/v1.0-phase-7-report.md`](./phases/v1.0-phase-7-report.md) |
+| 8 — AI tool-use plugin + dry-run plan | 🟡 All sub-phases shipped (pending smoke) | Headline feature. **All six sub-phases (8.A–8.F) complete.** ~1940 LOC of agent code, 26 new tests, 220 total passing. `lark agent-ask` CLI + `examples/plugins/ai/agent.lua` + safe-by-default destructive blocking. Report: [`phases/v1.0-phase-8-report.md`](./phases/v1.0-phase-8-report.md). Smoke runbook: [`phases/v1.0-phase-8-smoke-runbook.md`](./phases/v1.0-phase-8-smoke-runbook.md) |
 | 9 — Web search shortcuts + onboarding wizard | Pending | |
 | 10 — QA pass + bug sweep + theme polish | Pending | |
 | 11 — Beta + Medium draft + launch prep | Pending | |
@@ -123,6 +123,56 @@ No TUI surface yet — Phase 6 wires the AI plugin.
 
 New deps: `reqwest "stream"` feature + `futures-util` (default-feature-less).
 
+## Phase 6 outcome — AI single-shot (code done 2026-05-24)
+
+Uncommitted on `v1.0-prep`. Report: [`phases/v1.0-phase-6-report.md`](./phases/v1.0-phase-6-report.md). Smoke runbook: [`phases/v1.0-phase-6-smoke-runbook.md`](./phases/v1.0-phase-6-smoke-runbook.md).
+
+- **CLI subcommand** `lark ai-ask [--system X] [--model Y] [--max-tokens N] <PROMPT>` — streams ProviderEvent::TextDelta to stdout as plain text; usage stats to stderr. Mirrors pi-mono's `pi -p`. `src/main.rs:handle_ai_ask_command` (~116 LOC).
+- **AI plugin** at `examples/plugins/ai/{manifest.toml, ask.lua}` (~140 Lua LOC). Form: prompt + optional system override. Renders response in preview pane with copyable text + token-usage summary row. Error path uses ❌ icon + `help_url` → `docs/AI_INTEGRATION.md`; friendly labels for missing-key / rate-limit cases.
+- **Decision (ADR-008): no in-process `lark.ai_ask` host fn.** Plugin shells out to CLI for a single code path. In-process host fn defers to Phase 6.5 when streaming UX inside the TUI lands.
+
+**Pending before Phase 6 marks ✅:** real-provider smoke pass per runbook, then commit.
+
+## Phase 8 progress — sub-phases shipped ahead of schedule
+
+Uncommitted on `v1.0-prep`. 8.B/8.E/8.F still pending (8.B blocked on Phase 7).
+
+| Sub-phase | Surface | LOC | Status |
+|---|---|---|---|
+| **8.A** | `src/agent/session.rs` (JSONL append-only log, UUID v7 IDs) + `src/agent/harness.rs` (`AgentPhase` state machine, `TurnSnapshot`, `ThinkingLevel`, `AgentConfig`, `AgentHarness::create_in/reopen/prompt/abort`) | ~820 | ✅ Code done |
+| **8.C** | `MessageQueues` in `harness.rs` — `Arc<Mutex<>>`-wrapped steering + follow-up queues; `steer()/follow_up()/queue_depths()` methods; `prompt()` drains follow-ups across multiple turns; `abort()` clears steering, preserves follow-up | ~150 | ✅ Code done |
+| **8.D** | `src/agent/audit.rs` — safe-metadata-only JSONL audit log; `AuditRecord` schema (`trace_id` / `span_id` / `parent_span_id`); typed helpers (`turn_start/end`, `provider_start/end`); harness emits spans automatically when `with_audit()` is set | ~290 | ✅ Code done |
+
+**Validation:** `cargo test --bin lark` → **210 passed** (+22 from Phase 5 baseline). `cargo clippy --bin lark -- -D warnings` → clean.
+
+## Phase 7 + 8 outcome — Agent palette complete (2026-05-25)
+
+All code for v1.0's headline feature shipped on `v1.0-prep`
+(uncommitted). End-to-end flow works:
+
+- `lark agent-ask "<prompt>"` builds an `AgentHarness`, dispatches
+  tool cycles, streams to stdout, persists session + audit log.
+- `examples/plugins/ai/agent.lua` shells out to the CLI from the TUI.
+- Three-layer safety: (1) `agent_callable` opt-in per plugin, (2)
+  `destructive` flag per command, (3) `DefaultApprovalHook` blocks
+  destructive plans unless `--yes`.
+
+Validation: **220 tests pass** (+10 from Phase 6 baseline of 210), clippy
+clean, all 40+ existing manifests still parse, Lua syntax check on
+ask.lua + agent.lua clean.
+
+**Pending before tagging Phase 8 ✅:** real-provider smoke pass per
+[`phases/v1.0-phase-8-smoke-runbook.md`](./phases/v1.0-phase-8-smoke-runbook.md),
+then commit.
+
 ## Next
 
-See the **Now / Next / Later** section in `.docs/ai/roadmap.md`. Phase 6 (AI single-shot plugin — `examples/plugins/ai/ask.lua` surfacing `agent::build_provider` in the TUI) is queued. Taylor is still smoke-testing Phase 4.5 (Mail compose, Mail mutating actions, mobile-width thresholds) and Phase 5 (real-API provider calls) in parallel.
+See the **Now / Next / Later** section in [`roadmap.md`](./roadmap.md).
+With Phases 1–8 in the bank, remaining v1.0 work is:
+
+- **Phase 9** — Web search shortcuts plugin + onboarding wizard.
+- **Phase 10** — QA pass + bug sweep + theme polish.
+- **Phase 11** — Beta + Medium draft + launch prep.
+- **Phase 12** — Tag v1.0 + Medium post + Show HN.
+
+The big architectural lifts are done.

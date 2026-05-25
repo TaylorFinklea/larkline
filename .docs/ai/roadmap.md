@@ -21,7 +21,7 @@ v1.0 scope (12 phases, ~22 weeks):
 - **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
 - **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
 
-Phases 1-5 done (2026-05-18). Current focus: Phase 6 (AI single-shot plugin built on `agent::build_provider`). Taylor smoke-testing Mail + mobile-layout + AI providers in parallel.
+Phases 1-5 done (2026-05-18). **Phases 6 + 7 + 8 code complete (2026-05-25)** — all uncommitted on `v1.0-prep`, pending real-provider smoke. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + matching TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). 220 tests pass, clippy clean, ~1940 LOC of new agent code. Remaining v1.0 work: smoke + Phases 9–12 (web search, onboarding, QA, beta, tag). Taylor smoke-testing Mail + mobile-layout + AI providers in parallel.
 
 ### Next (after v1.0 ships)
 
@@ -227,10 +227,10 @@ Full plan in [`v1.0-plan.md`](./v1.0-plan.md). Twelve phases, ~21 weeks.
 - [x] Phase 2: macOS Swift helper — `larkline-macos-helper` binary, **EventKit only** (✅ 2026-05-12; 5 commits on `v1.0-prep`. Sub-phase 2.E dropped — `EKParticipant.participantStatus` is read-only on macOS. Report: [`phases/v1.0-phase-2-macos-helper-report.md`](./phases/v1.0-phase-2-macos-helper-report.md))
 - [x] Phase 3: Calendar v2 — structured items, regex-extracted Teams/Zoom/Meet URL (✅ 2026-05-12; 4 commits on `v1.0-prep`. Added `lark.exec_io` host fn for stdin piping — also activates dormant v0.15.0 `from_exit` translator when shell plugins migrate. Report: [`phases/v1.0-phase-3-calendar-v2-report.md`](./phases/v1.0-phase-3-calendar-v2-report.md))
 - [x] Phase 4: Mail plugin — **osascript-based** (✅ 2026-05-12; 2 commits on `v1.0-prep`. 4 of 5 sub-phases shipped: Inbox/Search/Triage/New Mail. Phase 4.E mailbox switcher deferred to v1.x — chain-action plumbing overhead for low v1.0 value. Compose simplified from `$EDITOR` handoff to "Mail.app composer with pre-filled To+Subject"; user types body in Mail.app's native editor. Report: [`phases/v1.0-phase-4-mail-report.md`](./phases/v1.0-phase-4-mail-report.md))
-- [ ] Phase 5: AI Provider trait + 4 backends — **Anthropic Messages, OpenAI Responses, OpenRouter, Ollama**. Codex CLI dropped (would force MCP scope; in-app agent vision doesn't need MCP)
-- [ ] Phase 6: AI single-shot plugin (`ai/ask.lua`)
-- [ ] Phase 7: In-process tool registry auto-generated from manifests; `agent_callable` + `destructive` schema additions
-- [ ] Phase 8: AI tool-use plugin (`ai/agent.lua`) — agent loop with dry-run plan preview, audit log
+- [x] Phase 5: AI Provider trait + 4 backends — **Anthropic Messages, OpenAI Responses, OpenRouter, Ollama** (✅ 2026-05-18; 6 commits on `v1.0-prep`. Codex CLI dropped — would force MCP scope. Report: [`phases/v1.0-phase-5-ai-provider-report.md`](./phases/v1.0-phase-5-ai-provider-report.md))
+- [x] Phase 6: AI single-shot — `lark ai-ask` CLI + `examples/plugins/ai/ask.lua` plugin (✅ code 2026-05-24, smoke pending. Report: [`phases/v1.0-phase-6-report.md`](./phases/v1.0-phase-6-report.md))
+- [x] Phase 7: Tool registry + `agent_callable`/`destructive` manifest schema + CANCEL_TOKEN task-local + `lark.is_cancelled()` host fn (✅ code 2026-05-25, smoke pending. Implementation deviated from ADR-008 trait-change route → task-local; rationale in ADR-009. Report: [`phases/v1.0-phase-7-report.md`](./phases/v1.0-phase-7-report.md))
+- [x] Phase 8: AI tool-use agent — `lark agent-ask` CLI + `examples/plugins/ai/agent.lua` TUI plugin. All 6 sub-phases (8.A–8.F) shipped; spec at [`phases/v1.0-phase-8-agent-loop-spec.md`](./phases/v1.0-phase-8-agent-loop-spec.md), report at [`phases/v1.0-phase-8-report.md`](./phases/v1.0-phase-8-report.md). Three-layer safety. ~1940 LOC. (✅ code 2026-05-25, smoke pending)
 - [ ] Phase 9: Web search shortcuts plugin + onboarding wizard
 - [ ] Phase 10: QA pass + bug sweep + theme polish
 - [ ] Phase 11: Beta + Medium draft + launch prep

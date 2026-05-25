@@ -2638,6 +2638,8 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 widget: false,
                 widget_refresh_secs: 0,
                 mini_app: false,
+                agent_callable: false,
+                destructive: false,
             })) as Arc<dyn Plugin>
         }};
     }

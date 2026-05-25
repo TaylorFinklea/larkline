@@ -12,12 +12,14 @@
 //! the blocks back to their native shape internally.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::agent::error::ProviderError;
 
 /// Who authored a message in the conversation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Role {
     /// Conversation-level system prompt. Anthropic puts this in a
     /// separate top-level field; OpenAI uses a `system` role message.
@@ -30,7 +32,15 @@ pub enum Role {
 
 /// A single content block within a [`Message`]. The Anthropic Messages
 /// API uses these as a list; OpenAI providers flatten them.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// The serde format is **externally tagged** (default) because
+/// `Text(String)` is a newtype-around-primitive variant which serde's
+/// internal tagging can't represent. Wire format in the session log:
+/// `{"text": "..."}` / `{"tool_use": {...}}` / `{"tool_result": {...}}`.
+/// This is our own format — provider wire conversion happens in each
+/// `{provider}.rs` file independently and doesn't go through serde.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Plain prose. The most common block.
     Text(String),
@@ -58,7 +68,7 @@ pub enum ContentBlock {
 }
 
 /// One turn in the conversation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: Vec<ContentBlock>,
@@ -119,7 +129,8 @@ pub struct AskRequest {
 }
 
 /// Reason the model stopped generating, normalized across providers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StopReason {
     /// Normal completion of the response.
     EndTurn,
