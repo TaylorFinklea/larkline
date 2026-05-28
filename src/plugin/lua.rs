@@ -102,15 +102,28 @@ impl LuaPlugin {
 
         // lark.exec(cmd, args?) -> string — run a command, return stdout.
         // Uses tokio::process::Command with explicit args (no shell interpolation).
+        //
+        // Spawn failure (binary not on PATH) returns an empty string
+        // rather than raising a Lua error. Plugins universally guard with
+        // `if not raw or raw == "" then <graceful error item>`, so a
+        // missing CLI degrades cleanly instead of crashing the plugin.
+        // (Before this, `lark.exec("kubectl", ...)` with no kubectl
+        // installed errored out before the plugin's own guard could run.)
+        // The richer `lark.exec_io` still surfaces spawn errors via its
+        // exit_code for callers that need to distinguish them.
         let exec_fn = lua
             .create_async_function(|_, (cmd, args): (String, Option<Vec<String>>)| async move {
                 let mut command = tokio::process::Command::new(&cmd);
                 if let Some(ref args) = args {
                     command.args(args);
                 }
-                let output = command.output().await.map_err(LuaError::external)?;
-                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                Ok(stdout)
+                match command.output().await {
+                    Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+                    Err(e) => {
+                        tracing::debug!(cmd = %cmd, error = %e, "lark.exec spawn failed; returning empty string");
+                        Ok(String::new())
+                    }
+                }
             })
             .map_err(|e| PluginError::ExecutionFailed(e.to_string()))?;
         lark.set("exec", exec_fn)
