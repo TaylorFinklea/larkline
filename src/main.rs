@@ -166,6 +166,10 @@ struct ListEntry {
     is_widget: bool,
     is_mini_app: bool,
     streaming: bool,
+    /// Whether the in-app AI agent may call this command as a tool.
+    agent_callable: bool,
+    /// Whether this command mutates state (gates the agent's approval).
+    destructive: bool,
 }
 
 /// JSON shape emitted by `lark action`. Wire format consumed by `lark.nvim`'s
@@ -544,6 +548,7 @@ Session: $XDG_STATE_HOME/larkline/sessions/<uuid>.jsonl."
     let mut harness = agent::AgentHarness::create_in(agent_cfg, provider, &sessions_dir)
         .with_context(|| "failed to create agent session")?
         .with_plugins(&ctx.plugins)
+        .with_secrets(Arc::clone(&ctx.secrets))
         .with_audit(audit);
 
     if auto_yes {
@@ -620,6 +625,8 @@ fn handle_list_command(_args: &[String]) -> Result<()> {
             is_widget: d.metadata.widget,
             is_mini_app: d.metadata.mini_app,
             streaming: d.metadata.streaming,
+            agent_callable: d.metadata.agent_callable,
+            destructive: d.metadata.destructive,
         })
         .collect();
 

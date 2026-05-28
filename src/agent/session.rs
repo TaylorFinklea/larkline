@@ -274,8 +274,30 @@ impl SessionLog {
         Ok(id)
     }
 
+    /// Append a tool-result entry, chaining `parent_id` from the
+    /// current leaf (like the other typed helpers). `call_id` matches
+    /// the `ToolUse.id` from the assistant message that requested it.
+    pub fn append_tool_result(
+        &mut self,
+        call_id: String,
+        content: String,
+        is_error: bool,
+    ) -> Result<Uuid, SessionError> {
+        let id = Uuid::now_v7();
+        let entry = SessionEntry::ToolResult {
+            id,
+            parent_id: self.last_id,
+            timestamp_ms: now_ms(),
+            call_id,
+            content,
+            is_error,
+        };
+        self.append(&entry)?;
+        Ok(id)
+    }
+
     /// Append a generic entry; updates the cursor + writes to disk.
-    /// Public for tests + future entry types (tool_result lands in 8.B).
+    /// Public for tests + custom entry types.
     pub fn append(&mut self, entry: &SessionEntry) -> Result<(), SessionError> {
         self.write_line(entry)?;
         self.last_id = entry.id();

@@ -23,6 +23,7 @@ use crate::agent::provider::{
 };
 use crate::agent::registry;
 use crate::agent::session::{SessionEntry, SessionLog};
+use crate::plugin::engine;
 use crate::plugin::traits::Plugin;
 
 /// Explicit phase state for the harness.
@@ -208,6 +209,14 @@ pub struct AgentHarness {
     /// `agent_callable` and slugifying via [`registry::tool_name_for`].
     /// Empty until [`with_plugins`] is called.
     plugin_lookup: HashMap<String, Arc<dyn Plugin>>,
+    /// Full plugin list scoped into the `PLUGIN_LIST` task_local during
+    /// tool dispatch so agent-called plugins can use `lark.invoke()`.
+    plugin_list: Arc<Vec<Arc<dyn Plugin>>>,
+    /// Secrets map scoped into the `SECRETS` task_local during tool
+    /// dispatch so agent-called plugins can read `lark.env(KEY)` —
+    /// without this an agent-invoked github/atlassian plugin can't
+    /// authenticate. Empty until [`with_secrets`] is called.
+    secrets: Arc<std::collections::HashMap<String, String>>,
     /// Cancellation token observed by long-running plugin code via the
     /// `lark.is_cancelled()` host fn. Cloned into the per-execution
     /// `CANCEL_TOKEN` task_local before each tool dispatch.
@@ -239,6 +248,8 @@ impl AgentHarness {
             queues: Arc::new(Mutex::new(MessageQueues::default())),
             audit: None,
             plugin_lookup: HashMap::new(),
+            plugin_list: Arc::new(Vec::new()),
+            secrets: Arc::new(std::collections::HashMap::new()),
             cancel: tokio_util::sync::CancellationToken::new(),
             hooks: vec![Box::new(DefaultApprovalHook)],
         })
@@ -263,6 +274,8 @@ impl AgentHarness {
             queues: Arc::new(Mutex::new(MessageQueues::default())),
             audit: None,
             plugin_lookup: HashMap::new(),
+            plugin_list: Arc::new(Vec::new()),
+            secrets: Arc::new(std::collections::HashMap::new()),
             cancel: tokio_util::sync::CancellationToken::new(),
             hooks: vec![Box::new(DefaultApprovalHook)],
         })
@@ -276,12 +289,34 @@ impl AgentHarness {
     /// schema on the next turn.
     #[must_use]
     pub fn with_plugins(mut self, plugins: &[Arc<dyn Plugin>]) -> Self {
-        let callable: Vec<_> = plugins.iter().filter(|p| p.metadata().agent_callable).cloned().collect();
+        let callable: Vec<_> = plugins
+            .iter()
+            .filter(|p| p.metadata().agent_callable)
+            .cloned()
+            .collect();
         self.config.tools = registry::build_tools(&callable);
         self.plugin_lookup = callable
             .into_iter()
             .map(|p| (registry::tool_name_for(p.metadata()), p))
             .collect();
+        // Full list (not just callable) so `lark.invoke()` from an
+        // agent-called plugin can reach any sibling, matching normal
+        // execution semantics.
+        self.plugin_list = Arc::new(plugins.to_vec());
+        self
+    }
+
+    /// Provide the secrets map scoped into the `SECRETS` task_local
+    /// during tool dispatch. Without this, agent-called plugins can't
+    /// read `lark.env(KEY)` — so a github/atlassian/weather plugin
+    /// invoked as a tool would fail to authenticate. The CLI passes the
+    /// same resolved map it builds for the provider.
+    #[must_use]
+    pub fn with_secrets(
+        mut self,
+        secrets: Arc<std::collections::HashMap<String, String>>,
+    ) -> Self {
+        self.secrets = secrets;
         self
     }
 
@@ -699,8 +734,25 @@ impl AgentHarness {
                 Some(plugin) => {
                     let plugin = plugin.clone();
                     let cancel = self.cancel.clone();
-                    let result = crate::plugin::engine::CANCEL_TOKEN
-                        .scope(cancel, async move { plugin.execute().await })
+                    let secrets = Arc::clone(&self.secrets);
+                    let plugin_list = Arc::clone(&self.plugin_list);
+                    // Scope the same task-locals normal execution sets
+                    // (engine.rs:execute_normal) plus CANCEL_TOKEN, so
+                    // agent-called plugins see secrets, can `lark.invoke()`,
+                    // get recursion guarding, and observe cancellation.
+                    let result = engine::SECRETS
+                        .scope(
+                            secrets,
+                            engine::PLUGIN_LIST.scope(
+                                plugin_list,
+                                engine::INVOKE_DEPTH.scope(
+                                    0,
+                                    engine::CANCEL_TOKEN.scope(cancel, async move {
+                                        plugin.execute().await
+                                    }),
+                                ),
+                            ),
+                        )
                         .await;
                     match result {
                         Ok(output) => (render_plugin_output(&output), false),
@@ -713,16 +765,12 @@ impl AgentHarness {
                 ),
             };
 
-            // Persist the tool_result in the session log too.
-            let result_id = Uuid::now_v7();
-            self.session.append(&SessionEntry::ToolResult {
-                id: result_id,
-                parent_id: self.session.session_id(), // best-effort; session sets correct chain
-                timestamp_ms: now_ms(),
-                call_id: call.id.clone(),
-                content: content.clone(),
-                is_error,
-            })?;
+            // Persist the tool_result in the session log, chaining
+            // parent_id from the current leaf (the assistant message
+            // that emitted the tool_use).
+            let result_id =
+                self.session
+                    .append_tool_result(call.id.clone(), content.clone(), is_error)?;
             entry_ids.push(result_id);
 
             if let (Some(audit), Some(())) = (self.audit.as_mut(), tool_span) {
@@ -1403,5 +1451,103 @@ mod tests {
         assert_eq!(last.role, Role::User);
         assert!(matches!(&last.content[0],
             ContentBlock::Text(t) if t.contains("rejected by hook")));
+    }
+
+    /// Plugin that reads the `SECRETS` task-local exactly the way
+    /// `lark.env()` does (see `src/plugin/lua.rs`). Returns the value of
+    /// `TEST_SECRET`, or `"MISSING"` if the task-local isn't scoped.
+    /// This is the faithful proxy for "can an agent-called plugin
+    /// authenticate?" without spinning up a full mlua VM.
+    #[derive(Debug)]
+    struct SecretReadingPlugin {
+        meta: crate::plugin::traits::PluginMetadata,
+    }
+    #[async_trait::async_trait]
+    impl crate::plugin::traits::Plugin for SecretReadingPlugin {
+        fn metadata(&self) -> &crate::plugin::traits::PluginMetadata {
+            &self.meta
+        }
+        async fn execute(
+            &self,
+        ) -> Result<
+            crate::plugin::traits::PluginOutput,
+            crate::plugin::traits::PluginError,
+        > {
+            let val = crate::plugin::engine::SECRETS
+                .try_with(|s| s.get("TEST_SECRET").cloned())
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "MISSING".to_string());
+            Ok(crate::plugin::traits::PluginOutput {
+                raw_text: Some(val),
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_dispatched_plugin_can_read_secrets() {
+        // Regression test for the Phase 8 secrets-scoping bug: tool
+        // dispatch must scope the SECRETS task-local so agent-called
+        // plugins can authenticate via `lark.env()`. Before the fix the
+        // plugin saw "MISSING".
+        let provider = ToolCycleProvider::new(vec![
+            vec![
+                ProviderEvent::ToolUse {
+                    id: "call_1".into(),
+                    name: "needs_key".into(),
+                    args: serde_json::json!({}),
+                },
+                ProviderEvent::Done {
+                    stop_reason: StopReason::ToolUse,
+                },
+            ],
+            vec![ProviderEvent::Done {
+                stop_reason: StopReason::EndTurn,
+            }],
+        ]);
+        let dir = tempdir().unwrap();
+
+        let mut meta = tool_plugin("needs_key", false, "unused").metadata().clone();
+        meta.name = "needs_key".into();
+        let plugins: Vec<Arc<dyn crate::plugin::traits::Plugin>> =
+            vec![Arc::new(SecretReadingPlugin { meta })];
+
+        let mut secrets = std::collections::HashMap::new();
+        secrets.insert("TEST_SECRET".to_string(), "sk-test-12345".to_string());
+
+        let mut h = AgentHarness::create_in(default_config(), provider, dir.path())
+            .unwrap()
+            .with_plugins(&plugins)
+            .with_secrets(Arc::new(secrets));
+
+        h.prompt(Message::user("use the tool"), |_| {})
+            .await
+            .unwrap();
+
+        // The tool_result (a user-role message after the assistant's
+        // tool_use) must contain the secret value, proving SECRETS was
+        // scoped during dispatch.
+        let tool_result_msg = h
+            .messages
+            .iter()
+            .find(|m| {
+                m.role == Role::User
+                    && m.content
+                        .iter()
+                        .any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+            })
+            .expect("a tool_result message should exist");
+        let ContentBlock::ToolResult { content, .. } = &tool_result_msg.content[0] else {
+            panic!("expected ToolResult block");
+        };
+        assert!(
+            content.contains("sk-test-12345"),
+            "tool_result should carry the secret the plugin read via SECRETS; got: {content}"
+        );
+        assert!(
+            !content.contains("MISSING"),
+            "plugin saw MISSING — SECRETS task-local was not scoped during dispatch"
+        );
     }
 }
