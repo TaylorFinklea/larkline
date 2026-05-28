@@ -14,6 +14,7 @@ mod agent;
 mod app;
 mod app_output;
 mod atlassian;
+mod command;
 mod config;
 mod form_actions;
 mod history;

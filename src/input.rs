@@ -232,6 +232,7 @@ fn handle_command(event: KeyEvent) -> Option<Action> {
     match event.code {
         KeyCode::Esc => Some(Action::EnterNormalMode),
         KeyCode::Enter => Some(Action::CommandSubmit),
+        KeyCode::Tab => Some(Action::CommandComplete),
         KeyCode::Backspace | KeyCode::Delete => Some(Action::CommandBackspace),
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char(c) if !c.is_control() => Some(Action::CommandChar(c)),

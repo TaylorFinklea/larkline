@@ -1444,6 +1444,45 @@ fn render_status_bar(
                     format!(" :{}\u{2588}", state.command_input),
                     Style::default().fg(theme.text).bold(),
                 ));
+                // Live suggestions: matching command(s) + their hints.
+                let matches = crate::command::matching(&state.command_input);
+                match matches.as_slice() {
+                    [] if !state.command_input.is_empty() => {
+                        spans.push(Span::styled(
+                            "  no match",
+                            Style::default().fg(theme.text_dimmed),
+                        ));
+                    }
+                    [single] => {
+                        // One match: show full usage + description, and a
+                        // Tab hint when the verb isn't fully typed yet.
+                        spans.push(Span::styled(
+                            format!("  {}", single.usage()),
+                            Style::default().fg(theme.accent),
+                        ));
+                        spans.push(Span::styled(
+                            format!("  — {}", single.description),
+                            Style::default().fg(theme.text_dimmed),
+                        ));
+                        if single.name != state.command_input {
+                            spans.extend(key_hint("Tab", "complete", theme));
+                        }
+                    }
+                    many if !many.is_empty() => {
+                        // Multiple matches: list names, Tab to complete.
+                        let names = many
+                            .iter()
+                            .map(|c| c.name)
+                            .collect::<Vec<_>>()
+                            .join("  ");
+                        spans.push(Span::styled(
+                            format!("  {names}"),
+                            Style::default().fg(theme.text_dimmed),
+                        ));
+                        spans.extend(key_hint("Tab", "complete", theme));
+                    }
+                    _ => {}
+                }
             }
             VimMode::Insert => {
                 spans.push(Span::styled(" INSERT ", badge_style));

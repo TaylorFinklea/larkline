@@ -1757,6 +1757,25 @@ impl App {
                 self.state.command_input.pop();
             }
 
+            Action::CommandComplete => {
+                // Tab-complete the verb against the registry. On a unique
+                // match expand to the full name; append a trailing space
+                // only for commands that take arguments so the user can
+                // type them immediately (no-arg commands are ready to
+                // submit). On a partial common prefix, just extend.
+                if let Some(completed) = crate::command::complete(&self.state.command_input) {
+                    let takes_args = crate::command::COMMANDS
+                        .iter()
+                        .find(|c| c.name == completed)
+                        .is_some_and(|c| c.arg_hint.is_some());
+                    self.state.command_input = if takes_args {
+                        format!("{completed} ")
+                    } else {
+                        completed
+                    };
+                }
+            }
+
             Action::CommandSubmit => {
                 let cmd = self.state.command_input.trim().to_string();
                 self.state.vim_mode = VimMode::Normal;

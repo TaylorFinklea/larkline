@@ -42,6 +42,8 @@ pub enum Action {
     CommandChar(char),
     /// Delete the last character from the command-mode input buffer.
     CommandBackspace,
+    /// Tab-complete the command-mode input against the command registry.
+    CommandComplete,
     /// Submit the current command-mode input.
     CommandSubmit,
     /// User confirmed the pending shell action.
