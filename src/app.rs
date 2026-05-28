@@ -1040,17 +1040,16 @@ impl App {
                                 self.state.mode = Mode::ViewOutput;
                             }
                             self.state.output_selected = 0;
-                            // Auto-select Table mode when columns are defined.
-                            self.state.output_mode = if self
+                            // Detect Markdown/Table/RawText/List from the
+                            // output shape (single source of truth) so a
+                            // markdown response renders instead of showing
+                            // literal `**bold**` in RawText/List mode.
+                            self.state.output_mode = self
                                 .state
                                 .plugin_output
                                 .as_ref()
-                                .is_some_and(|o| !o.columns.is_empty())
-                            {
-                                OutputMode::Table
-                            } else {
-                                OutputMode::List
-                            };
+                                .map_or(OutputMode::List, crate::app_output::output_mode_for);
+                            self.state.markdown_cache = None;
                         }
                     }
                 }
@@ -1094,17 +1093,13 @@ impl App {
                             // ViewOutput mode: replace entire output.
                             self.state.output_selected = 0;
                             self.state.scroll_offset = 0;
+                            // Detect Markdown/Table/RawText/List from the
+                            // output shape — single source of truth so
+                            // markdown responses render (not literal `**`).
+                            self.state.output_mode =
+                                crate::app_output::output_mode_for(&output);
+                            self.state.markdown_cache = None;
                             self.state.plugin_output = Some(output);
-                            self.state.output_mode = if self
-                                .state
-                                .plugin_output
-                                .as_ref()
-                                .is_some_and(|o| !o.columns.is_empty())
-                            {
-                                OutputMode::Table
-                            } else {
-                                OutputMode::List
-                            };
                             self.state.status_message =
                                 Some(("Action completed".to_string(), std::time::Instant::now()));
                         }

@@ -9,3 +9,8 @@ entry = "run.sh"
 timeout_seconds = 5
 
 category = "system"
+
+# Agent-callable: read-only, zero-arg, no secrets — an ideal first tool
+# for the in-app AI agent. Not destructive (just reports stats).
+agent_callable = true
+destructive = false

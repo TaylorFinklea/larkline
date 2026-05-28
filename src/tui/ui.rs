@@ -10,7 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
-        TableState,
+        TableState, Wrap,
     },
 };
 
@@ -237,13 +237,22 @@ fn render_unified_list(
                         Style::default().fg(theme.text_dimmed),
                     ));
                 }
-                // Quickkey badge on the right: [gb]
+                // Quickkey badge, right-justified into a column at the
+                // row's right edge so all `[xx]` badges line up regardless
+                // of name/group length. Pad with spaces computed from the
+                // list's inner width (minus borders + highlight symbol).
                 if let Some(qk) = quickkey {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        format!("[{qk}]"),
-                        Style::default().fg(theme.accent),
-                    ));
+                    let badge = format!("[{qk}]");
+                    // borders (2) + highlight symbol "▶ " (2) reserved on
+                    // every row by ratatui.
+                    let avail = usize::from(area.width.saturating_sub(4));
+                    let content_w: usize = spans.iter().map(Span::width).sum();
+                    let badge_w = badge.chars().count();
+                    // At least two spaces so the badge never abuts content
+                    // on very long rows.
+                    let pad = avail.saturating_sub(content_w + badge_w).max(2);
+                    spans.push(Span::raw(" ".repeat(pad)));
+                    spans.push(Span::styled(badge, Style::default().fg(theme.accent)));
                 }
                 ListItem::new(Line::from(spans))
             }
@@ -777,7 +786,10 @@ fn render_output_pane(
                         .as_bytes()
                         .into_text()
                         .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
-                    let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
+                    let paragraph = Paragraph::new(text)
+                        .block(block)
+                        .wrap(Wrap { trim: false })
+                        .scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 } else {
                     // Format items as plain text lines.
@@ -787,7 +799,10 @@ fn render_output_pane(
                         .map(|i| i.label.as_str())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
+                    let paragraph = Paragraph::new(text)
+                        .block(block)
+                        .wrap(Wrap { trim: false })
+                        .scroll((scroll, 0));
                     frame.render_widget(paragraph, area);
                 }
                 return;
@@ -809,7 +824,13 @@ fn render_output_pane(
                 };
                 #[allow(clippy::cast_possible_truncation)]
                 let scroll = state.scroll_offset as u16;
-                let paragraph = Paragraph::new(text).block(block).scroll((scroll, 0));
+                // Wrap long lines so prose responses (AI agent, articles)
+                // don't run off the right edge. `trim: false` preserves
+                // markdown indentation (lists, code blocks).
+                let paragraph = Paragraph::new(text)
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll, 0));
                 frame.render_widget(paragraph, area);
                 return;
             }

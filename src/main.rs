@@ -566,7 +566,12 @@ Session: $XDG_STATE_HOME/larkline/sessions/<uuid>.jsonl."
                 let _ = out.flush();
             }
             agent::ProviderEvent::ToolUse { name, .. } => {
-                let _ = writeln!(out, "\n→ tool: {name}");
+                // Clean paragraph break in stdout (the captured response);
+                // the human-facing "→ tool" marker goes to stderr so it
+                // doesn't pollute stdout for callers that capture it (the
+                // TUI plugin parses stdout as the answer body).
+                let _ = writeln!(out, "\n");
+                eprintln!("→ tool: {name}");
             }
             agent::ProviderEvent::Usage { .. } | agent::ProviderEvent::Done { .. } => {}
         })

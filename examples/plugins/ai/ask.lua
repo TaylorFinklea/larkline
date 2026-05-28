@@ -89,34 +89,25 @@ lark.register({
                 }
             end
 
-            -- Happy path: one row with the response. The prompt is the
-            -- label so the result list reads as a chat history. The
-            -- response goes into `detail` (rendered in the preview pane).
-            -- `copy_text` makes Cmd-C / `c` copy the full response.
-            -- Token usage is shown as a secondary dim row so successful
-            -- runs are visibly accounted-for without being noisy.
-            local items = {
-                {
-                    label = prompt,
-                    icon = "🤖",
-                    detail = result.stdout,
-                    copy_text = result.stdout,
-                },
-            }
-            -- Token usage goes to stderr from the CLI (one line:
-            -- "[tokens in=N out=N]"). Parse and surface as a small row.
+            -- Render the answer as markdown in the output pane. AI
+            -- responses are long-form prose (often markdown), so a list
+            -- row's single-line detail mangles them — raw_text +
+            -- output_format = "markdown" is the right surface. A dimmed
+            -- footer carries token usage parsed from the CLI's stderr
+            -- line: "[tokens in=N out=N]".
+            local body = result.stdout or ""
             local in_tok, out_tok = (result.stderr or ""):match("tokens in=(%d+) out=(%d+)")
             if in_tok and out_tok then
-                table.insert(items, {
-                    label = "Tokens: " .. in_tok .. " in / " .. out_tok .. " out",
-                    icon = "📊",
-                    detail = "Reported by the AI provider",
-                })
+                body = body
+                    .. "\n\n---\n"
+                    .. "_Tokens: " .. in_tok .. " in / " .. out_tok .. " out_"
             end
 
             return {
                 title = "AI Ask",
-                items = items,
+                raw_text = body,
+                output_format = "markdown",
+                items = {},
             }
         end
 

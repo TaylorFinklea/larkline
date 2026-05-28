@@ -84,31 +84,28 @@ lark.register({
                 }
             end
 
-            -- Build the result list. Primary row is the answer. Secondary
-            -- row carries turn count + tokens parsed from the stderr footer
-            -- the CLI prints: "[turns=N tokens in=M out=K session=...]".
-            local items = {
-                {
-                    label = prompt,
-                    icon = "🤖",
-                    detail = result.stdout,
-                    copy_text = result.stdout,
-                },
-            }
+            -- Render the answer as markdown in the output pane. The
+            -- response is long-form prose (often with markdown), so a
+            -- list row's single-line detail mangles it — raw_text +
+            -- output_format = "markdown" is the right surface.
+            -- A dimmed footer carries turn/token metadata parsed from
+            -- the CLI's stderr line: "[turns=N tokens in=M out=K session=...]".
+            local body = result.stdout or ""
             local turns, tok_in, tok_out, session =
                 (result.stderr or ""):match("turns=(%d+) tokens in=(%d+) out=(%d+) session=(%S+)")
             if turns then
-                table.insert(items, {
-                    label = "Turns: " .. turns .. " · Tokens: " .. tok_in .. " in / " .. tok_out .. " out",
-                    icon = "📊",
-                    detail = "Session: " .. (session or "?")
-                        .. "\nAudit: $XDG_STATE_HOME/larkline/agent-audit.log",
-                })
+                body = body
+                    .. "\n\n---\n"
+                    .. "_Turns: " .. turns
+                    .. " · Tokens: " .. tok_in .. " in / " .. tok_out .. " out"
+                    .. " · Session: " .. (session or "?") .. "_"
             end
 
             return {
                 title = "AI Agent",
-                items = items,
+                raw_text = body,
+                output_format = "markdown",
+                items = {},
             }
         end
 
