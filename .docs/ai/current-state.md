@@ -55,6 +55,17 @@ Open / deferred (documented, NOT bugs left unfixed):
 
 ## Glance strip + plugin cleanup (2026-05-29)
 
+- **Focus-steal fix** (`3aadf13`, pushed): widget/status auto-refresh used
+  `engine.execute()` (UserSelected) → every refresh yanked the main view to the
+  refreshing plugin (Docker/Caffeinate). Added `engine.refresh()` (Prefetch,
+  cache-only); fixed the prefetch handler to overwrite Ready (was Loading→Ready
+  only, so refreshes never updated the cached value — froze the countdown).
+- **Degraded-widget demotion** (`ab49e0a`, pushed): `PluginOutput.level`
+  (warn/error) demotes a degraded widget from its card to a ⚠ glance-strip chip
+  (`glance_indices` = status chips + degraded widgets; cards render only the
+  rest). Docker not-installed → "🐳 ⚠ Docker not installed" chip. See the spec.
+- **AI Projects plugin removed** (`5606f74`, pushed) — drifted, like Nebular/Tesela.
+
 - **Glance strip** (new feature, spec: [`phases/v1.0-glance-strip-spec.md`](./phases/v1.0-glance-strip-spec.md)):
   a compact 1-line strip of at-a-glance status chips above the status bar,
   lighter than the 6-line widget row. Manifest opt-in `status = true` (+
