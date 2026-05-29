@@ -79,7 +79,7 @@ pub fn write(cached: &Cached) -> Result<()> {
 #[cfg(unix)]
 fn write_private(path: &std::path::Path, content: &str) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -87,6 +87,12 @@ fn write_private(path: &std::path::Path, content: &str) -> Result<()> {
         .mode(0o600)
         .open(path)
         .with_context(|| format!("opening {} for write", path.display()))?;
+    // `.mode(0o600)` only applies when O_CREAT actually creates the file. If
+    // the cache file already exists with looser permissions (pre-created by
+    // another process, a prior build, or a restored backup), re-assert 0600
+    // so the live access token it holds isn't left world/group-readable.
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("tightening permissions on {}", path.display()))?;
     f.write_all(content.as_bytes())?;
     Ok(())
 }
@@ -166,5 +172,29 @@ mod tests {
         let meta = std::fs::metadata(&path).expect("metadata");
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "cache file must be 0600, got {mode:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_tightens_preexisting_loose_perms() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("atlassian-access.json");
+        // Pre-create the file world-readable (the hijack/leak scenario).
+        std::fs::write(&path, "stale").expect("pre-create");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+
+        let cached = Cached {
+            access_token: "secret".into(),
+            expires_at: now_unix() + 3600,
+            cloudid: "c".into(),
+            email: "e@e.com".into(),
+            site_url: "https://example.atlassian.net".into(),
+        };
+        let raw = serde_json::to_string_pretty(&cached).unwrap();
+        super::write_private(&path, &raw).expect("write");
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "pre-existing file must be tightened to 0600, got {mode:o}");
     }
 }

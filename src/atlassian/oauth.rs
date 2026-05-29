@@ -233,6 +233,12 @@ fn http_client() -> Result<reqwest::Client> {
             env!("CARGO_PKG_VERSION"),
             " (atlassian-oauth)"
         ))
+        // reqwest has no default request timeout; without these a stalled
+        // token endpoint hangs `lark atlassian token` (the per-invocation
+        // refresh hot path) and interactive login indefinitely. Matches the
+        // connect_timeout the AI providers already set.
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .context("building reqwest client")
 }
@@ -282,7 +288,17 @@ pub async fn login_command(_args: &[String]) -> Result<()> {
     eprintln!("If the browser doesn't open, visit this URL:\n  {url}");
     open_browser(&url);
 
-    let code = callback::wait_for_code(listener, &state).await?;
+    // Bound the wait so a redirect that never arrives (closed tab, denied
+    // consent, browser never reaches 127.0.0.1) doesn't hang the command
+    // forever — the user can re-run login.
+    let code = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        callback::wait_for_code(listener, &state),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!("Atlassian authorization timed out after 5 minutes — re-run `lark atlassian login`")
+    })??;
     let tokens = exchange_code(&code, &redirect_uri, &verifier).await?;
     let refresh = tokens.refresh_token.as_deref().context(
         "Atlassian did not return a refresh_token — check scopes include offline_access",

@@ -43,13 +43,22 @@ pub async fn bind_local() -> Result<(TcpListener, u16)> {
     Ok((listener, port))
 }
 
-/// Block waiting for the authorize redirect. Returns the `code` query parameter
-/// after verifying that `state` matches what we sent.
-pub async fn wait_for_code(listener: TcpListener, expected_state: &str) -> Result<String> {
-    let (mut stream, _peer) = listener.accept().await.context("accepting callback")?;
+/// How long to wait for a single connection to send its request headers
+/// before skipping it. Guards against a connected-but-silent socket
+/// (browser preconnect, OS port probe) stalling the whole flow.
+const PER_CONNECTION_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-    // Read just enough bytes to see the end of the request headers. We never read
-    // the body — OAuth callbacks are always GETs.
+fn http_response(status: &str, html: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{html}",
+        html.len()
+    )
+}
+
+/// Read request headers (never the body — OAuth callbacks are GETs) up to
+/// the first `\r\n\r\n`, an EOF, or the 8 KiB cap.
+async fn read_request(stream: &mut tokio::net::TcpStream) -> Result<Vec<u8>> {
     let mut buf = vec![0u8; 8192];
     let mut read = 0;
     loop {
@@ -65,58 +74,85 @@ pub async fn wait_for_code(listener: TcpListener, expected_state: &str) -> Resul
             break;
         }
     }
-    let req = std::str::from_utf8(&buf[..read]).context("callback request was not UTF-8")?;
-    let first_line = req.lines().next().unwrap_or("");
+    buf.truncate(read);
+    Ok(buf)
+}
 
-    // Parse "GET /callback?code=...&state=... HTTP/1.1"
-    let path = first_line.split_whitespace().nth(1).unwrap_or("");
-    let query = path.split_once('?').map_or("", |(_, q)| q);
-    let params = parse_query(query);
+/// Block waiting for the authorize redirect. Returns the `code` query parameter
+/// after verifying that `state` matches what we sent.
+///
+/// Loops over accepted connections, skipping any that carry neither `code`
+/// nor `error` (browser preconnects, favicon fetches, port probes) so a stray
+/// connection can't spuriously fail the login with a "state mismatch". The
+/// caller bounds the overall wait with a timeout so a redirect that never
+/// arrives doesn't hang forever.
+pub async fn wait_for_code(listener: TcpListener, expected_state: &str) -> Result<String> {
+    loop {
+        let (mut stream, _peer) = listener.accept().await.context("accepting callback")?;
 
-    let write_response = |status: &str, html: &str| {
-        format!(
-            "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n{html}",
-            html.len()
-        )
-    };
+        let req_bytes =
+            match tokio::time::timeout(PER_CONNECTION_READ_TIMEOUT, read_request(&mut stream)).await
+            {
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(e)) => return Err(e),
+                // Connected but sent nothing in time — not our redirect; skip it.
+                Err(_) => continue,
+            };
+        let req = String::from_utf8_lossy(&req_bytes);
+        let first_line = req.lines().next().unwrap_or("");
 
-    // OAuth authorization servers can send back `error=...&error_description=...`
-    // instead of `code` when the user cancels or consent fails.
-    if let Some(err) = params.get("error") {
+        // Parse "GET /callback?code=...&state=... HTTP/1.1"
+        let path = first_line.split_whitespace().nth(1).unwrap_or("");
+        let query = path.split_once('?').map_or("", |(_, q)| q);
+        let params = parse_query(query);
+
+        // Anything that isn't the OAuth redirect (no `code`, no `error`) is a
+        // stray connection — answer 404 and keep waiting rather than bailing.
+        if !params.contains_key("code") && !params.contains_key("error") {
+            let _ = stream
+                .write_all(http_response("404 Not Found", ERROR_HTML).as_bytes())
+                .await;
+            let _ = stream.shutdown().await;
+            continue;
+        }
+
+        // OAuth authorization servers can send back `error=...&error_description=...`
+        // instead of `code` when the user cancels or consent fails.
+        if let Some(err) = params.get("error") {
+            let _ = stream
+                .write_all(http_response("400 Bad Request", ERROR_HTML).as_bytes())
+                .await;
+            let desc = params.get("error_description").cloned().unwrap_or_default();
+            bail!(
+                "Atlassian returned OAuth error: {err}{}",
+                if desc.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {desc}")
+                }
+            );
+        }
+
+        let returned_state = params.get("state").map(String::as_str).unwrap_or_default();
+        if returned_state != expected_state {
+            let _ = stream
+                .write_all(http_response("400 Bad Request", ERROR_HTML).as_bytes())
+                .await;
+            bail!("state mismatch in OAuth callback — possible CSRF");
+        }
+
+        let code = params
+            .get("code")
+            .cloned()
+            .context("OAuth callback missing `code` parameter")?;
+
         let _ = stream
-            .write_all(write_response("400 Bad Request", ERROR_HTML).as_bytes())
+            .write_all(http_response("200 OK", SUCCESS_HTML).as_bytes())
             .await;
-        let desc = params.get("error_description").cloned().unwrap_or_default();
-        bail!(
-            "Atlassian returned OAuth error: {err}{}",
-            if desc.is_empty() {
-                String::new()
-            } else {
-                format!(" — {desc}")
-            }
-        );
+        let _ = stream.shutdown().await;
+
+        return Ok(code);
     }
-
-    let returned_state = params.get("state").map(String::as_str).unwrap_or_default();
-    if returned_state != expected_state {
-        let _ = stream
-            .write_all(write_response("400 Bad Request", ERROR_HTML).as_bytes())
-            .await;
-        bail!("state mismatch in OAuth callback — possible CSRF");
-    }
-
-    let code = params
-        .get("code")
-        .cloned()
-        .context("OAuth callback missing `code` parameter")?;
-
-    let _ = stream
-        .write_all(write_response("200 OK", SUCCESS_HTML).as_bytes())
-        .await;
-    let _ = stream.shutdown().await;
-
-    Ok(code)
 }
 
 /// Parse `k1=v1&k2=v2` with percent-decoding. Duplicates keep the last value.
