@@ -43,13 +43,15 @@ lark.register({
         end
 
         local ok, data = pcall(lark.json.decode, raw)
-        if not ok or not data or not data.sessions then
+        -- `ccusage session --json` returns the array under the singular key
+        -- `session` (alongside `totals`), not `sessions`.
+        if not ok or not data or not data.session then
             return { title = "Claude Usage", items = { { label = "Failed to parse output", icon = "!" } } }
         end
 
         local items = {}
         local total_cost = 0
-        for _, sess in ipairs(data.sessions) do
+        for _, sess in ipairs(data.session) do
             total_cost = total_cost + (sess.totalCost or 0)
             local sid = tostring(sess.sessionId or "?")
             -- Extract project name from session path.
@@ -79,7 +81,7 @@ lark.register({
         local range_label = tostring(lark.store.get("time_range") or "7d"):gsub('^"', ""):gsub('"$', "")
         table.insert(items, 1, {
             label = "Total: " .. fmt_cost(total_cost) .. "  (" .. range_label .. ")",
-            detail = #data.sessions .. " sessions",
+            detail = #data.session .. " sessions",
             icon = "💰",
             copy_text = fmt_cost(total_cost),
         })

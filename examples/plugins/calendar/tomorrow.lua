@@ -119,27 +119,36 @@ end
 local function error_item(message, help_url)
     return { icon = "!", label = message, help_url = help_url, actions = {} }
 end
-local function icalbuddy_fallback(range)
+local function icalbuddy_fallback()
     local r = lark.exec("which", { "icalbuddy" })
     if not r or r:match("%S") == nil then
         return { error_item("Neither larkline-macos-helper nor icalbuddy installed",
                             "https://hasseg.org/icalBuddy/") }
     end
-    local raw = lark.exec("icalbuddy", {
-        "-n", "-nc", "-b", "EVENT: ",
-        "-iep", "title,datetime,location",
-        "-npn", "-nrd", range or "eventsTomorrow",
-    })
+    -- icalbuddy has no "tomorrow" verb — passing one makes it print its usage
+    -- text. Compute tomorrow's date and query that single day with the
+    -- documented eventsFrom:/to: range; fall back to eventsToday+1
+    -- (today..tomorrow) only if the date shell call fails.
+    local d = lark.exec("date", { "-v+1d", "+%Y-%m-%d" })
+    d = d and d:match("%d%d%d%d%-%d%d%-%d%d") or nil
+    local args = { "-n", "-nc", "-b", "EVENT: ", "-iep", "title,datetime,location", "-npn", "-nrd" }
+    if d then
+        args[#args + 1] = "eventsFrom:" .. d
+        args[#args + 1] = "to:" .. d
+    else
+        args[#args + 1] = "eventsToday+1"
+    end
+    local raw = lark.exec("icalbuddy", args)
     if not raw or raw:match("^%s*$") then
         return { { icon = "🎉", label = "Nothing on the calendar tomorrow", actions = {} } }
     end
-    return { { icon = "📋", label = "Today (icalbuddy fallback)", preview = raw, actions = {} } }
+    return { { icon = "📋", label = "Tomorrow (icalbuddy fallback)", preview = raw, actions = {} } }
 end
 
 lark.register({
     on_run = function()
         if not has_helper() then
-            return { title = "Tomorrow", items = icalbuddy_fallback("eventsTomorrow") }
+            return { title = "Tomorrow", items = icalbuddy_fallback() }
         end
 
         local start_iso = iso_for_offset(1)

@@ -13,7 +13,7 @@ lark.register({
 
             -- Try fd first (faster, respects .gitignore), fall back to find.
             -- Use LARK_CWD (set by lark.nvim) if available, otherwise $HOME.
-            local search_root = lark.env("LARK_CWD") or os.getenv("HOME") or "/"
+            local search_root = lark.env("LARK_CWD") or lark.env("HOME") or "/"
             local raw = lark.exec("fd", { "--max-results", "50", "--color", "never", query, search_root })
             if not raw or raw == "" then
                 raw = lark.exec("find", { search_root, "-maxdepth", "5", "-iname", "*" .. query .. "*", "-not", "-path", "*/.*" })
@@ -30,7 +30,7 @@ lark.register({
             for path in raw:gmatch("[^\n]+") do
                 local name = path:match("([^/]+)$") or path
                 local dir = path:match("^(.*)/[^/]+$") or ""
-                local home = os.getenv("HOME") or ""
+                local home = lark.env("HOME") or ""
                 if home ~= "" and dir:sub(1, #home) == home then
                     dir = "~" .. dir:sub(#home + 1)
                 end
@@ -41,7 +41,7 @@ lark.register({
                     actions[#actions + 1] = { label = "Open (vsplit)", kind = "nvim_edit", args = { path, "vsplit" } }
                 end
                 actions[#actions + 1] = { label = "Open in Finder", kind = "shell", args = { "open", "-R", path } }
-                actions[#actions + 1] = { label = "Open in $EDITOR", kind = "shell", args = { os.getenv("EDITOR") or "vim", path } }
+                actions[#actions + 1] = { label = "Open in $EDITOR", kind = "shell", args = { lark.env("EDITOR") or "vim", path } }
                 actions[#actions + 1] = { label = "Copy path", kind = "clipboard", args = { path } }
                 actions[#actions + 1] = { label = "Copy filename", kind = "clipboard", args = { name } }
 

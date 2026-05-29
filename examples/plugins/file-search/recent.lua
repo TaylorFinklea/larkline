@@ -2,7 +2,7 @@
 
 lark.register({
     on_run = function()
-        local home = os.getenv("HOME") or "/"
+        local home = lark.env("HOME") or "/"
         -- Use LARK_CWD (set by lark.nvim) if available, otherwise common dirs.
         local lark_cwd = lark.env("LARK_CWD")
 
@@ -60,7 +60,7 @@ lark.register({
                 actions[#actions + 1] = { label = "Open (vsplit)", kind = "nvim_edit", args = { path, "vsplit" } }
             end
             actions[#actions + 1] = { label = "Open in Finder", kind = "shell", args = { "open", "-R", path } }
-            actions[#actions + 1] = { label = "Open in $EDITOR", kind = "shell", args = { os.getenv("EDITOR") or "vim", path } }
+            actions[#actions + 1] = { label = "Open in $EDITOR", kind = "shell", args = { lark.env("EDITOR") or "vim", path } }
             actions[#actions + 1] = { label = "Copy path", kind = "clipboard", args = { path } }
 
             items[#items + 1] = {
