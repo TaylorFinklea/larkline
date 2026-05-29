@@ -28,8 +28,13 @@ use crate::agent::provider::{Message, StopReason};
 /// rejects anything other than this version with [`SessionError::Version`].
 pub const SESSION_VERSION: u32 = 1;
 
-/// One line in the session log. Tagged by `type` so older readers can skip
-/// unknown variants forward-compatibly.
+/// One line in the session log, tagged by `type`.
+///
+/// Note: this internally-tagged enum has no `#[serde(other)]` fallback, so
+/// a reader currently *errors* on an unknown `type` rather than skipping it.
+/// True forward-compatible skipping of future variants is a v1.x concern
+/// (it would require parsing to a `Value` and filtering by tag, since every
+/// known variant is assumed to carry an `id`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEntry {
@@ -173,12 +178,31 @@ impl SessionLog {
     pub fn reopen(path: &Path) -> Result<(Self, Vec<SessionEntry>), SessionError> {
         let raw = std::fs::read_to_string(path)?;
         let mut entries: Vec<SessionEntry> = Vec::new();
-        for line in raw.lines() {
-            if line.trim().is_empty() {
-                continue;
+        // Collect non-empty lines so we can distinguish a torn FINAL line
+        // (a crash / power-loss mid-append) from genuine mid-file
+        // corruption. The log is the source of truth for crash recovery, so
+        // tail damage must drop only the bad last line, not the whole
+        // recoverable prefix; a parse failure anywhere earlier is real
+        // corruption and is surfaced rather than silently swallowed.
+        let lines: Vec<&str> = raw
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let last_idx = lines.len().saturating_sub(1);
+        for (i, line) in lines.iter().enumerate() {
+            match serde_json::from_str::<SessionEntry>(line) {
+                Ok(entry) => entries.push(entry),
+                Err(e) if i == last_idx => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "dropping malformed trailing line during session reopen (likely a torn write)"
+                    );
+                    break;
+                }
+                Err(e) => return Err(e.into()),
             }
-            let entry: SessionEntry = serde_json::from_str(line)?;
-            entries.push(entry);
         }
 
         let header = entries.first().ok_or(SessionError::MissingHeader)?;
@@ -308,9 +332,13 @@ impl SessionLog {
         let json = serde_json::to_string(entry)?;
         self.file.write_all(json.as_bytes())?;
         self.file.write_all(b"\n")?;
-        // Flush after every entry so a crash never drops a committed
-        // message. The cost is one fsync per turn-end (typically a few
-        // per session), which is well below user-perceptible latency.
+        // `write_all` already hands the bytes to the OS, so a committed
+        // entry survives a process crash / kill (it's in the page cache).
+        // `File::flush` is a no-op (there's no userspace buffer); this is
+        // page-cache durability, NOT fsync — a power loss or kernel panic
+        // can still lose an un-synced tail (which `reopen` tolerates as a
+        // torn trailing line). Call `sync_data` here if power-loss
+        // durability is ever required.
         self.file.flush()?;
         Ok(())
     }
@@ -419,6 +447,44 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let err = SessionLog::reopen(&path).unwrap_err();
         assert!(matches!(err, SessionError::MissingHeader));
+    }
+
+    #[test]
+    fn reopen_tolerates_torn_trailing_line() {
+        // Simulate a crash mid-append: valid entries then a truncated last
+        // line. The recoverable prefix must survive, not be discarded.
+        let dir = tempdir().unwrap();
+        let mut log = SessionLog::create_in(dir.path()).unwrap();
+        let path = log.path().to_path_buf();
+        log.append_user(Message::user("hello")).unwrap();
+        log.append_assistant(Message::assistant("hi")).unwrap();
+        drop(log);
+
+        // Append a torn (partial-JSON) final line.
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"type\":\"user\",\"id\":\"00000000-0000-7000-8000-0000")
+            .unwrap();
+        drop(f);
+
+        let (_log, entries) = SessionLog::reopen(&path).unwrap();
+        // session header + user + assistant survive; the torn line is dropped.
+        assert_eq!(entries.len(), 3);
+        assert!(matches!(entries[0], SessionEntry::Session { .. }));
+        assert!(matches!(entries[2], SessionEntry::Assistant { .. }));
+    }
+
+    #[test]
+    fn reopen_surfaces_midfile_corruption() {
+        // A bad line that is NOT the last is genuine corruption — must error,
+        // not be silently swallowed.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corrupt.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"session\",\"id\":\"00000000-0000-7000-8000-000000000000\",\"version\":1,\"created_at_ms\":0}\nNOT JSON\n{\"type\":\"session\",\"id\":\"00000000-0000-7000-8000-000000000000\",\"version\":1,\"created_at_ms\":0}\n",
+        )
+        .unwrap();
+        assert!(SessionLog::reopen(&path).is_err());
     }
 
     #[test]

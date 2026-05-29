@@ -80,9 +80,10 @@ pub enum AuditError {
 
 /// Append-only audit log writer.
 ///
-/// One instance shared across sessions in production. Flushed after
-/// every write so a crash never loses an emitted event. The harness
-/// holds an `Option<AuditLog>` so tests can run without an audit file.
+/// One instance shared across sessions in production. Each write reaches
+/// the OS page cache immediately (survives a process crash; see `write`
+/// for the fsync caveat). The harness holds an `Option<AuditLog>` so tests
+/// can run without an audit file.
 #[derive(Debug)]
 pub struct AuditLog {
     path: PathBuf,
@@ -112,8 +113,10 @@ impl AuditLog {
         &self.path
     }
 
-    /// Append one record. Flushes immediately so a crash never drops a
-    /// committed entry.
+    /// Append one record. `write_all` hands the bytes to the OS so a
+    /// committed entry survives a process crash; `File::flush` is a no-op,
+    /// so this is page-cache durability, not fsync (a power loss can still
+    /// lose an un-synced tail). Use `sync_data` if that's ever required.
     pub fn write(&mut self, record: &AuditRecord) -> Result<(), AuditError> {
         let json = serde_json::to_string(record)?;
         self.file.write_all(json.as_bytes())?;
