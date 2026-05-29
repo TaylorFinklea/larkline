@@ -53,6 +53,33 @@ Open / deferred (documented, NOT bugs left unfixed):
   (no production caller of abort()/cancel_token() exists until the TUI agent
   loop, Phase 8.E).
 
+## Glance strip + plugin cleanup (2026-05-29)
+
+- **Glance strip** (new feature, spec: [`phases/v1.0-glance-strip-spec.md`](./phases/v1.0-glance-strip-spec.md)):
+  a compact 1-line strip of at-a-glance status chips above the status bar,
+  lighter than the 6-line widget row. Manifest opt-in `status = true` (+
+  `status_refresh_secs`); plugin sets `PluginOutput.status` (chip text, falls
+  back to truncated title). Reuses widget prefetch/cache/refresh + the `A`
+  dashboard picker (now Widget + Status with a W/S tag, `disabled_status`
+  opt-out). `J` focuses, h/l move, Enter opens (mirrors widget-card open).
+  Caffeinate Status is the first opt-in (`☕ 23m` / `off` / `n/a`). Commits
+  `7e6e6c0` (feature) + `1c8df07` (review fixes).
+- **Adversarial review of the feature** found + fixed 3 reachable HIGH bugs:
+  auto-refresh never fired (`unwrap_or(now)` → froze the countdown; ALSO fixed
+  the dormant widget auto-refresh), stale-index panic after `R`/PM-close
+  (RefreshPlugins now rebuilds widget+status indices; render/refresh use
+  `.get()`), and j/k scrolling the hidden list while the strip was focused.
+  Multi-chip overflow scroll + profile-hidden-focus deferred to v1.x (not
+  reachable with the single shipped chip) — see the spec's Known Limitations.
+- **Removed Nebular News + Tesela** example plugins (drifted, to be rebuilt) —
+  commit `c3fbea7`. ~/.config symlinks gone; CHANGELOG history kept.
+- Post-bug-sweep smoke fixes (`ba0fb56`): file-search `os.getenv`→`lark.env`
+  crash, ccusage `data.session` key, calendar tomorrow icalbuddy fallback.
+
+Build green throughout: 62 lib + 247 bin + integration, clippy --all-targets
+-D warnings, fmt. Unpushed on `v1.0-prep` (bug-sweep batch was pushed; the
+nebular removal + glance strip + review fixes are local — pending Taylor's go).
+
 ## Next Milestone — v1.0 Agent Palette
 
 Planned 2026-05-09. ~21 weeks horizon. Headline thesis: **a command palette
