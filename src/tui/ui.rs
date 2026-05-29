@@ -1182,12 +1182,13 @@ fn render_widget_row(
             Some(CachedResult::Ready(output) | CachedResult::Revalidating(output)) => {
                 let max_lines = (area.height as usize).saturating_sub(2); // border eats 2
                 for item in output.items.iter().take(max_lines) {
-                    let label = if item.label.len() > card_areas[i].width as usize - 3 {
+                    let budget = (card_areas[i].width as usize).saturating_sub(3);
+                    let label = if item.label.chars().count() > budget {
                         format!(
                             "{}…",
                             item.label
                                 .chars()
-                                .take(card_areas[i].width as usize - 4)
+                                .take(budget.saturating_sub(1))
                                 .collect::<String>()
                         )
                     } else {
@@ -1218,7 +1219,11 @@ fn render_widget_row(
                 )));
             }
             Some(CachedResult::Error(e)) => {
-                let msg = if e.len() > 20 { &e[..20] } else { e };
+                let msg: String = if e.chars().count() > 20 {
+                    e.chars().take(20).collect()
+                } else {
+                    e.clone()
+                };
                 lines.push(Line::from(Span::styled(
                     format!("⚠ {msg}"),
                     Style::default().fg(theme.error),

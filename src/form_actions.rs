@@ -8,6 +8,9 @@ use crate::plugin::traits::FieldType;
 
 pub fn next_field(app: &mut App) {
     if let Some(ref mut form) = app.state.form_state {
+        if form.fields.is_empty() {
+            return;
+        }
         form.focused = (form.focused + 1) % form.fields.len();
     }
 }

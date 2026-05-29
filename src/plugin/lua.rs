@@ -274,7 +274,9 @@ impl LuaPlugin {
                         }
                     }
                     if let Ok(timeout_secs) = opts.get::<f64>("timeout") {
-                        req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                        if timeout_secs.is_finite() && timeout_secs >= 0.0 {
+                            req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                        }
                     }
                 }
 
@@ -309,7 +311,9 @@ impl LuaPlugin {
                             }
                         }
                         if let Ok(timeout_secs) = opts.get::<f64>("timeout") {
-                            req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                            if timeout_secs.is_finite() && timeout_secs >= 0.0 {
+                                req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                            }
                         }
                     }
 

@@ -92,6 +92,11 @@ pub fn check_form_init(state: &mut AppState, plugin_index: usize) {
 
 /// Initialize form state from a `FormSpec` returned by a plugin.
 pub fn initialize_form(state: &mut AppState, plugin_index: usize, form_spec: &FormSpec) {
+    // A form with no fields is unusable and would make field-navigation
+    // arithmetic (`% fields.len()`) divide by zero. Refuse to activate it.
+    if form_spec.fields.is_empty() {
+        return;
+    }
     let fields: Vec<FormFieldState> = form_spec
         .fields
         .iter()
@@ -124,4 +129,22 @@ pub fn initialize_form(state: &mut AppState, plugin_index: usize, form_spec: &Fo
             .unwrap_or_else(|| "Submit".to_string()),
         is_settings: false,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_field_form_is_not_activated() {
+        // A plugin returning a form with zero fields must not activate form state,
+        // otherwise Tab (next_field) would compute `% 0` and panic.
+        let mut state = AppState::default();
+        let form_spec = FormSpec {
+            fields: Vec::new(),
+            submit_label: None,
+        };
+        initialize_form(&mut state, 0, &form_spec);
+        assert!(state.form_state.is_none());
+    }
 }

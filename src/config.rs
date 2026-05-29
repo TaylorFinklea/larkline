@@ -826,7 +826,7 @@ fn parse_color(s: &str) -> anyhow::Result<Color> {
         "gray" => Ok(Color::Gray),
         "darkgray" => Ok(Color::DarkGray),
         "white" => Ok(Color::White),
-        hex if hex.starts_with('#') && hex.len() == 7 => {
+        hex if hex.starts_with('#') && hex.len() == 7 && hex.is_ascii() => {
             let r = u8::from_str_radix(&hex[1..3], 16)?;
             let g = u8::from_str_radix(&hex[3..5], 16)?;
             let b = u8::from_str_radix(&hex[5..7], 16)?;
@@ -994,8 +994,9 @@ pub fn env_path() -> PathBuf {
 
 /// Strip matching surrounding single or double quotes from a `.env` value.
 fn strip_quotes(value: &str) -> &str {
-    if (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''))
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
     {
         &value[1..value.len() - 1]
     } else {
@@ -1248,6 +1249,27 @@ mod tests {
         assert!(config.ui.visible_items > 0);
         assert!(!config.general.plugin_dirs.is_empty());
         assert_eq!(config.logging.level, "warn");
+    }
+
+    #[test]
+    fn strip_quotes_handles_lone_quote_without_panicking() {
+        // A value that is a single quote char must not slice &value[1..0].
+        assert_eq!(strip_quotes("\""), "\"");
+        assert_eq!(strip_quotes("'"), "'");
+        assert_eq!(strip_quotes(""), "");
+        // Genuinely quoted values still strip.
+        assert_eq!(strip_quotes("\"hi\""), "hi");
+        assert_eq!(strip_quotes("'hi'"), "hi");
+        assert_eq!(strip_quotes("\"\""), "");
+    }
+
+    #[test]
+    fn parse_color_rejects_multibyte_hex_without_panicking() {
+        // 7 bytes but a multibyte char straddles a slice boundary — must Err, not panic.
+        assert!(parse_color("#€000").is_err());
+        assert!(parse_color("#ggg000").is_err());
+        // Valid hex still parses.
+        assert!(parse_color("#ff8800").is_ok());
     }
 
     #[test]

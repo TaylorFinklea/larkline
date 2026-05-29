@@ -2592,8 +2592,8 @@ fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
 fn copy_and_flash(text: &str, state: &mut AppState) {
     match copy_to_clipboard(text) {
         Ok(()) => {
-            let preview = if text.len() > 40 {
-                format!("{}…", &text[..40])
+            let preview = if text.chars().count() > 40 {
+                format!("{}…", text.chars().take(40).collect::<String>())
             } else {
                 text.to_string()
             };
