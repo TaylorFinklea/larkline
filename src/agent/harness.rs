@@ -11,7 +11,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::agent::audit::AuditLog;
@@ -195,9 +194,6 @@ pub struct AgentHarness {
     /// In-memory conversation history; reflected in `session` on every
     /// `prompt()`. Reconstructed from the session log on `reopen`.
     messages: Vec<Message>,
-    /// Handle to the in-flight provider task, if any. `abort()` calls
-    /// `.abort()` on this handle to cancel a running turn.
-    in_flight: Option<JoinHandle<Result<(), crate::agent::error::ProviderError>>>,
     /// Shared queues for steering + follow-up messages. See
     /// [`MessageQueues`] doc for semantics.
     queues: Arc<Mutex<MessageQueues>>,
@@ -217,9 +213,17 @@ pub struct AgentHarness {
     /// without this an agent-invoked github/atlassian plugin can't
     /// authenticate. Empty until [`with_secrets`] is called.
     secrets: Arc<std::collections::HashMap<String, String>>,
-    /// Cancellation token observed by long-running plugin code via the
-    /// `lark.is_cancelled()` host fn. Cloned into the per-execution
-    /// `CANCEL_TOKEN` task_local before each tool dispatch.
+    /// Cancellation token for the current turn. Fired by [`abort`] (or by
+    /// an external [`cancel_token`] clone) to interrupt the in-flight
+    /// provider stream and cause `prompt()` to return
+    /// [`TurnOutcome::Aborted`]. Also cloned into the per-tool-dispatch
+    /// `CANCEL_TOKEN` task_local so long-running plugin code can observe
+    /// it via the `lark.is_cancelled()` host fn. Reset to a fresh token
+    /// after any aborted `prompt()` so a prior abort can't poison the
+    /// next turn (`CancellationToken` cancellation is permanent).
+    ///
+    /// [`abort`]: AgentHarness::abort
+    /// [`cancel_token`]: AgentHarness::cancel_token
     cancel: tokio_util::sync::CancellationToken,
     /// Agent hooks consulted around tool dispatch. Default:
     /// `[DefaultApprovalHook]` — non-destructive plans auto-dispatch,
@@ -244,7 +248,6 @@ impl AgentHarness {
             provider,
             session,
             messages: Vec::new(),
-            in_flight: None,
             queues: Arc::new(Mutex::new(MessageQueues::default())),
             audit: None,
             plugin_lookup: HashMap::new(),
@@ -270,7 +273,6 @@ impl AgentHarness {
             provider,
             session,
             messages,
-            in_flight: None,
             queues: Arc::new(Mutex::new(MessageQueues::default())),
             audit: None,
             plugin_lookup: HashMap::new(),
@@ -340,9 +342,13 @@ impl AgentHarness {
         self
     }
 
-    /// Returns the `CancellationToken` this harness will inject into
-    /// tool dispatches. Caller can keep it to fire from another task
-    /// (e.g. on a Ctrl-C handler) and cancel any in-flight tool.
+    /// Returns the current turn's `CancellationToken`. Obtain a clone
+    /// *before* calling [`prompt`](Self::prompt), then fire it from
+    /// another task (e.g. a Ctrl-C / abort-key handler) to interrupt the
+    /// in-flight provider stream and any cooperating tool; `prompt()`
+    /// then returns [`TurnOutcome::Aborted`]. The harness installs a
+    /// fresh token after an aborted `prompt()`, so re-fetch the token
+    /// before each new `prompt()`.
     #[must_use]
     pub fn cancel_token(&self) -> tokio_util::sync::CancellationToken {
         self.cancel.clone()
@@ -441,6 +447,13 @@ impl AgentHarness {
     {
         self.require_phase(AgentPhase::Idle, "start a new prompt")?;
 
+        // Start each prompt with a live token. A token left cancelled by a
+        // prior abort() (or a previous aborted prompt) would otherwise make
+        // the first turn here abort immediately.
+        if self.cancel.is_cancelled() {
+            self.cancel = tokio_util::sync::CancellationToken::new();
+        }
+
         // One trace_id per top-level prompt — all child turns + provider
         // requests share it so the audit log can reconstruct the causal
         // tree for this user interaction.
@@ -460,7 +473,13 @@ impl AgentHarness {
                 },
             };
 
-            let outcome = self.run_single_turn(trace_id, user_msg, &mut on_event).await?;
+            let result = self.run_single_turn(trace_id, user_msg, &mut on_event).await;
+            // Always return to Idle once a turn ends — success, abort, OR
+            // error. Otherwise a transient provider/session failure would
+            // leave the harness stuck in `Turn` and every later prompt()
+            // would fail `require_phase(Idle)` with `Busy` forever.
+            self.phase = AgentPhase::Idle;
+            let outcome = result?;
             let was_aborted = matches!(outcome, TurnOutcome::Aborted);
             outcomes.push(outcome);
             if was_aborted {
@@ -468,6 +487,12 @@ impl AgentHarness {
                 // preserved per spec (next caller can resume).
                 break;
             }
+        }
+
+        // A fired CancellationToken stays cancelled for all clones, so
+        // replace it after an abort to avoid poisoning the next turn.
+        if self.cancel.is_cancelled() {
+            self.cancel = tokio_util::sync::CancellationToken::new();
         }
 
         Ok(outcomes)
@@ -510,6 +535,7 @@ impl AgentHarness {
         let mut turn_input_tokens: u32 = 0;
         let mut turn_output_tokens: u32 = 0;
         let mut final_stop_reason = StopReason::EndTurn;
+        let mut aborted = false;
 
         for iteration in 0..MAX_TOOL_ITERATIONS {
             let snapshot = self.config.materialize(self.messages.clone());
@@ -531,10 +557,17 @@ impl AgentHarness {
             let mut acc = TurnAccumulator::default();
             let mut provider_error_kind: Option<&'static str> = None;
 
+            // Clone the cancel token so the select arm doesn't borrow
+            // `self` (which `ask_fut` already borrows via `self.provider`).
+            let cancel = self.cancel.clone();
+
             // Scope `ask_fut` so its `&self.provider` borrow drops
             // before we hit any `self.audit.as_mut()` below — the
             // pinned Future is type-erased and the borrow checker
             // can't split disjoint-field borrows across it.
+            //
+            // The loop yields `Some(result)` for a normal provider
+            // completion and `None` when the cancel token fired (abort).
             let ask_result = {
                 let ask_fut = self.provider.ask(snapshot.request, tx);
                 tokio::pin!(ask_fut);
@@ -547,13 +580,20 @@ impl AgentHarness {
                             while let Ok(event) = rx.try_recv() {
                                 apply_event(event, on_event, &mut acc);
                             }
-                            break ask_result;
+                            break Some(ask_result);
                         }
                         maybe_event = rx.recv() => {
                             match maybe_event {
                                 Some(event) => apply_event(event, on_event, &mut acc),
-                                None => break Ok(()),
+                                None => break Some(Ok(())),
                             }
+                        }
+                        () = cancel.cancelled() => {
+                            // Abort fired. Dropping `ask_fut` (when this
+                            // block ends) cancels the in-flight provider
+                            // request; we stop streaming immediately.
+                            provider_error_kind = Some("Aborted");
+                            break None;
                         }
                     }
                 }
@@ -571,6 +611,14 @@ impl AgentHarness {
                     provider_error_kind,
                 );
             }
+            // `None` means the cancel token fired mid-stream. Stop the turn
+            // without persisting a partial assistant message (which could
+            // leave a tool_use with no matching tool_result); the shared
+            // turn-end bookkeeping below still runs.
+            let Some(ask_result) = ask_result else {
+                aborted = true;
+                break;
+            };
             ask_result?;
 
             if let Some((i, o)) = acc.usage {
@@ -624,17 +672,40 @@ impl AgentHarness {
                     }
                 }
                 BlockDecision::Block(reason) => {
-                    // Inject the rejection back so the model can react
-                    // on the next turn (or end gracefully if it can't).
-                    let rejection = format!(
-                        "Tool plan rejected by hook: {reason}. Continuing without tools."
-                    );
-                    let rejection_msg = Message::user(rejection);
-                    self.messages.push(rejection_msg);
+                    // Answer EVERY tool_use with a matching tool_result so the
+                    // assistant's tool_use blocks aren't left orphaned. The
+                    // Anthropic Messages API rejects an assistant tool_use that
+                    // isn't followed by a tool_result with HTTP 400, which would
+                    // break every later turn that replays this history. Persist
+                    // them too so a reopened session stays well-formed.
+                    let mut result_blocks = Vec::with_capacity(plan.calls.len());
+                    for call in &plan.calls {
+                        let content =
+                            format!("Tool call rejected by approval hook: {reason}");
+                        let result_id = self.session.append_tool_result(
+                            call.id.clone(),
+                            content.clone(),
+                            true,
+                        )?;
+                        entry_ids.push(result_id);
+                        result_blocks.push(ContentBlock::ToolResult {
+                            tool_use_id: call.id.clone(),
+                            content,
+                            is_error: true,
+                        });
+                    }
+                    self.messages.push(Message {
+                        role: Role::User,
+                        content: result_blocks,
+                    });
                     final_stop_reason = StopReason::Other("hook_blocked".to_string());
                     break;
                 }
             }
+        }
+
+        if aborted {
+            final_stop_reason = StopReason::Other("aborted".to_string());
         }
 
         let turn_end_id = self.session.append_turn_end(
@@ -655,7 +726,11 @@ impl AgentHarness {
             );
         }
 
-        self.phase = AgentPhase::Idle;
+        // Phase is reset to Idle by the caller (prompt()) on every exit
+        // path, so a turn that errors out can't strand the harness in Turn.
+        if aborted {
+            return Ok(TurnOutcome::Aborted);
+        }
         Ok(TurnOutcome::Completed {
             stop_reason: final_stop_reason,
             usage: Some((turn_input_tokens, turn_output_tokens)),
@@ -740,20 +815,29 @@ impl AgentHarness {
                     // (engine.rs:execute_normal) plus CANCEL_TOKEN, so
                     // agent-called plugins see secrets, can `lark.invoke()`,
                     // get recursion guarding, and observe cancellation.
-                    let result = engine::SECRETS
-                        .scope(
-                            secrets,
-                            engine::PLUGIN_LIST.scope(
-                                plugin_list,
-                                engine::INVOKE_DEPTH.scope(
-                                    0,
-                                    engine::CANCEL_TOKEN.scope(cancel, async move {
-                                        plugin.execute().await
-                                    }),
-                                ),
+                    //
+                    // Dispatch on a spawned task so a panic in the plugin
+                    // (Lua FFI, poisoned store mutex, ...) is caught by the
+                    // JoinHandle and turned into an error tool_result rather
+                    // than unwinding the whole turn — matching engine.rs's
+                    // execute_normal panic-isolation guarantee.
+                    let handle = tokio::spawn(engine::SECRETS.scope(
+                        secrets,
+                        engine::PLUGIN_LIST.scope(
+                            plugin_list,
+                            engine::INVOKE_DEPTH.scope(
+                                0,
+                                engine::CANCEL_TOKEN
+                                    .scope(cancel, async move { plugin.execute().await }),
                             ),
-                        )
-                        .await;
+                        ),
+                    ));
+                    let result = match handle.await {
+                        Ok(r) => r,
+                        Err(join_err) => Err(crate::plugin::traits::PluginError::ExecutionFailed(
+                            format!("plugin task panicked: {join_err}"),
+                        )),
+                    };
                     match result {
                         Ok(output) => (render_plugin_output(&output), false),
                         Err(e) => (format!("Plugin error: {e}"), true),
@@ -800,27 +884,29 @@ impl AgentHarness {
         Ok(blocks)
     }
 
-    /// Cancel the in-flight turn. Returns immediately; the running
-    /// `prompt()` future observes the abort on its next event-loop tick
-    /// and returns `TurnOutcome::Aborted`.
+    /// Abort the current turn and clear pending steering input.
+    ///
+    /// Fires the cancellation token, which the in-flight provider stream
+    /// observes (so `prompt()` returns [`TurnOutcome::Aborted`]) and which
+    /// cooperating tools see via `lark.is_cancelled()`. Because `abort`
+    /// takes `&mut self`, a turn actively running inside `prompt()` holds
+    /// the borrow — so to interrupt a *running* turn, fire a
+    /// [`cancel_token`](Self::cancel_token) clone from another task;
+    /// calling `abort()` directly is for clearing state between turns.
+    /// Either way the token is reset to a fresh one on the next
+    /// `prompt()`, so a fired abort never poisons a later turn.
     ///
     /// **Queue semantics (Phase 8.C):** clears the steering queue
     /// (mid-turn intent is invalidated by the abort), preserves the
     /// follow-up queue (continuation intent survives — caller can
     /// resume from the next `prompt()`).
-    ///
-    /// No-op when no turn is in flight; safe to call from any phase.
     pub fn abort(&mut self) {
-        if let Some(handle) = self.in_flight.take() {
-            handle.abort();
-        }
+        self.cancel.cancel();
         self.queues
             .lock()
             .expect("queue mutex poisoned during abort")
             .steering
             .clear();
-        // The phase transition back to Idle happens inside prompt() when
-        // its drain loop sees the channel close. Follow-up is preserved.
     }
 
     fn require_phase(
@@ -945,17 +1031,22 @@ fn entries_to_messages(entries: &[SessionEntry]) -> Vec<Message> {
                 out.push(message.clone());
             }
             SessionEntry::ToolResult {
-                call_id, content, ..
+                call_id,
+                content,
+                is_error,
+                ..
             } => {
                 // Tool results render back as user messages carrying the
                 // ToolResult content block — matches how providers want
-                // them in the next request.
+                // them in the next request. Preserve the persisted is_error
+                // flag so a failed tool doesn't replay as a success after
+                // reopen (which can change the model's next-turn behavior).
                 out.push(Message {
                     role: Role::User,
                     content: vec![crate::agent::provider::ContentBlock::ToolResult {
                         tool_use_id: call_id.clone(),
                         content: content.clone(),
-                        is_error: false,
+                        is_error: *is_error,
                     }],
                 });
             }
@@ -1001,6 +1092,50 @@ mod tests {
         }
     }
 
+    /// Provider that always fails — drives the phase-reset-on-error path.
+    #[derive(Debug)]
+    struct ErroringProvider;
+
+    #[async_trait]
+    impl Provider for ErroringProvider {
+        fn name(&self) -> &'static str {
+            "erroring"
+        }
+
+        async fn ask(
+            &self,
+            _request: AskRequest,
+            _events: mpsc::UnboundedSender<ProviderEvent>,
+        ) -> Result<(), ProviderError> {
+            Err(ProviderError::Network("boom".to_string()))
+        }
+    }
+
+    /// Provider that streams one delta then sleeps far longer than any
+    /// test — lets us fire an abort while a turn is genuinely in flight.
+    #[derive(Debug)]
+    struct SlowProvider;
+
+    #[async_trait]
+    impl Provider for SlowProvider {
+        fn name(&self) -> &'static str {
+            "slow"
+        }
+
+        async fn ask(
+            &self,
+            _request: AskRequest,
+            events: mpsc::UnboundedSender<ProviderEvent>,
+        ) -> Result<(), ProviderError> {
+            let _ = events.send(ProviderEvent::TextDelta("start".to_string()));
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let _ = events.send(ProviderEvent::Done {
+                stop_reason: StopReason::EndTurn,
+            });
+            Ok(())
+        }
+    }
+
     fn default_config() -> AgentConfig {
         AgentConfig {
             system_prompt: None,
@@ -1009,6 +1144,55 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             tools: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn provider_error_leaves_harness_idle_for_retry() {
+        let dir = tempdir().unwrap();
+        let mut h =
+            AgentHarness::create_in(default_config(), Box::new(ErroringProvider), dir.path())
+                .unwrap();
+
+        let err = h.prompt(Message::user("hi"), |_| {}).await.unwrap_err();
+        assert!(matches!(err, AgentError::Provider(_)));
+        // Must return to Idle — otherwise the harness is bricked in Turn and
+        // every later prompt() returns Busy forever.
+        assert_eq!(h.phase(), AgentPhase::Idle);
+        // A second prompt fails with the provider error again, NOT Busy.
+        let err2 = h.prompt(Message::user("again"), |_| {}).await.unwrap_err();
+        assert!(
+            matches!(err2, AgentError::Provider(_)),
+            "second prompt must not be Busy, got {err2:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn abort_interrupts_in_flight_turn() {
+        let dir = tempdir().unwrap();
+        let mut h =
+            AgentHarness::create_in(default_config(), Box::new(SlowProvider), dir.path()).unwrap();
+
+        // Fire the abort from another task while the turn is awaiting the
+        // (30s) provider — the only structurally-possible mid-turn abort,
+        // since prompt() holds &mut self.
+        let cancel = h.cancel_token();
+        let aborter = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            cancel.cancel();
+        });
+
+        let outcomes = h.prompt(Message::user("hi"), |_| {}).await.unwrap();
+        aborter.await.unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(
+            matches!(outcomes[0], TurnOutcome::Aborted),
+            "expected Aborted, got {:?}",
+            outcomes[0]
+        );
+        assert_eq!(h.phase(), AgentPhase::Idle);
+        // Token was reset, so a subsequent prompt isn't pre-aborted.
+        assert!(!h.cancel_token().is_cancelled());
     }
 
     #[test]
@@ -1446,11 +1630,40 @@ mod tests {
             }
             other => panic!("expected Completed, got {other:?}"),
         }
-        // The hook-rejection message is appended as a user message.
+        // The hook rejection is appended as a user message whose content is
+        // a ToolResult answering the blocked tool_use (is_error=true) — NOT a
+        // free-text message, which would orphan the tool_use and 400 on the
+        // next turn. The assistant tool_use and this tool_result must pair up.
         let last = h.messages.last().unwrap();
         assert_eq!(last.role, Role::User);
-        assert!(matches!(&last.content[0],
-            ContentBlock::Text(t) if t.contains("rejected by hook")));
+        match &last.content[0] {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "call_1");
+                assert!(is_error);
+                assert!(content.contains("rejected by approval hook"));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+        // Every tool_use in history is answered by a matching tool_result.
+        let tool_use_ids: Vec<&str> = h
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        for id in tool_use_ids {
+            let answered = h.messages.iter().flat_map(|m| &m.content).any(|b| {
+                matches!(b, ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id)
+            });
+            assert!(answered, "tool_use {id} has no matching tool_result");
+        }
     }
 
     /// Plugin that reads the `SECRETS` task-local exactly the way
