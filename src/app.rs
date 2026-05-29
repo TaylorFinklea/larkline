@@ -242,6 +242,16 @@ pub struct AppState {
     pub widget_selected: usize,
     /// Plugin indices of active widget commands (built at startup, refreshed on R).
     pub widget_indices: Vec<usize>,
+    /// Last time each glance-strip status plugin was refreshed (by `plugin_index`).
+    pub status_last_refresh: std::collections::HashMap<usize, std::time::Instant>,
+    /// Whether the glance strip (compact status chips) is visible.
+    pub status_visible: bool,
+    /// Whether focus is on the glance strip (vs the command list / widgets).
+    pub status_focused: bool,
+    /// Index of the currently focused status chip.
+    pub status_selected: usize,
+    /// Plugin indices of active glance-strip status commands.
+    pub status_indices: Vec<usize>,
     /// Theme preset picker overlay (None = closed).
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
@@ -373,17 +383,28 @@ pub struct PowerMenuState {
     pub categories: Vec<PowerMenuCategory>,
 }
 
-/// A widget-eligible command for the widget picker overlay.
+/// Which dashboard surface a picker entry manages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerItemKind {
+    /// A widget card (top dashboard row).
+    Widget,
+    /// A glance-strip status chip.
+    Status,
+}
+
+/// A widget- or status-eligible command for the dashboard picker overlay.
 #[derive(Debug, Clone)]
 pub struct WidgetPickerEntry {
     /// Display name: "Plugin: Command" or just "Command".
     pub label: String,
     /// Icon from the manifest.
     pub icon: String,
-    /// Key used in `disabled_widgets` — `"GroupKey:CommandName"`.
+    /// Key used in `disabled_widgets` / `disabled_status` — `"GroupKey:CommandName"`.
     pub key: String,
-    /// Whether this widget is currently enabled (not in the disabled list).
+    /// Whether this item is currently enabled (not in the disabled list).
     pub enabled: bool,
+    /// Whether this entry manages a widget card or a status chip.
+    pub kind: PickerItemKind,
 }
 
 /// Overlay state for the widget picker.
@@ -615,6 +636,7 @@ impl App {
         };
         app.rebuild_unified_list();
         crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
+        crate::widgets::rebuild_status_indices(&mut app.state, &app.pm_config);
 
         // Apply default_plugin pre-selection: find the first Command row with the named plugin.
         if let Some(ref name) = config.general.default_plugin {
@@ -746,6 +768,7 @@ impl App {
                                     .map(|m| m.categories.as_slice()),
                                 self.state.pending_g,
                                 self.state.widget_focused,
+                                self.state.status_focused,
                             ) {
                                 if !matches!(action, Action::PendingG) {
                                     self.state.pending_g = false;
@@ -815,6 +838,40 @@ impl App {
                         self.engine.execute(*pidx);
                     }
                     self.rebuild_unified_list();
+                }
+            }
+
+            // Auto-refresh glance-strip status plugins on their interval. Not
+            // gated to Unified mode — the chip should stay fresh wherever the
+            // strip is shown (e.g. a caffeinate countdown while browsing).
+            if self.state.status_visible && !self.state.status_indices.is_empty() {
+                let now = std::time::Instant::now();
+                let due: Vec<usize> = self
+                    .state
+                    .status_indices
+                    .iter()
+                    .copied()
+                    .filter(|pidx| {
+                        let meta = &self.state.plugins[*pidx];
+                        let interval = if meta.status_refresh_secs > 0 {
+                            meta.status_refresh_secs
+                        } else {
+                            30
+                        };
+                        now.duration_since(
+                            self.state
+                                .status_last_refresh
+                                .get(pidx)
+                                .copied()
+                                .unwrap_or(now),
+                        )
+                        .as_secs()
+                            >= interval
+                    })
+                    .collect();
+                for pidx in &due {
+                    self.state.status_last_refresh.insert(*pidx, now);
+                    self.engine.execute(*pidx);
                 }
             }
 
@@ -1331,6 +1388,45 @@ impl App {
                 }
             }
 
+            Action::StatusFocus => {
+                if self.state.status_visible && !self.state.status_indices.is_empty() {
+                    self.state.status_focused = true;
+                    self.state.widget_focused = false;
+                    self.state.vim_mode = VimMode::Normal;
+                    if self.state.status_selected >= self.state.status_indices.len() {
+                        self.state.status_selected = 0;
+                    }
+                }
+            }
+            Action::StatusMoveLeft => {
+                if self.state.status_focused {
+                    if self.state.status_selected == 0 {
+                        // Step out of the strip back to the list.
+                        self.state.status_focused = false;
+                    } else {
+                        self.state.status_selected -= 1;
+                    }
+                }
+            }
+            Action::StatusMoveRight => {
+                if self.state.status_focused {
+                    let max = self.state.status_indices.len().saturating_sub(1);
+                    if self.state.status_selected < max {
+                        self.state.status_selected += 1;
+                    }
+                }
+            }
+            Action::StatusItemOpen => {
+                if self.state.status_focused {
+                    if let Some(&plugin_index) =
+                        self.state.status_indices.get(self.state.status_selected)
+                    {
+                        self.state.status_focused = false;
+                        self.open_plugin_in_view_output(plugin_index);
+                    }
+                }
+            }
+
             Action::Select => {
                 // Widget focused: l/Right → next card.
                 if self.state.widget_focused {
@@ -1750,6 +1846,8 @@ impl App {
 
             Action::EnterNormalMode => {
                 self.state.command_input.clear();
+                // Esc also steps out of the glance strip.
+                self.state.status_focused = false;
                 if self.state.vim_mode == VimMode::Normal
                     && self.state.mode == Mode::Unified
                     && !self.state.query.is_empty()
@@ -2694,6 +2792,8 @@ fn stub_plugins() -> Vec<Arc<dyn Plugin>> {
                 settings_spec: vec![],
                 widget: false,
                 widget_refresh_secs: 0,
+                status: false,
+                status_refresh_secs: 0,
                 mini_app: false,
                 agent_callable: false,
                 destructive: false,

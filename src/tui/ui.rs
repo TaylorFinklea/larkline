@@ -41,34 +41,36 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
         state.widgets_visible && !state.widget_indices.is_empty() && profile.allows_widget_row();
     let widget_height = if has_widgets { 6 } else { 0 };
 
+    // Compact glance strip (1 line) between content and the status bar.
+    let has_glance =
+        state.status_visible && !state.status_indices.is_empty() && profile.allows_glance_strip();
+    let glance_height = u16::from(has_glance);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(if has_widgets {
-            vec![
-                Constraint::Length(3),             // Search bar
-                Constraint::Length(widget_height), // Widget dashboard row
-                Constraint::Min(0),                // Content area
-                Constraint::Length(1),             // Status bar
-            ]
-        } else {
-            vec![
-                Constraint::Length(3), // Search bar
-                Constraint::Length(0), // No widgets
-                Constraint::Min(0),    // Content area
-                Constraint::Length(1), // Status bar
-            ]
-        })
+        .constraints(vec![
+            Constraint::Length(3),             // Search bar
+            Constraint::Length(widget_height), // Widget dashboard row (0 or 6)
+            Constraint::Min(0),                // Content area
+            Constraint::Length(glance_height), // Glance strip (0 or 1)
+            Constraint::Length(1),             // Status bar
+        ])
         .split(area);
 
     render_search_bar(frame, state, theme, chunks[0]);
-    render_status_bar(frame, state, theme, chunks[3]);
+    render_status_bar(frame, state, theme, chunks[4]);
 
     // Render widget dashboard row.
     if has_widgets {
         render_widget_row(frame, state, theme, chunks[1]);
     }
 
-    // Content area is now chunks[2] instead of chunks[1].
+    // Render the compact glance strip.
+    if has_glance {
+        render_glance_strip(frame, state, theme, chunks[3]);
+    }
+
+    // Content area is chunks[2].
     let content_area = chunks[2];
 
     // Right pane (preview in Unified, output in ViewOutput) needs Medium+
@@ -1380,6 +1382,85 @@ fn render_plugin_manager(
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
+/// Truncate `s` to at most `max` characters (char-boundary-safe), appending
+/// `…` when it overflows.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        let take = max.saturating_sub(1);
+        format!("{}…", s.chars().take(take).collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
+/// Render the compact glance strip: one line of `icon text` chips read from
+/// each status plugin's cached output (`output.status`, or a truncated
+/// `title`). The focused chip is highlighted; loading/error states render as
+/// dim placeholders. Chips beyond the available width collapse to a `+N`.
+fn render_glance_strip(
+    frame: &mut Frame,
+    state: &AppState,
+    theme: &crate::config::Theme,
+    area: ratatui::layout::Rect,
+) {
+    use crate::app::CachedResult;
+    use ratatui::text::Span;
+    if state.status_indices.is_empty() || area.width < 4 {
+        return;
+    }
+
+    let sep = "  •  ";
+    let avail = area.width as usize;
+    let mut spans: Vec<Span> = Vec::new();
+    let mut used = 0usize;
+
+    // `slot` doubles as the rendered-so-far count: there's no skip before the
+    // span is pushed, only an early `break`, so `slot > 0` == "a chip already
+    // rendered" (used for the separator + overflow guard).
+    for (slot, &pidx) in state.status_indices.iter().enumerate() {
+        let meta = &state.plugins[pidx];
+        let text = match state.result_cache.get(&pidx) {
+            Some(CachedResult::Ready(o) | CachedResult::Revalidating(o)) => o
+                .status
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| truncate_chars(&o.title, 24)),
+            Some(CachedResult::Loading(_)) | None => "…".to_string(),
+            Some(CachedResult::Error(_)) => "⚠".to_string(),
+        };
+        let chip = truncate_chars(&format!("{} {}", meta.icon, text), 28);
+        let chip_w = chip.chars().count();
+        let sep_w = if slot > 0 { sep.chars().count() } else { 0 };
+
+        // Stop before overflow; show a "+N" tail for the remainder.
+        if slot > 0 && used + sep_w + chip_w > avail.saturating_sub(4) {
+            let remaining = state.status_indices.len() - slot;
+            spans.push(Span::styled(
+                format!("  +{remaining}"),
+                Style::default().fg(theme.text_dimmed),
+            ));
+            break;
+        }
+
+        if slot > 0 {
+            spans.push(Span::styled(sep, Style::default().fg(theme.text_dimmed)));
+            used += sep_w;
+        }
+        let style = if state.status_focused && slot == state.status_selected {
+            Style::default()
+                .fg(theme.highlight_fg)
+                .bg(theme.highlight_bg)
+        } else {
+            Style::default().fg(theme.text_dimmed)
+        };
+        spans.push(Span::styled(chip, style));
+        used += chip_w;
+    }
+
+    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme.status_bar_bg));
+    frame.render_widget(bar, area);
+}
+
 #[allow(clippy::too_many_lines)]
 fn render_status_bar(
     frame: &mut Frame,
@@ -1506,7 +1587,12 @@ fn render_status_bar(
                         // Ordered by importance -- navigation and search
                         // come first; widgets / quit fall off on phones.
                         let mut hints: Vec<(&str, &str)> = Vec::new();
-                        if state.widget_focused {
+                        if state.status_focused {
+                            hints.push(("h/l", "move"));
+                            hints.push(("⏎", "open"));
+                            hints.push(("A", "add/remove"));
+                            hints.push(("Esc", "back to list"));
+                        } else if state.widget_focused {
                             hints.push(("h/l", "reorder"));
                             hints.push(("⏎", "open"));
                             hints.push(("A", "add/remove"));
@@ -1526,6 +1612,9 @@ fn render_status_bar(
                                 } else {
                                     hints.push(("W", "show widgets"));
                                 }
+                            }
+                            if !state.status_indices.is_empty() {
+                                hints.push(("J", "status"));
                             }
                         }
                         let profile = state.layout_profile_override.unwrap_or_else(|| {
@@ -1805,9 +1894,9 @@ fn render_widget_picker(
     frame.render_widget(Clear, popup_area);
 
     let title = if has_query {
-        format!(" Widgets [{}/{}] ", visible.len(), picker.entries.len())
+        format!(" Dashboard [{}/{}] ", visible.len(), picker.entries.len())
     } else {
-        " Widgets ".to_string()
+        " Dashboard  (W widget · S status) ".to_string()
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1823,7 +1912,11 @@ fn render_widget_picker(
         .enumerate()
         .map(|(vi, (_orig_idx, entry))| {
             let check = if entry.enabled { "[x]" } else { "[ ]" };
-            let text = format!(" {check} {} {}", entry.icon, entry.label);
+            let tag = match entry.kind {
+                crate::app::PickerItemKind::Widget => "W",
+                crate::app::PickerItemKind::Status => "S",
+            };
+            let text = format!(" {check} {tag}  {} {}", entry.icon, entry.label);
             let style = if vi == picker.selected {
                 Style::default()
                     .fg(theme.highlight_fg)

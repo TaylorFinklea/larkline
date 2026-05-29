@@ -60,6 +60,30 @@ pub fn rebuild_widget_indices(state: &mut AppState, pm_config: &PluginManagerCon
     }
 }
 
+/// Rebuild the list of glance-strip status plugin indices. Mirrors
+/// [`rebuild_widget_indices`] but for the compact status strip (uses
+/// `disabled_status`, discovery order — no separate ordering in v1.0).
+pub fn rebuild_status_indices(state: &mut AppState, pm_config: &PluginManagerConfig) {
+    let indices: Vec<usize> = state
+        .plugins
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            m.status && {
+                let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
+                !pm_config.is_status_disabled(gk, &m.name)
+            }
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    state.status_indices = indices;
+    state.status_visible = !state.status_indices.is_empty();
+    if state.status_selected >= state.status_indices.len() {
+        state.status_selected = 0;
+    }
+}
+
 /// Update `preview_plugin_index` to match the currently selected unified row.
 pub fn sync_preview_index(state: &mut AppState) {
     state.preview_plugin_index = state

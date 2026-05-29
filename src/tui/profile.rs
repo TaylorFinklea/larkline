@@ -67,6 +67,14 @@ impl LayoutProfile {
         matches!(self, Self::Medium | Self::Wide)
     }
 
+    /// Whether the compact glance strip (1-line status chips) may render.
+    /// It's only one line, so it shows on Narrow and up; Phone hides it to
+    /// keep every row for content.
+    #[must_use]
+    pub fn allows_glance_strip(self) -> bool {
+        matches!(self, Self::Narrow | Self::Medium | Self::Wide)
+    }
+
     /// Whether the secondary right-hand pane (preview in `Unified`, output
     /// detail in `ViewOutput`) can render side-by-side with the list.
     /// Below this threshold the list takes the full width and the right

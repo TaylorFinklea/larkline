@@ -8,6 +8,7 @@ lark.register({
         if not raw or raw == "" then
             return {
                 title = "Caffeinate",
+                status = "n/a",
                 items = { {
                     label  = "spotlight-caffeinate-cli not found",
                     detail = "Install Spotlight Caffeinate",
@@ -21,9 +22,11 @@ lark.register({
         if ok and type(status) == "table" then
             local items = {}
             local is_active = status.active or status.is_active or false
+            local chip
 
             if is_active then
                 local remaining = status.remaining_minutes or status.remaining or "?"
+                chip = tostring(remaining) .. "m"
                 items[#items + 1] = {
                     label  = "Active — " .. tostring(remaining) .. " min remaining",
                     detail = "Mac is staying awake",
@@ -37,13 +40,14 @@ lark.register({
                     },
                 }
             else
+                chip = "off"
                 items[#items + 1] = {
                     label  = "Inactive",
                     detail = "Mac will sleep normally — use Start to activate",
                     icon   = "💤",
                 }
             end
-            return { title = "Caffeinate", items = items }
+            return { title = "Caffeinate", status = chip, items = items }
         end
 
         -- Fallback: parse key-value text format (e.g. "State: idle\nRemaining: 0s\n...").
@@ -91,6 +95,7 @@ lark.register({
             }
         end
 
-        return { title = "Caffeinate — " .. state_value, items = items }
+        local chip = state_value == "idle" and "off" or state_value
+        return { title = "Caffeinate — " .. state_value, status = chip, items = items }
     end,
 })

@@ -1178,6 +1178,9 @@ pub struct PluginManagerConfig {
     /// Commands not in this list appear after those that are, in default order.
     #[serde(default)]
     pub widget_order: Vec<String>,
+    /// Glance-strip status chips hidden from the strip as `"GroupKey:CommandName"`.
+    #[serde(default)]
+    pub disabled_status: Vec<String>,
 }
 
 /// Path to the plugin manager state file.
@@ -1278,6 +1281,25 @@ impl PluginManagerConfig {
             true // now visible
         } else {
             self.disabled_widgets.push(key);
+            false // now hidden
+        }
+    }
+
+    /// Check if a glance-strip status chip is disabled.
+    #[must_use]
+    pub fn is_status_disabled(&self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        self.disabled_status.iter().any(|k| k == &key)
+    }
+
+    /// Toggle a status chip's visibility. Returns the new visible state.
+    pub fn toggle_status(&mut self, group_key: &str, command_name: &str) -> bool {
+        let key = format!("{group_key}:{command_name}");
+        if let Some(pos) = self.disabled_status.iter().position(|k| k == &key) {
+            self.disabled_status.remove(pos);
+            true // now visible
+        } else {
+            self.disabled_status.push(key);
             false // now hidden
         }
     }

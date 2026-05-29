@@ -31,6 +31,7 @@ pub fn handle_key(
     power_menu: Option<&[PowerMenuCategory]>,
     pending_g: bool,
     widget_focused: bool,
+    status_focused: bool,
 ) -> Option<Action> {
     // Confirmation dialog intercepts all keys.
     if has_pending_confirmation {
@@ -86,7 +87,9 @@ pub fn handle_key(
         VimMode::Command => handle_command(event),
         VimMode::Insert => handle_insert(event, keybindings),
         VimMode::Normal => match mode {
-            Mode::Unified => handle_browse_normal(event, keybindings, widget_focused),
+            Mode::Unified => {
+                handle_browse_normal(event, keybindings, widget_focused, status_focused)
+            }
             Mode::ViewOutput => handle_view_output(event, keybindings),
             Mode::MiniApp => handle_mini_app(event, keybindings),
             Mode::PluginManager => handle_plugin_manager(event),
@@ -109,7 +112,19 @@ fn handle_browse_normal(
     event: KeyEvent,
     keybindings: &ResolvedKeybindings,
     widget_focused: bool,
+    status_focused: bool,
 ) -> Option<Action> {
+    // Glance-strip focus captures left/right/Enter/Esc before anything else.
+    if status_focused && event.modifiers == KeyModifiers::NONE {
+        match event.code {
+            KeyCode::Enter => return Some(Action::StatusItemOpen),
+            KeyCode::Char('h') | KeyCode::Left => return Some(Action::StatusMoveLeft),
+            KeyCode::Char('l') | KeyCode::Right => return Some(Action::StatusMoveRight),
+            KeyCode::Esc => return Some(Action::EnterNormalMode),
+            _ => {}
+        }
+    }
+
     // Check configurable browse map (j/k/q/R/Enter).
     if let Some(action) = keybindings.browse_map.get(&event) {
         return Some(match action {
@@ -169,6 +184,8 @@ fn handle_browse_normal(
         // Widget management (Shift keys).
         KeyCode::Char('W') => Some(Action::WidgetToggleVisibility),
         KeyCode::Char('K') => Some(Action::WidgetFocusUp),
+        // Focus the glance strip (compact status chips at the bottom).
+        KeyCode::Char('J') => Some(Action::StatusFocus),
         KeyCode::Char('H') => Some(Action::WidgetMoveLeft),
         KeyCode::Char('L') => Some(Action::WidgetMoveRight),
         KeyCode::Char('D') => Some(Action::WidgetDisable),

@@ -13,6 +13,9 @@ description = "Current caffeinate status"
 entry = "status.lua"
 timeout_seconds = 5
 prefetch = true
+# Show a compact chip in the glance strip (e.g. "☕ 23m").
+status = true
+status_refresh_secs = 30
 
 [[commands]]
 name = "Start"

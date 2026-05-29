@@ -62,6 +62,13 @@ pub struct PluginMetadata {
     pub widget: bool,
     /// Widget auto-refresh interval in seconds (0 = no auto-refresh, default 60).
     pub widget_refresh_secs: u64,
+    /// Show a compact one-line status chip in the glance strip — lighter than
+    /// a full widget card. The plugin sets [`PluginOutput::status`] for the
+    /// chip text (falls back to a truncated `title`).
+    pub status: bool,
+    /// Glance-strip auto-refresh interval in seconds. 0 = fall back to
+    /// `widget_refresh_secs`, then the 30s default.
+    pub status_refresh_secs: u64,
     /// Whether this plugin supports mini app mode (full-screen split panes).
     pub mini_app: bool,
     /// Whether this command (or every command in a multi-command plugin)
@@ -111,6 +118,11 @@ pub struct PluginOutput {
     /// instead of a single output view.
     #[serde(default)]
     pub layout: Option<MiniAppLayout>,
+    /// Compact status string for the glance strip (e.g. `"23m"`). When set on
+    /// a `status`-enabled plugin it renders as `{icon} {status}`; when `None`
+    /// the strip falls back to a truncated `title`.
+    #[serde(default)]
+    pub status: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +663,8 @@ mod tests {
             settings_spec: vec![],
             widget: false,
             widget_refresh_secs: 0,
+            status: false,
+            status_refresh_secs: 0,
             mini_app: false,
             agent_callable: false,
             destructive: false,

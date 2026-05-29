@@ -1529,6 +1529,8 @@ mod tests {
             settings_spec: vec![],
             widget: false,
             widget_refresh_secs: 0,
+            status: false,
+            status_refresh_secs: 0,
             mini_app: false,
             agent_callable: true,
             destructive,

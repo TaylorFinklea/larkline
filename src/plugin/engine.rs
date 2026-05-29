@@ -164,7 +164,7 @@ impl PluginEngine {
         }
         for i in 0..self.plugins.len() {
             let meta = self.plugins[i].metadata();
-            if meta.prefetch || meta.widget {
+            if meta.prefetch || meta.widget || meta.status {
                 self.execute_with_source(i, ExecutionSource::Prefetch);
             }
         }
@@ -472,6 +472,8 @@ mod tests {
             settings_spec: vec![],
             widget: false,
             widget_refresh_secs: 0,
+            status: false,
+            status_refresh_secs: 0,
             mini_app: false,
             agent_callable: false,
             destructive: false,

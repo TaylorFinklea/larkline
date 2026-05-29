@@ -97,6 +97,10 @@ struct ManifestPlugin {
     widget: Option<bool>,
     /// Widget auto-refresh interval in seconds.
     widget_refresh_secs: Option<u64>,
+    /// Show a compact one-line status chip in the glance strip.
+    status: Option<bool>,
+    /// Glance-strip refresh interval; falls back to `widget_refresh_secs`.
+    status_refresh_secs: Option<u64>,
     /// Whether this plugin supports mini app mode (full-screen split panes).
     mini_app: Option<bool>,
     /// Whether this plugin (and every command in multi-command form) is
@@ -127,6 +131,10 @@ struct ManifestCommand {
     cache: Option<bool>,
     widget: Option<bool>,
     widget_refresh_secs: Option<u64>,
+    /// Per-command override for `status`; falls back to plugin-level.
+    status: Option<bool>,
+    /// Per-command override for `status_refresh_secs`; falls back to plugin-level.
+    status_refresh_secs: Option<u64>,
     /// Whether this command supports mini app mode.
     mini_app: Option<bool>,
     /// Per-command override for `agent_callable`; falls back to plugin-level.
@@ -239,6 +247,11 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                     .collect(),
                 widget: p.widget.unwrap_or(false),
                 widget_refresh_secs: p.widget_refresh_secs.unwrap_or(60),
+                status: p.status.unwrap_or(false),
+                status_refresh_secs: p
+                    .status_refresh_secs
+                    .or(p.widget_refresh_secs)
+                    .unwrap_or(30),
                 mini_app: p.mini_app.unwrap_or(false),
                 agent_callable: p.agent_callable.unwrap_or(false),
                 destructive: p.destructive.unwrap_or(false),
@@ -298,6 +311,13 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                         widget_refresh_secs: cmd
                             .widget_refresh_secs
                             .unwrap_or(p.widget_refresh_secs.unwrap_or(60)),
+                        status: cmd.status.unwrap_or(p.status.unwrap_or(false)),
+                        status_refresh_secs: cmd
+                            .status_refresh_secs
+                            .or(p.status_refresh_secs)
+                            .or(cmd.widget_refresh_secs)
+                            .or(p.widget_refresh_secs)
+                            .unwrap_or(30),
                         mini_app: cmd.mini_app.unwrap_or(p.mini_app.unwrap_or(false)),
                         agent_callable: cmd.agent_callable.unwrap_or(plugin_default_agent_callable),
                         destructive: cmd.destructive.unwrap_or(plugin_default_destructive),

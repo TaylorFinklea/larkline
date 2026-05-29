@@ -8,6 +8,7 @@ use crate::app::{App, VimMode, WidgetPickerEntry, WidgetPickerState};
 pub fn widget_focus_up(app: &mut App) {
     if app.state.widgets_visible && !app.state.widget_indices.is_empty() {
         app.state.widget_focused = true;
+        app.state.status_focused = false;
         app.state.vim_mode = VimMode::Normal;
     }
 }
@@ -73,32 +74,37 @@ pub fn widget_toggle_visibility(app: &mut App) {
 }
 
 pub fn widget_picker_open(app: &mut App) {
-    let entries: Vec<WidgetPickerEntry> = app
-        .state
-        .plugins
-        .iter()
-        .filter(|m| m.widget)
-        .map(|m| {
-            let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
-            let key = format!("{gk}:{}", m.name);
-            let label = if let Some(ref pg) = m.plugin_group {
-                format!("{pg}: {}", m.name)
-            } else {
-                m.name.clone()
-            };
-            let enabled = !app.pm_config.is_widget_disabled(gk, &m.name);
-            WidgetPickerEntry {
+    let mut entries: Vec<WidgetPickerEntry> = Vec::new();
+    for m in &app.state.plugins {
+        let gk = m.plugin_group.as_deref().unwrap_or(&m.name);
+        let key = format!("{gk}:{}", m.name);
+        let label = m
+            .plugin_group
+            .as_ref()
+            .map_or_else(|| m.name.clone(), |pg| format!("{pg}: {}", m.name));
+        if m.widget {
+            entries.push(WidgetPickerEntry {
+                label: label.clone(),
+                icon: m.icon.clone(),
+                key: key.clone(),
+                enabled: !app.pm_config.is_widget_disabled(gk, &m.name),
+                kind: crate::app::PickerItemKind::Widget,
+            });
+        }
+        if m.status {
+            entries.push(WidgetPickerEntry {
                 label,
                 icon: m.icon.clone(),
                 key,
-                enabled,
-            }
-        })
-        .collect();
+                enabled: !app.pm_config.is_status_disabled(gk, &m.name),
+                kind: crate::app::PickerItemKind::Status,
+            });
+        }
+    }
 
     if entries.is_empty() {
         app.state.status_message = Some((
-            "No widget-eligible plugins found".to_string(),
+            "No widget- or status-eligible plugins found".to_string(),
             std::time::Instant::now(),
         ));
     } else {
@@ -145,13 +151,25 @@ pub fn widget_picker_toggle(app: &mut App) {
         };
         if let Some(entry) = picker.entries.get_mut(actual_idx) {
             if let Some((gk, cmd)) = entry.key.split_once(':') {
-                app.pm_config.toggle_widget(gk, cmd);
-                entry.enabled = !app.pm_config.is_widget_disabled(gk, cmd);
-                if let Err(e) = crate::config::save_plugin_manager_config(&app.pm_config) {
-                    tracing::warn!(error = %e, "failed to save widget config");
+                match entry.kind {
+                    crate::app::PickerItemKind::Widget => {
+                        app.pm_config.toggle_widget(gk, cmd);
+                        entry.enabled = !app.pm_config.is_widget_disabled(gk, cmd);
+                        if let Err(e) = crate::config::save_plugin_manager_config(&app.pm_config) {
+                            tracing::warn!(error = %e, "failed to save widget config");
+                        }
+                        crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
+                        app.state.widgets_visible = !app.state.widget_indices.is_empty();
+                    }
+                    crate::app::PickerItemKind::Status => {
+                        app.pm_config.toggle_status(gk, cmd);
+                        entry.enabled = !app.pm_config.is_status_disabled(gk, cmd);
+                        if let Err(e) = crate::config::save_plugin_manager_config(&app.pm_config) {
+                            tracing::warn!(error = %e, "failed to save status config");
+                        }
+                        crate::widgets::rebuild_status_indices(&mut app.state, &app.pm_config);
+                    }
                 }
-                crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
-                app.state.widgets_visible = !app.state.widget_indices.is_empty();
             }
         }
     }

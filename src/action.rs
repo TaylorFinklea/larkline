@@ -168,6 +168,14 @@ pub enum Action {
     WidgetPickerBackspace,
     /// Open the focused widget card's full output (Enter on widget).
     WidgetCardOpen,
+    /// Move focus to the glance strip (compact status chips).
+    StatusFocus,
+    /// Move the focused glance chip left (previous chip).
+    StatusMoveLeft,
+    /// Move the focused glance chip right (next chip).
+    StatusMoveRight,
+    /// Open the focused glance chip's full plugin output (Enter on chip).
+    StatusItemOpen,
     /// Run the system upgrade command shown in the update hint.
     RunUpgrade,
     /// Move focus to the next pane in mini app mode.
