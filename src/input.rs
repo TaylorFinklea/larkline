@@ -270,7 +270,20 @@ fn handle_power_menu(event: KeyEvent, categories: &[PowerMenuCategory]) -> Optio
             }
             None
         }
-        KeyCode::Enter => Some(Action::Execute),
+        KeyCode::Enter => {
+            // Enter arrives as KeyCode::Enter, not Char('\n'), so an item
+            // registered under the '\n' key (e.g. PluginManager's
+            // Expand/collapse) would be unreachable. Resolve it here before
+            // falling back to the generic Execute action.
+            for cat in categories {
+                for item in &cat.items {
+                    if item.key == '\n' {
+                        return Some(item.action.clone());
+                    }
+                }
+            }
+            Some(Action::Execute)
+        }
         _ => None,
     }
 }

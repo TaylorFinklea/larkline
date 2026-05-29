@@ -1100,6 +1100,10 @@ impl App {
                                 crate::app_output::output_mode_for(&output);
                             self.state.markdown_cache = None;
                             self.state.plugin_output = Some(output);
+                            // Reset any active output-search filter: its indices
+                            // point into the OLD items list, so leaving them would
+                            // hide/misselect rows in the replaced output.
+                            crate::app_output::reset_output_search(&mut self.state);
                             self.state.status_message =
                                 Some(("Action completed".to_string(), std::time::Instant::now()));
                         }
@@ -1168,7 +1172,16 @@ impl App {
                 } else if self.state.mode == Mode::MiniApp {
                     if let Some(ref mut mini) = self.state.mini_app {
                         if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
-                            if pane.selected > 0 {
+                            // Markdown/raw-text panes scroll the per-pane offset
+                            // the renderer actually reads; list panes move the
+                            // selection. Keyed on the PANE's mode, not the global
+                            // output_mode (never set in MiniApp).
+                            if matches!(
+                                pane.output_mode,
+                                OutputMode::Markdown | OutputMode::RawText
+                            ) {
+                                pane.scroll_offset = pane.scroll_offset.saturating_sub(1);
+                            } else if pane.selected > 0 {
                                 pane.selected -= 1;
                             }
                         }
@@ -1250,9 +1263,16 @@ impl App {
                 } else if self.state.mode == Mode::MiniApp {
                     if let Some(ref mut mini) = self.state.mini_app {
                         if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
-                            let max = pane.content.items.len().saturating_sub(1);
-                            if pane.selected < max {
-                                pane.selected += 1;
+                            if matches!(
+                                pane.output_mode,
+                                OutputMode::Markdown | OutputMode::RawText
+                            ) {
+                                pane.scroll_offset += 1;
+                            } else {
+                                let max = pane.content.items.len().saturating_sub(1);
+                                if pane.selected < max {
+                                    pane.selected += 1;
+                                }
                             }
                         }
                     }
@@ -1841,7 +1861,7 @@ impl App {
                         crate::widgets::sync_preview_index(&mut self.state);
                     }
                 }
-                Mode::ViewOutput | Mode::MiniApp => {
+                Mode::ViewOutput => {
                     if matches!(
                         self.state.output_mode,
                         OutputMode::Markdown | OutputMode::RawText
@@ -1849,6 +1869,20 @@ impl App {
                         self.state.scroll_offset = 0;
                     } else {
                         self.state.output_selected = 0;
+                    }
+                }
+                Mode::MiniApp => {
+                    if let Some(ref mut mini) = self.state.mini_app {
+                        if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
+                            if matches!(
+                                pane.output_mode,
+                                OutputMode::Markdown | OutputMode::RawText
+                            ) {
+                                pane.scroll_offset = 0;
+                            } else {
+                                pane.selected = 0;
+                            }
+                        }
                     }
                 }
             },
@@ -1874,7 +1908,7 @@ impl App {
                             crate::widgets::sync_preview_index(&mut self.state);
                         }
                     }
-                    Mode::ViewOutput | Mode::MiniApp => {
+                    Mode::ViewOutput => {
                         if matches!(
                             self.state.output_mode,
                             OutputMode::Markdown | OutputMode::RawText
@@ -1885,6 +1919,21 @@ impl App {
                             let max = crate::app_output::visible_output_count(&self.state)
                                 .saturating_sub(1);
                             self.state.output_selected = max;
+                        }
+                    }
+                    Mode::MiniApp => {
+                        if let Some(ref mut mini) = self.state.mini_app {
+                            if let Some(pane) = mini.panes.get_mut(&mini.focused_pane) {
+                                if matches!(
+                                    pane.output_mode,
+                                    OutputMode::Markdown | OutputMode::RawText
+                                ) {
+                                    pane.scroll_offset = usize::MAX / 2;
+                                } else {
+                                    pane.selected =
+                                        pane.content.items.len().saturating_sub(1);
+                                }
+                            }
                         }
                     }
                 }

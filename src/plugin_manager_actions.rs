@@ -7,6 +7,10 @@ pub fn open(app: &mut App) {
     app.state.power_menu = None;
     app.state.mode = Mode::PluginManager;
     app.state.vim_mode = VimMode::Normal;
+    // widget_focused is a Unified-mode concept. If a widget card was focused
+    // when the manager was opened, leaving the flag set makes the MoveUp/Down
+    // guards swallow j/k navigation in the manager.
+    app.state.widget_focused = false;
     app.state.plugin_manager = Some(crate::plugin_manager_state::build(
         &app.plugin_dirs,
         &app.state.plugins,
