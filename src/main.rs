@@ -719,10 +719,10 @@ fn find_plugin<'a>(
     plugins: &'a [Arc<dyn plugin::Plugin>],
     name: &str,
 ) -> Result<&'a Arc<dyn plugin::Plugin>> {
-    plugins
-        .iter()
-        .find(|p| p.metadata().name == name)
-        .ok_or_else(|| anyhow::anyhow!("plugin not found: {name}"))
+    // Supports "Group:Command" to disambiguate the same command name across
+    // plugin groups, and errors (instead of silently picking the first) when
+    // a bare name is ambiguous.
+    plugin::resolve_plugin(plugins, name).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Execute a plugin by name and print its JSON output to stdout.

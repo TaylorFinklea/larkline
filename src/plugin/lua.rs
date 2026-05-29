@@ -431,12 +431,11 @@ impl LuaPlugin {
                     LuaError::external("lark.invoke: plugin list not available in this context")
                 })?;
 
-                let plugin = plugins
-                    .iter()
-                    .find(|p| p.metadata().name == name)
-                    .ok_or_else(|| {
-                        LuaError::external(format!("lark.invoke: plugin '{name}' not found"))
-                    })?
+                // Supports "Group:Command" to disambiguate same-named
+                // commands across plugin groups; errors on an ambiguous bare
+                // name rather than silently picking the first match.
+                let plugin = crate::plugin::resolve_plugin(plugins.as_slice(), &name)
+                    .map_err(|e| LuaError::external(format!("lark.invoke: {e}")))?
                     .clone();
 
                 let output = PLUGIN_LIST

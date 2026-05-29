@@ -355,6 +355,24 @@ pub fn scan(dirs: &[PathBuf]) -> anyhow::Result<Vec<DiscoveredPlugin>> {
         }
     }
     plugins.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+
+    // Warn on TRUE duplicates — same (plugin_group, name) pair — which not
+    // even Group:Command addressing can disambiguate, so one is unreachable.
+    // (The same name across different groups is the normal shadow case and is
+    // reachable via Group:Command, so it isn't warned here.)
+    let mut seen: std::collections::HashSet<(Option<&str>, &str)> =
+        std::collections::HashSet::new();
+    for p in &plugins {
+        let key = (p.metadata.plugin_group.as_deref(), p.metadata.name.as_str());
+        if !seen.insert(key) {
+            tracing::warn!(
+                name = %p.metadata.name,
+                group = ?p.metadata.plugin_group,
+                "duplicate plugin command (same group + name); only one is reachable — rename one"
+            );
+        }
+    }
+
     Ok(plugins)
 }
 

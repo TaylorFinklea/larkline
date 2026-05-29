@@ -19,58 +19,101 @@
 use crate::agent::provider::ToolDefinition;
 use crate::plugin::traits::Plugin;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Build the agent's tool registry from a discovered plugin list.
+/// Build the agent tool registry AND the dispatch lookup from a single
+/// deduplicated pass, so the tools advertised to the provider and the
+/// dispatcher's routing table always agree 1:1.
 ///
-/// Only plugins with `agent_callable = true` in their manifest are
-/// included. Each produces one [`ToolDefinition`] with:
-///
-/// - **name**: `{plugin_group}__{name}` for multi-command plugins;
-///   `{name}` slugified for single-command plugins. Always unique
-///   within the registry.
-/// - **description**: the manifest's `description` field, prefixed
-///   with `[destructive]` when the command sets `destructive = true`
-///   so the model has tonal context even before the dry-run plan.
-/// - **input_schema**: empty object `{}`. v1.x derives this from
-///   `settings_spec`.
+/// Only plugins with `agent_callable = true` are included. Two plugins
+/// whose names slug to the same tool id (`tool_name_for` is not injective
+/// over arbitrary names) would otherwise (a) make the provider reject the
+/// request — Anthropic/OpenAI 400 on duplicate tool names — and (b) make
+/// the HashMap lookup silently keep only one, routing the model's call to
+/// whichever survived. We keep the first and skip later colliders with a
+/// warning so neither hazard can occur.
+#[must_use]
+pub fn build_registry(
+    plugins: &[Arc<dyn Plugin>],
+) -> (Vec<ToolDefinition>, HashMap<String, Arc<dyn Plugin>>) {
+    let mut tools = Vec::new();
+    let mut lookup: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    for p in plugins.iter().filter(|p| p.metadata().agent_callable) {
+        let meta = p.metadata();
+        let name = tool_name_for(meta);
+        if lookup.contains_key(&name) {
+            tracing::warn!(
+                tool = %name,
+                plugin = %meta.name,
+                "duplicate agent tool name; skipping the colliding plugin (rename it or give it a distinct plugin_group)"
+            );
+            continue;
+        }
+        tools.push(tool_definition_for(meta, &name));
+        lookup.insert(name, Arc::clone(p));
+    }
+    (tools, lookup)
+}
+
+/// Build just the [`ToolDefinition`] list (the provider's view). Shares the
+/// collision-deduplicated pass with [`build_registry`].
 #[must_use]
 pub fn build_tools(plugins: &[Arc<dyn Plugin>]) -> Vec<ToolDefinition> {
-    plugins
-        .iter()
-        .filter(|p| p.metadata().agent_callable)
-        .map(|p| {
-            let meta = p.metadata();
-            let name = tool_name_for(meta);
-            let description = if meta.destructive {
-                format!("[destructive] {}", meta.description)
-            } else {
-                meta.description.clone()
-            };
-            ToolDefinition {
-                name,
-                description,
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": false
-                }),
-            }
-        })
-        .collect()
+    build_registry(plugins).0
+}
+
+/// One [`ToolDefinition`] for a plugin under the given (already-computed)
+/// tool name. Description is prefixed with `[destructive]` when the command
+/// sets `destructive = true`; input schema is the empty object for v1.0.
+fn tool_definition_for(meta: &crate::plugin::traits::PluginMetadata, name: &str) -> ToolDefinition {
+    let description = if meta.destructive {
+        format!("[destructive] {}", meta.description)
+    } else {
+        meta.description.clone()
+    };
+    ToolDefinition {
+        name: name.to_string(),
+        description,
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    }
 }
 
 /// Construct the `{plugin_group}__{name}` (or just slugified `{name}`)
 /// tool identifier for a given plugin's metadata. Slugification matches
 /// what the dispatcher uses to route tool calls back — lowercase ASCII
 /// alphanumerics + underscores; everything else becomes `_`.
+///
+/// Falls back to a deterministic hash-derived id when slugification yields
+/// nothing usable (a name with no ASCII alphanumerics, e.g. emoji/CJK-only),
+/// so the tool always has a non-empty, provider-acceptable name.
 #[must_use]
 pub fn tool_name_for(meta: &crate::plugin::traits::PluginMetadata) -> String {
     let cmd = slugify(&meta.name);
-    match &meta.plugin_group {
+    let name = match &meta.plugin_group {
         Some(group) => format!("{}__{cmd}", slugify(group)),
         None => cmd,
+    };
+    if name.chars().any(|c| c.is_ascii_alphanumeric()) {
+        name
+    } else {
+        fallback_tool_name(meta)
     }
+}
+
+/// Deterministic, per-plugin-distinct tool id for names that slug to empty.
+fn fallback_tool_name(meta: &crate::plugin::traits::PluginMetadata) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    meta.name.hash(&mut h);
+    if let Some(group) = &meta.plugin_group {
+        group.hash(&mut h);
+    }
+    format!("tool_{:x}", h.finish())
 }
 
 fn slugify(s: &str) -> String {
@@ -191,5 +234,31 @@ mod tests {
         let tools = build_tools(&ps);
         assert_eq!(tools[0].input_schema["type"], "object");
         assert_eq!(tools[0].input_schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn colliding_tool_names_are_deduplicated_consistently() {
+        // "Git-Hub" and "Git Hub" both slug to "git_hub" — the provider must
+        // not receive two tools with the same name, and the lookup must keep
+        // exactly one (consistent with the advertised list).
+        let ps = plugins(vec![
+            meta("Git-Hub", None, true, false),
+            meta("Git Hub", None, true, false),
+        ]);
+        let (tools, lookup) = build_registry(&ps);
+        assert_eq!(tools.len(), 1, "no duplicate tool name advertised");
+        assert_eq!(lookup.len(), 1, "lookup agrees 1:1 with advertised tools");
+        assert!(lookup.contains_key("git_hub"));
+    }
+
+    #[test]
+    fn empty_slug_name_gets_nonempty_fallback() {
+        // An emoji/CJK-only name slugs to "" — must not produce an empty
+        // (provider-rejected) tool name.
+        let ps = plugins(vec![meta("🚀", None, true, false)]);
+        let (tools, lookup) = build_registry(&ps);
+        assert_eq!(tools.len(), 1);
+        assert!(!tools[0].name.is_empty());
+        assert!(lookup.contains_key(&tools[0].name));
     }
 }

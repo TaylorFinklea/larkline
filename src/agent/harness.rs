@@ -296,11 +296,13 @@ impl AgentHarness {
             .filter(|p| p.metadata().agent_callable)
             .cloned()
             .collect();
-        self.config.tools = registry::build_tools(&callable);
-        self.plugin_lookup = callable
-            .into_iter()
-            .map(|p| (registry::tool_name_for(p.metadata()), p))
-            .collect();
+        // Build tools + dispatch lookup from one deduplicated pass so the
+        // advertised tool list and the router agree 1:1 (a slug collision
+        // is skipped with a warning rather than emitting a duplicate tool
+        // name to the provider while the HashMap silently drops one).
+        let (tools, lookup) = registry::build_registry(&callable);
+        self.config.tools = tools;
+        self.plugin_lookup = lookup;
         // Full list (not just callable) so `lark.invoke()` from an
         // agent-called plugin can reach any sibling, matching normal
         // execution semantics.
