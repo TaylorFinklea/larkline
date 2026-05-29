@@ -98,11 +98,27 @@ Commands:
     );
 }
 
+/// Reject a plugin name that isn't a single normal path component — blocks
+/// absolute paths (`/etc`), parent-dir escapes (`../../x`), `.`/`..`, empty
+/// names, and multi-segment paths. Without this, `plugin_dir.join(name)`
+/// silently discards the base for an absolute arg (so `lark plugin remove
+/// /etc` targets `/etc`) or escapes it via `..`, turning the recursive
+/// `remove_dir_all` into an arbitrary-directory delete.
+fn validate_plugin_name(name: &str) -> Result<()> {
+    use std::path::Component;
+    let mut comps = std::path::Path::new(name).components();
+    match (comps.next(), comps.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => anyhow::bail!("Invalid plugin name: {name:?} (must be a single path component)"),
+    }
+}
+
 /// Scaffold a new plugin at `~/.config/larkline/plugins/<name>/`.
 ///
 /// Creates `manifest.toml` and either `init.lua` (default), `run.sh` (`--shell`), or a
 /// two-command Lua scaffold (`--multi`). Returns `Err` if the directory already exists.
 fn init_plugin(name: &str, shell: bool, multi: bool) -> Result<()> {
+    validate_plugin_name(name)?;
     let plugin_dir = config::default_plugin_dir().join(name);
     if plugin_dir.exists() {
         anyhow::bail!("Plugin directory already exists: {}", plugin_dir.display());
@@ -345,10 +361,16 @@ Options:
     }
     let prompt = prompt_parts.join(" ");
 
-    let (cfg, _) = config::load().unwrap_or_else(|e| {
+    let (cfg, warnings) = config::load().unwrap_or_else(|e| {
         eprintln!("larkline: config error ({e}), using defaults");
         (config::Config::default(), Vec::new())
     });
+    // Surface config warnings — otherwise a config parse error silently
+    // falls back to the default Anthropic provider and the user sees a
+    // confusing "ANTHROPIC_API_KEY is not set" instead of the real cause.
+    for w in &warnings {
+        eprintln!("larkline: {w}");
+    }
 
     // Mirror the TUI's secrets pipeline so `lark secret set` keys resolve
     // identically across both entry points.
@@ -386,8 +408,11 @@ Options:
     while let Some(event) = rx.recv().await {
         match event {
             agent::ProviderEvent::TextDelta(chunk) => {
-                out.write_all(chunk.as_bytes())?;
-                out.flush()?;
+                // Tolerate a closed stdout (e.g. `lark ai-ask ... | head`)
+                // rather than aborting with a spurious BrokenPipe error;
+                // matches handle_agent_ask_command.
+                let _ = out.write_all(chunk.as_bytes());
+                let _ = out.flush();
             }
             agent::ProviderEvent::ToolUse { name, .. } => {
                 // Phase 6 doesn't pass tools; tool-use shouldn't arrive.
@@ -407,8 +432,8 @@ Options:
             }
         }
     }
-    writeln!(out)?;
-    out.flush()?;
+    let _ = writeln!(out);
+    let _ = out.flush();
 
     // Provider task should have returned by now (channel close = it dropped tx).
     let ask_result = provider_task
@@ -517,10 +542,13 @@ Session: $XDG_STATE_HOME/larkline/sessions/<uuid>.jsonl."
     let prompt = prompt_parts.join(" ");
 
     let ctx = build_plugin_context()?;
-    let (cfg, _) = config::load().unwrap_or_else(|e| {
+    let (cfg, warnings) = config::load().unwrap_or_else(|e| {
         eprintln!("larkline: config error ({e}), using defaults");
         (config::Config::default(), Vec::new())
     });
+    for w in &warnings {
+        eprintln!("larkline: {w}");
+    }
 
     let provider = agent::build_provider(&cfg.ai, &ctx.secrets)
         .with_context(|| "failed to build AI provider")?;
@@ -1131,6 +1159,7 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
             let name = args
                 .get(1)
                 .ok_or_else(|| anyhow::anyhow!("Usage: lark plugin remove <NAME>"))?;
+            validate_plugin_name(name)?;
             let target = plugin_dir.join(name);
             if !target.exists() {
                 anyhow::bail!("Plugin not found: {name}");
@@ -1393,6 +1422,19 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_plugin_name_rejects_traversal_and_absolute() {
+        assert!(validate_plugin_name("my-plugin").is_ok());
+        assert!(validate_plugin_name("Weather").is_ok());
+        // Path-traversal / absolute / multi-segment / dot names are rejected.
+        assert!(validate_plugin_name("/etc").is_err());
+        assert!(validate_plugin_name("../victim").is_err());
+        assert!(validate_plugin_name("a/b").is_err());
+        assert!(validate_plugin_name("..").is_err());
+        assert!(validate_plugin_name(".").is_err());
+        assert!(validate_plugin_name("").is_err());
+    }
 
     #[test]
     fn log_file_dir_prefers_xdg_state_home() {
