@@ -794,9 +794,17 @@ pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
     } else {
         String::new()
     };
-    let mut doc = content
-        .parse::<toml_edit::DocumentMut>()
-        .unwrap_or_default();
+    // Only start from a blank document when the file is genuinely
+    // absent/empty. If it has content that simply fails to parse, refuse
+    // to write — `unwrap_or_default()` here would silently overwrite the
+    // user's entire (recoverable) config with a near-empty file.
+    let mut doc = if content.trim().is_empty() {
+        toml_edit::DocumentMut::default()
+    } else {
+        content.parse::<toml_edit::DocumentMut>().map_err(|e| {
+            anyhow::anyhow!("refusing to rewrite malformed config.toml ({e}); fix it by hand first")
+        })?
+    };
     if doc.get("theme").is_none() {
         doc["theme"] = toml_edit::table();
     }
@@ -937,9 +945,12 @@ fn write_default_if_missing(path: &std::path::Path) -> anyhow::Result<()> {
 /// Loads configuration from `~/.config/larkline/config.toml`.
 ///
 /// Returns the default config if the file doesn't exist.
-/// Returns a pair of `(Config, warnings)` — warnings is non-empty when the config
-/// had parse errors or invalid field values (falls back to defaults for those fields).
-/// Returns `Err` only for unrecoverable I/O errors (can't read the file at all).
+/// Returns a pair of `(Config, warnings)` — warnings is non-empty when the
+/// config had parse errors. A single invalid field/section no longer
+/// discards the whole config: when the strict whole-document parse fails,
+/// each top-level section is parsed independently and every section that is
+/// individually valid is kept (only the broken ones fall back to defaults).
+/// Returns `Err` only for unrecoverable I/O errors (can't read the file).
 pub fn load() -> anyhow::Result<(Config, Vec<String>)> {
     let path = config_path();
     if !path.exists() {
@@ -949,12 +960,60 @@ pub fn load() -> anyhow::Result<(Config, Vec<String>)> {
     let contents = std::fs::read_to_string(&path)?;
     match toml::from_str::<Config>(&contents) {
         Ok(config) => Ok((config, Vec::new())),
-        Err(e) => {
-            let warning = format!("Config error: {e} — using defaults");
-            tracing::error!(error = %e, "failed to parse config, falling back to defaults");
-            Ok((Config::default(), vec![warning]))
-        }
+        Err(whole_err) => match toml::from_str::<toml::Table>(&contents) {
+            // Document is valid TOML but a field/section failed strict
+            // deserialization. Keep the valid sections; default the rest.
+            Ok(table) => {
+                let (config, mut warnings) = merge_sections(&table);
+                if warnings.is_empty() {
+                    warnings.push(format!(
+                        "Config error: {whole_err} — using defaults for affected fields"
+                    ));
+                }
+                tracing::warn!(error = %whole_err, "config had invalid sections; kept the valid ones");
+                Ok((config, warnings))
+            }
+            // Syntactically malformed TOML — nothing recoverable.
+            Err(syntax_err) => {
+                let warning = format!("Config error: {syntax_err} — using defaults");
+                tracing::error!(error = %syntax_err, "failed to parse config, falling back to defaults");
+                Ok((Config::default(), vec![warning]))
+            }
+        },
     }
+}
+
+/// Deserialize each top-level config section independently from a parsed
+/// TOML table, keeping valid sections and defaulting the ones that fail
+/// (with a per-section warning). A typo in `[ai]` no longer nukes the
+/// user's `[theme]` / `[keybindings]` / `[favorites]`.
+fn merge_sections(table: &toml::Table) -> (Config, Vec<String>) {
+    let mut config = Config::default();
+    let mut warnings = Vec::new();
+
+    macro_rules! section {
+        ($key:literal, $field:ident) => {
+            if let Some(value) = table.get($key) {
+                match value.clone().try_into() {
+                    Ok(parsed) => config.$field = parsed,
+                    Err(e) => warnings.push(format!(
+                        "Config error in [{}]: {e} — using defaults for that section",
+                        $key
+                    )),
+                }
+            }
+        };
+    }
+
+    section!("general", general);
+    section!("ui", ui);
+    section!("logging", logging);
+    section!("theme", theme);
+    section!("favorites", favorites);
+    section!("keybindings", keybindings);
+    section!("ai", ai);
+
+    (config, warnings)
 }
 
 /// Returns the path to the config file, respecting `XDG_CONFIG_HOME` if set.
@@ -979,9 +1038,22 @@ pub fn default_plugin_dir() -> PathBuf {
 }
 
 fn home_dir() -> PathBuf {
-    // std::env::home_dir is deprecated due to Windows quirks, but
-    // HOME env var is reliable on macOS/Linux which are our targets.
-    std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from)
+    // std::env::home_dir is deprecated due to Windows quirks, but the HOME
+    // env var is reliable on macOS/Linux which are our targets.
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home);
+    }
+    // HOME unset (sandbox / cron / daemon launch). Do NOT fall back to a
+    // world-writable shared "/tmp" — config and the secrets .env would then
+    // sit at a predictable, world-readable, symlink-hijackable path. Use the
+    // per-user temp dir (on macOS this is the private $TMPDIR under
+    // /var/folders/...; honors $TMPDIR elsewhere).
+    let fallback = std::env::temp_dir();
+    tracing::warn!(
+        path = %fallback.display(),
+        "HOME is unset; using the per-user temp dir for config/secrets"
+    );
+    fallback
 }
 
 /// Returns the path to the secrets `.env` file.
@@ -1249,6 +1321,26 @@ mod tests {
         assert!(config.ui.visible_items > 0);
         assert!(!config.general.plugin_dirs.is_empty());
         assert_eq!(config.logging.level, "warn");
+    }
+
+    #[test]
+    fn merge_sections_keeps_valid_sections_when_one_is_invalid() {
+        // A bad [ai] provider must not discard a valid [ui] section.
+        let table: toml::Table = toml::from_str(
+            r#"
+            [ui]
+            visible_items = 7
+            [ai]
+            provider = "not_a_real_provider"
+            "#,
+        )
+        .expect("valid TOML syntax");
+        let (config, warnings) = merge_sections(&table);
+        assert_eq!(config.ui.visible_items, 7, "valid section kept");
+        assert!(
+            warnings.iter().any(|w| w.contains("[ai]")),
+            "broken section warned, got {warnings:?}"
+        );
     }
 
     #[test]
