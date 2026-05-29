@@ -1,6 +1,52 @@
 # Current State
 
-> Updated: 2026-05-25
+> Updated: 2026-05-28
+
+## Bug sweep + fixes (2026-05-28) — advances Phase 10
+
+Ran an exhaustive 13-dimension multi-agent review of the whole codebase
+(each finding adversarially verified) → **48 confirmed defects** (15 high /
+19 medium / 14 low; 5 false positives correctly refuted). Fixed **all of
+them** across 11 commits on `v1.0-prep` (`c5d5757`..`0f1260e`, on top of
+`68a5080`). ~25 regression tests added. Build green: **62 lib + 247 bin +
+integration pass**, `clippy --bin lark -D warnings` clean, `fmt --check`
+clean. Global binary reinstalled. **Nothing pushed.**
+
+Headline fixes (full detail in harness-deck report `20260528-bug-sweep-fixes`):
+- **Panics** (HIGH): empty-form Tab divide-by-zero, lone-quote `.env` slice,
+  multibyte hex/clipboard byte-slices, widget-width underflow, NaN http timeout.
+- **Agent harness**: phase now resets to Idle on error (was bricked in Turn
+  forever); **cancellation wired end-to-end** (abort fires token → select
+  loop observes → `TurnOutcome::Aborted`; token reset around prompt; dead
+  `in_flight` removed); panic-isolated tool dispatch; hook-blocked plans emit
+  paired `tool_result`s (was orphaning tool_use → 400 on every later turn).
+- **Providers**: Anthropic `input_tokens` now captured (was always 0);
+  OpenAI-Chat drains tool_calls on any finish_reason (OpenRouter/Ollama).
+- **Plugin engine**: `kill_on_drop` on all 4 spawns; `exec_io` pipe-buffer
+  deadlock fixed (concurrent stdin/stdout); store size-check consistency +
+  process-wide shared store registry (fixes `lark.invoke` lost-update).
+- **Name collisions**: registry dedups colliding tool names (was 400/misroute)
+  + **`Group:Command` addressing** for `lark invoke`/`lark.invoke` so shadowed
+  commands are reachable (e.g. `Mail:Inbox`); empty-slug fallback.
+- **Config**: section-by-section merge (one bad field no longer nukes the
+  whole config); `save_theme_preset` won't wipe a malformed-but-recoverable
+  file; no secrets to world-writable `/tmp`.
+- **Atlassian**: OAuth callback + reqwest timeouts (was hang-forever); accept
+  loop skips stray connections; token cache 0600 re-asserted on existing file.
+- **Session**: reopen tolerates a torn trailing line (crash recovery); honest
+  durability comments.
+- **CLI/TUI**: `lark plugin remove` path-traversal blocked; AI subcommands
+  surface config warnings; `ai-ask` tolerates broken pipe; ActionResult
+  output-search desync, widget-focus nav, power-menu Enter, mini-app scroll.
+
+Open / deferred (documented, NOT bugs left unfixed):
+- `cargo clippy --all-targets` has **5 pre-existing test-code lints** (not from
+  this sweep, not gated by the project's `--bin lark` gate).
+- Session forward-compat `#[serde(other)]` skip left as v1.x (needs
+  cross-cutting `SessionEntry` match churn; doc corrected to not over-claim).
+- Real-provider smoke of the agent cancellation path still wants Taylor's pass
+  (no production caller of abort()/cancel_token() exists until the TUI agent
+  loop, Phase 8.E).
 
 ## Next Milestone — v1.0 Agent Palette
 

@@ -92,3 +92,22 @@
 - **Limitation:** Plugins outside Lua (shell scripts, future Python plugins) can't observe the token. v1.x can add cancellation via SIGINT to subprocess plugins if demand surfaces.
 
 The trait-change route remains available if v1.x wants explicit per-call cancellation observability that task-local can't provide (e.g. for async-await cancellation propagation through plugin code). For v1.0 the polling primitive suffices.
+
+## ADR-010: Bug-sweep design calls (2026-05-28)
+
+**Context:** A multi-agent codebase sweep found 48 verified defects; fixing them required several non-obvious design choices worth recording so they aren't second-guessed or reverted.
+
+**Decisions:**
+
+1. **Turn cancellation drives off `self.cancel`, reset at `prompt()` boundaries — not per-turn child tokens.** `abort()` (and an external `cancel_token()` clone) fire `self.cancel.cancel()`; the turn loop's `tokio::select!` observes `cancel.cancelled()` and returns `TurnOutcome::Aborted`. Because `CancellationToken` cancellation is permanent for all clones, `prompt()` replaces a cancelled token with a fresh one at BOTH start (clears a stale abort that would instantly abort a new turn) and end (so the next `cancel_token()` clone is live). The documented contract: *fetch `cancel_token()` before each `prompt()`*. The dead `in_flight: JoinHandle` plumbing `abort()` relied on (never assigned) was removed. Rationale: `abort(&mut self)` and `prompt(&mut self)` are borrow-exclusive, so a running turn can only be interrupted via a token clone from another task — the token, not a JoinHandle, is the real abort primitive.
+
+2. **Name collisions: dedup at registry build + `Group:Command` addressing.** `registry::build_registry` builds the advertised tool list and the dispatch lookup from ONE deduplicated pass (keep-first, warn-and-skip colliders) so providers never get duplicate tool names (which they 400 on) and the router stays 1:1. `tool_name_for` falls back to a hash id for names that slug to empty. For name-based addressing, `plugin::resolve_plugin` accepts `"Group:Command"` to reach shadowed commands and errors with the qualified alternatives on an ambiguous bare name (instead of silently picking the first). Quickkeys already list all matches in the GUI, so no quickkey change was needed.
+
+3. **Config: section-by-section best-effort merge.** On a strict whole-document parse failure, `load()` re-parses to a `toml::Table` and deserializes each top-level section independently, keeping every valid section and defaulting only the broken ones. A typo in `[ai]` no longer discards the user's `[theme]`/`[keybindings]`/etc. Syntactically-broken TOML still falls back to all-defaults.
+
+4. **Durability is page-cache, not fsync — comments corrected, behavior unchanged.** Session + audit logs rely on `write_all` (survives process crash) with a no-op `File::flush`; the prior "one fsync per turn-end" comments were false. Left page-cache durability in place (right for a local TUI) and corrected the comments; `sync_data` noted as the fix if power-loss durability is ever required. `reopen()` now tolerates a torn trailing line (keeps the recoverable prefix) but still surfaces mid-file corruption.
+
+**Scope deferrals (deliberate, documented):**
+- Session forward-compat `#[serde(other)]` skip → v1.x (needs cross-cutting `SessionEntry` match churn; every variant assumes an `id`). The doc comment was corrected to stop claiming skip-on-unknown works today.
+- `cargo clippy --all-targets` has 5 pre-existing test-code lints (wildcard-over-2-variant matches, a boxed test-provider helper, items-after-test-module). Not introduced by the sweep and not gated by the project's `--bin lark` gate; left untouched to respect scope.
+- `home_dir()` falls back to the per-user temp dir (private `$TMPDIR` on macOS) when `HOME` is unset, rather than a full `Result`-returning refactor of `config_path`/`env_path`/`default_plugin_dir` and all their callers (large ripple for a low-severity, uncommon trigger).

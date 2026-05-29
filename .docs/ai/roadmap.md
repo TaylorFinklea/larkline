@@ -21,7 +21,7 @@ v1.0 scope (12 phases, ~22 weeks):
 - **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
 - **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
 
-Phases 1-5 done (2026-05-18). **Phases 6 + 7 + 8 code complete (2026-05-25)** — all uncommitted on `v1.0-prep`, pending real-provider smoke. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + matching TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). 220 tests pass, clippy clean, ~1940 LOC of new agent code. Remaining v1.0 work: smoke + Phases 9–12 (web search, onboarding, QA, beta, tag). Taylor smoke-testing Mail + mobile-layout + AI providers in parallel.
+Phases 1-5 done (2026-05-18). **Phases 6 + 7 + 8 code complete (2026-05-25)** — committed on `v1.0-prep`, pending real-provider smoke. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + matching TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). **Bug sweep (2026-05-28) — advances Phase 10:** 48 verified defects found + all fixed across 11 commits (`c5d5757`..`0f1260e`), ~25 regression tests added, 62 lib + 247 bin + integration pass, clippy/fmt clean; see `current-state.md` and harness-deck `20260528-bug-sweep-fixes`. Remaining v1.0 work: smoke + Phases 9–12 (web search, onboarding, finish QA/theme polish, beta, tag). Taylor smoke-testing Mail + mobile-layout + AI providers in parallel.
 
 ### Next (after v1.0 ships)
 
