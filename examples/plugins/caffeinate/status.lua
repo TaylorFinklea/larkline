@@ -53,6 +53,7 @@ lark.register({
         -- Fallback: parse key-value text format (e.g. "State: idle\nRemaining: 0s\n...").
         local items = {}
         local state_value = "unknown"
+        local remaining_value = nil
 
         for line in raw:gmatch("[^\r\n]+") do
             local key, value = line:match("^([^:]+):%s*(.+)$")
@@ -60,6 +61,7 @@ lark.register({
                 key = key:match("^%s*(.-)%s*$")
                 value = value:match("^%s*(.-)%s*$")
                 if key == "State" then state_value = value end
+                if key == "Remaining" then remaining_value = value end
 
                 local icon = "📋"
                 if key == "State" then
@@ -95,7 +97,23 @@ lark.register({
             }
         end
 
-        local chip = state_value == "idle" and "off" or state_value
+        -- Chip: when active, prefer the time remaining (e.g. "23m") over the
+        -- bare state word; fall back to the state if no useful remaining value.
+        local active = state_value ~= "idle" and state_value ~= "unknown"
+        local chip
+        if active then
+            if remaining_value and remaining_value ~= "" and remaining_value ~= "0s" then
+                -- Drop the trailing seconds ("28m 16s" -> "28m"); the chip only
+                -- refreshes every status_refresh_secs, so second-precision is
+                -- misleading. Keep a bare "45s" when that's all there is.
+                local compact = (remaining_value:gsub("%s+%d+s$", ""))
+                chip = (compact ~= "" and compact) or remaining_value
+            else
+                chip = state_value
+            end
+        else
+            chip = "off"
+        end
         return { title = "Caffeinate — " .. state_value, status = chip, items = items }
     end,
 })
