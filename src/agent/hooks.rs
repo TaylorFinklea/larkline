@@ -165,7 +165,7 @@ mod tests {
             .await
         {
             BlockDecision::Block(reason) => assert!(reason.contains("approval")),
-            other => panic!("expected Block, got {other:?}"),
+            BlockDecision::Allow => panic!("expected Block, got Allow"),
         }
     }
 }

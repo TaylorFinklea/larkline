@@ -47,29 +47,48 @@ impl std::fmt::Display for NvimOpenError {
     }
 }
 
-/// Open a file in the parent Neovim via `nvim --server $NVIM --remote-send`.
+/// Open a file in the parent Neovim via `nvim --server $NVIM --remote(-tab)`.
 ///
 /// `split` is one of `edit`, `split`, `vsplit`, `tabedit`. Any other value
 /// falls back to `edit`.
+///
+/// The file path is handed to `--remote`/`--remote-tab` as a literal `argv`
+/// filename, so nvim does NO ex-command parsing on it — a path containing an
+/// ex-command separator (`|`), file expansions (`%`/`#`), or spaces cannot
+/// inject commands into the parent editor. (The old approach crafted a
+/// `:edit <path>` ex line via `--remote-send`, where a `|` in a plugin-
+/// supplied path terminated the `:edit` and ran the rest as ex commands,
+/// e.g. `:!rm ...`.) `split`/`vsplit` are created by a separate, path-free
+/// `--remote-send` so the only thing carrying the untrusted path stays the
+/// literal `--remote` arg.
 pub fn nvim_open_file(path: &str, split: &str) -> Result<(), NvimOpenError> {
     let Ok(socket) = std::env::var("NVIM") else {
         return Err(NvimOpenError::NotUnderNvim);
     };
-    let cmd_verb = match split {
-        "split" | "vsplit" | "tabedit" => split,
-        _ => "edit",
-    };
-    // Build an ex sequence: <Esc>:<verb> <path><CR>. Escape backslashes and
-    // double quotes in the path; nvim's remote-send parses the string as
-    // key notation, so "<" and ">" embedded in the path would be misread.
-    let escaped = path
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('<', "\\<");
-    let keys = format!("<Esc>:{cmd_verb} {escaped}<CR>");
 
+    // Create the split first with a path-free ex command (no injection surface).
+    match split {
+        "split" => run_nvim(&socket, &["--remote-send", "<Esc>:split<CR>"])?,
+        "vsplit" => run_nvim(&socket, &["--remote-send", "<Esc>:vsplit<CR>"])?,
+        _ => {}
+    }
+
+    // tabedit opens a fresh tab via --remote-tab; everything else (edit, the
+    // just-created split/vsplit window, and any unknown value) uses --remote.
+    let remote_flag = if split == "tabedit" {
+        "--remote-tab"
+    } else {
+        "--remote"
+    };
+    run_nvim(&socket, &[remote_flag, path])
+}
+
+/// Run `nvim --server <socket> <args...>` and map a non-zero exit to an error.
+fn run_nvim(socket: &str, args: &[&str]) -> Result<(), NvimOpenError> {
     let output = std::process::Command::new("nvim")
-        .args(["--server", &socket, "--remote-send", &keys])
+        .arg("--server")
+        .arg(socket)
+        .args(args)
         .output()
         .map_err(|e| NvimOpenError::CommandFailed(e.to_string()))?;
 

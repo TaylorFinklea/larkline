@@ -1262,7 +1262,7 @@ mod tests {
                 // user + assistant + turn_end
                 assert_eq!(entry_ids.len(), 3);
             }
-            other => panic!("expected Completed, got {other:?}"),
+            TurnOutcome::Aborted => panic!("expected Completed, got Aborted"),
         }
     }
 
@@ -1449,6 +1449,10 @@ mod tests {
         calls: std::sync::Mutex<VecDeque<Vec<ProviderEvent>>>,
     }
     impl ToolCycleProvider {
+        // Returns Box<Self> because every caller hands it straight to
+        // create_in as a Box<dyn Provider>; boxing here keeps the call sites
+        // terse.
+        #[allow(clippy::unnecessary_box_returns)]
         fn new(calls: Vec<Vec<ProviderEvent>>) -> Box<Self> {
             Box::new(Self {
                 calls: std::sync::Mutex::new(calls.into()),
@@ -1624,7 +1628,7 @@ mod tests {
                 StopReason::Other(s) => assert_eq!(s, "hook_blocked"),
                 other => panic!("expected hook_blocked, got {other:?}"),
             },
-            other => panic!("expected Completed, got {other:?}"),
+            TurnOutcome::Aborted => panic!("expected Completed, got Aborted"),
         }
         // The hook rejection is appended as a user message whose content is
         // a ToolResult answering the blocked tool_use (is_error=true) — NOT a
