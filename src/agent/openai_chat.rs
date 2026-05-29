@@ -173,6 +173,14 @@ impl Provider for OpenAiChatProvider {
             dispatch_event(&event_text, &mut dispatcher, &events)?;
         }
 
+        // Flush tool calls left buffered if the stream closed without a
+        // finish_reason chunk (no-op when finish_reason already drained).
+        for outgoing in dispatcher.finish()? {
+            if events.send(outgoing).is_err() {
+                break;
+            }
+        }
+
         Ok(())
     }
 }
@@ -392,6 +400,46 @@ impl SseDispatcher {
         }
     }
 
+    /// Drain buffered tool-call builders into `ToolUse` events in index
+    /// order, emptying the accumulator.
+    fn drain_tool_calls(&mut self) -> Result<Vec<ProviderEvent>, ProviderError> {
+        let mut entries: Vec<_> = self.tool_calls.drain().collect();
+        entries.sort_by_key(|(k, _)| *k);
+        let mut out = Vec::with_capacity(entries.len());
+        for (_, builder) in entries {
+            let args_str = if builder.arguments.is_empty() {
+                "{}"
+            } else {
+                &builder.arguments
+            };
+            let parsed_args: JsonValue = serde_json::from_str(args_str).map_err(|e| {
+                ProviderError::Malformed(format!("tool_call arguments JSON: {e} in {args_str}"))
+            })?;
+            out.push(ProviderEvent::ToolUse {
+                id: builder.id,
+                name: builder.name,
+                args: parsed_args,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Flush any tool calls still buffered when the stream ends WITHOUT a
+    /// finish_reason chunk — some OpenAI-compatible shims close after
+    /// `[DONE]` without emitting finish_reason on the tool-call choice.
+    /// Emits the `ToolUse` events plus a synthetic `Done{ToolUse}` so the
+    /// harness dispatches them. A no-op once a finish_reason already drained.
+    fn finish(&mut self) -> Result<Vec<ProviderEvent>, ProviderError> {
+        if self.tool_calls.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out = self.drain_tool_calls()?;
+        out.push(ProviderEvent::Done {
+            stop_reason: StopReason::ToolUse,
+        });
+        Ok(out)
+    }
+
     fn handle_chunk(&mut self, payload: &str) -> Result<Vec<ProviderEvent>, ProviderError> {
         let value: JsonValue = serde_json::from_str(payload)
             .map_err(|e| ProviderError::Malformed(format!("chunk JSON: {e}")))?;
@@ -473,33 +521,24 @@ impl SseDispatcher {
                 .and_then(JsonValue::as_str)
                 .filter(|s| !s.is_empty())
             {
-                if reason == "tool_calls" {
-                    // Drain accumulated tool calls in index order so
-                    // they reach the agent loop deterministically.
-                    let mut entries: Vec<_> = self.tool_calls.drain().collect();
-                    entries.sort_by_key(|(k, _)| *k);
-                    for (_, builder) in entries {
-                        let args_str = if builder.arguments.is_empty() {
-                            "{}"
-                        } else {
-                            &builder.arguments
-                        };
-                        let parsed_args: JsonValue =
-                            serde_json::from_str(args_str).map_err(|e| {
-                                ProviderError::Malformed(format!(
-                                    "tool_call arguments JSON: {e} in {args_str}"
-                                ))
-                            })?;
-                        out.push(ProviderEvent::ToolUse {
-                            id: builder.id,
-                            name: builder.name,
-                            args: parsed_args,
-                        });
-                    }
-                }
-                out.push(ProviderEvent::Done {
-                    stop_reason: map_finish_reason(reason),
-                });
+                // Drain accumulated tool calls regardless of the exact
+                // finish_reason. Several OpenAI-compatible backends served
+                // through this transport (OpenRouter / Ollama) report
+                // "stop" while still having emitted tool_calls; gating the
+                // drain on the literal "tool_calls" silently lost those
+                // calls and stalled the agent turn.
+                let tool_uses = self.drain_tool_calls()?;
+                let had_tool_calls = !tool_uses.is_empty();
+                out.extend(tool_uses);
+                // If the model emitted tool calls, it intends a tool turn —
+                // report ToolUse so the harness dispatches them even if the
+                // backend labeled the finish "stop"/"length".
+                let stop_reason = if had_tool_calls {
+                    StopReason::ToolUse
+                } else {
+                    map_finish_reason(reason)
+                };
+                out.push(ProviderEvent::Done { stop_reason });
             }
         }
         Ok(out)
@@ -703,6 +742,58 @@ mod tests {
                 stop_reason: StopReason::EndTurn,
             }]
         );
+    }
+
+    #[test]
+    fn tool_calls_drain_even_when_finish_reason_is_stop() {
+        // OpenRouter/Ollama backends sometimes report finish_reason "stop"
+        // while having emitted tool_calls. The calls must still surface and
+        // the stop reason must become ToolUse so the harness dispatches.
+        let mut d = SseDispatcher::new();
+        d.handle_chunk(
+            r#"{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "get_weather", "arguments": "{\"city\":\"SF\"}"}}]}}]}"#,
+        )
+        .unwrap();
+        let out = d
+            .handle_chunk(r#"{"choices": [{"delta": {}, "finish_reason": "stop"}]}"#)
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        match &out[0] {
+            ProviderEvent::ToolUse { id, name, args } => {
+                assert_eq!(id, "call_1");
+                assert_eq!(name, "get_weather");
+                assert_eq!(args, &json!({"city": "SF"}));
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+        assert_eq!(
+            out[1],
+            ProviderEvent::Done {
+                stop_reason: StopReason::ToolUse,
+            }
+        );
+    }
+
+    #[test]
+    fn finish_flushes_tool_calls_with_no_finish_reason() {
+        // A shim that closes after [DONE] without a finish_reason on the
+        // tool-call choice — finish() must still surface the buffered call.
+        let mut d = SseDispatcher::new();
+        d.handle_chunk(
+            r#"{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": "noop", "arguments": "{}"}}]}}]}"#,
+        )
+        .unwrap();
+        let out = d.finish().unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(matches!(&out[0], ProviderEvent::ToolUse { id, .. } if id == "call_9"));
+        assert_eq!(
+            out[1],
+            ProviderEvent::Done {
+                stop_reason: StopReason::ToolUse,
+            }
+        );
+        // After draining, finish() is a no-op.
+        assert!(d.finish().unwrap().is_empty());
     }
 
     #[test]

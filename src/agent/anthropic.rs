@@ -295,6 +295,8 @@ fn extract_retry_after(body: &str) -> Option<u64> {
 /// (`message_start`, `ping`) are silently ignored.
 #[derive(Debug, PartialEq, Eq)]
 enum SseEvent {
+    /// Carries the prompt token count — the only event that reports it.
+    MessageStart { input_tokens: Option<u32> },
     ContentBlockStart { index: usize, block: BlockKind },
     ContentBlockDelta { index: usize, delta: DeltaKind },
     ContentBlockStop { index: usize },
@@ -329,7 +331,7 @@ fn extract_index(value: &JsonValue) -> Result<usize, ProviderError> {
 /// Parse one SSE event into our internal taxonomy. Returns `None` for
 /// event types we don't care about (`ping`, `message_start`, etc).
 fn parse_sse_event(event_type: &str, data: &str) -> Result<Option<SseEvent>, ProviderError> {
-    if matches!(event_type, "ping" | "message_start") {
+    if event_type == "ping" {
         return Ok(None);
     }
     if event_type == "error" {
@@ -339,6 +341,16 @@ fn parse_sse_event(event_type: &str, data: &str) -> Result<Option<SseEvent>, Pro
         .map_err(|e| ProviderError::Malformed(format!("SSE data: {e} in {data}")))?;
 
     match event_type {
+        "message_start" => {
+            // The prompt (input) token count is only reported here, in the
+            // initial message envelope. Dropping this event was why every
+            // Anthropic turn reported input_tokens = 0.
+            let input_tokens = value
+                .pointer("/message/usage/input_tokens")
+                .and_then(JsonValue::as_u64)
+                .and_then(|n| u32::try_from(n).ok());
+            Ok(Some(SseEvent::MessageStart { input_tokens }))
+        }
         "content_block_start" => {
             let index = extract_index(&value)?;
             let block = value
@@ -425,6 +437,7 @@ struct SseDispatcher {
     /// Per-block state: maps content_block index to its accumulated args.
     /// Only populated for tool_use blocks; text blocks stream directly.
     tool_blocks: HashMap<usize, ToolBlock>,
+    input_tokens: Option<u32>,
     output_tokens: Option<u32>,
 }
 
@@ -438,6 +451,7 @@ impl SseDispatcher {
     fn new() -> Self {
         Self {
             tool_blocks: HashMap::new(),
+            input_tokens: None,
             output_tokens: None,
         }
     }
@@ -455,6 +469,11 @@ impl SseDispatcher {
 
         let mut out = Vec::new();
         match event {
+            SseEvent::MessageStart { input_tokens } => {
+                if let Some(n) = input_tokens {
+                    self.input_tokens = Some(n);
+                }
+            }
             SseEvent::ContentBlockStart { index, block } => {
                 if let BlockKind::ToolUse { id, name } = block {
                     self.tool_blocks.insert(
@@ -519,10 +538,12 @@ impl SseDispatcher {
                 }
             }
             SseEvent::MessageStop => {
-                if let Some(n) = self.output_tokens.take() {
+                let input = self.input_tokens.take();
+                let output = self.output_tokens.take();
+                if input.is_some() || output.is_some() {
                     out.push(ProviderEvent::Usage {
-                        input_tokens: 0,
-                        output_tokens: n,
+                        input_tokens: input.unwrap_or(0),
+                        output_tokens: output.unwrap_or(0),
                     });
                 }
             }
@@ -652,6 +673,14 @@ mod tests {
     #[test]
     fn message_delta_emits_done_with_normalized_stop_reason() {
         let mut d = SseDispatcher::new();
+        // message_start carries the prompt (input) token count.
+        let out = d
+            .handle(
+                "message_start",
+                r#"{"message": {"usage": {"input_tokens": 137, "output_tokens": 1}}}"#,
+            )
+            .unwrap();
+        assert!(out.is_empty());
         let out = d
             .handle(
                 "message_delta",
@@ -664,12 +693,12 @@ mod tests {
                 stop_reason: StopReason::ToolUse,
             }]
         );
-        // Usage emitted on message_stop.
+        // Usage emitted on message_stop reports the REAL input tokens, not 0.
         let out = d.handle("message_stop", "{}").unwrap();
         assert_eq!(
             out,
             vec![ProviderEvent::Usage {
-                input_tokens: 0,
+                input_tokens: 137,
                 output_tokens: 42,
             }]
         );
