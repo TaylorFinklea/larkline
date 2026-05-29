@@ -39,9 +39,14 @@ Headline fixes (full detail in harness-deck report `20260528-bug-sweep-fixes`):
   surface config warnings; `ai-ask` tolerates broken pipe; ActionResult
   output-search desync, widget-focus nav, power-menu Enter, mini-app scroll.
 
+Follow-ups done (commit `c11c031`):
+- **NvimEdit `|` ex-command injection** — now opens via `nvim --remote`/
+  `--remote-tab` (literal argv filename, no ex parsing); split/vsplit via a
+  separate path-free command.
+- **5 pre-existing `--all-targets` test-code lints** cleared; `cargo clippy
+  --all-targets -- -D warnings` is now green.
+
 Open / deferred (documented, NOT bugs left unfixed):
-- `cargo clippy --all-targets` has **5 pre-existing test-code lints** (not from
-  this sweep, not gated by the project's `--bin lark` gate).
 - Session forward-compat `#[serde(other)]` skip left as v1.x (needs
   cross-cutting `SessionEntry` match churn; doc corrected to not over-claim).
 - Real-provider smoke of the agent cancellation path still wants Taylor's pass
