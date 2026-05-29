@@ -37,13 +37,18 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
         .unwrap_or_else(|| crate::tui::profile::LayoutProfile::from_width(area.width));
 
     // Vertical split: search bar | [widgets] | content area | status bar
-    let has_widgets =
-        state.widgets_visible && !state.widget_indices.is_empty() && profile.allows_widget_row();
+    // Only widgets NOT demoted to the glance strip (i.e. healthy ones) get a
+    // card; degraded widgets render as a ⚠ chip in the strip instead.
+    let has_card_widgets = state
+        .widget_indices
+        .iter()
+        .any(|w| !state.glance_indices.contains(w));
+    let has_widgets = state.widgets_visible && has_card_widgets && profile.allows_widget_row();
     let widget_height = if has_widgets { 6 } else { 0 };
 
-    // Compact glance strip (1 line) between content and the status bar.
-    let has_glance =
-        state.status_visible && !state.status_indices.is_empty() && profile.allows_glance_strip();
+    // Compact glance strip (1 line) between content and the status bar:
+    // status chips + demoted degraded widgets.
+    let has_glance = !state.glance_indices.is_empty() && profile.allows_glance_strip();
     let glance_height = u16::from(has_glance);
 
     let chunks = Layout::default()
@@ -1133,7 +1138,14 @@ fn render_widget_row(
 ) {
     use crate::app::CachedResult;
 
-    let indices = &state.widget_indices;
+    // Degraded widgets are demoted to the glance strip — only render cards for
+    // the healthy ones.
+    let indices: Vec<usize> = state
+        .widget_indices
+        .iter()
+        .copied()
+        .filter(|w| !state.glance_indices.contains(w))
+        .collect();
     if indices.is_empty() || area.width < 10 {
         return;
     }
@@ -1405,7 +1417,7 @@ fn render_glance_strip(
 ) {
     use crate::app::CachedResult;
     use ratatui::text::Span;
-    if state.status_indices.is_empty() || area.width < 4 {
+    if state.glance_indices.is_empty() || area.width < 4 {
         return;
     }
 
@@ -1417,27 +1429,45 @@ fn render_glance_strip(
     // `slot` doubles as the rendered-so-far count: there's no skip before the
     // span is pushed, only an early `break`, so `slot > 0` == "a chip already
     // rendered" (used for the separator + overflow guard).
-    for (slot, &pidx) in state.status_indices.iter().enumerate() {
+    for (slot, &pidx) in state.glance_indices.iter().enumerate() {
         // Bounds-safe, mirroring render_widget_row — a stale index never panics.
         let Some(meta) = state.plugins.get(pidx) else {
             continue;
         };
-        let text = match state.result_cache.get(&pidx) {
-            Some(CachedResult::Ready(o) | CachedResult::Revalidating(o)) => o
-                .status
-                .clone()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| truncate_chars(&o.title, 24)),
-            Some(CachedResult::Loading(_)) | None => "…".to_string(),
-            Some(CachedResult::Error(_)) => "⚠".to_string(),
+        // (text, degraded): degraded items (hard error, or a plugin-flagged
+        // warn/error level — e.g. a demoted "Docker not installed" widget) get
+        // a ⚠ prefix and the error color.
+        let (text, degraded) = match state.result_cache.get(&pidx) {
+            Some(CachedResult::Ready(o) | CachedResult::Revalidating(o)) => {
+                let deg = matches!(o.level.as_deref(), Some("warn" | "error"));
+                // For a degraded widget the "why" (e.g. "Docker not installed")
+                // is the first item's label — prefer it over the command name.
+                let t = o
+                    .status
+                    .clone()
+                    .or_else(|| {
+                        deg.then(|| o.items.first().map(|i| i.label.clone()))
+                            .flatten()
+                    })
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| truncate_chars(&o.title, 22));
+                (t, deg)
+            }
+            Some(CachedResult::Loading(_)) | None => ("…".to_string(), false),
+            Some(CachedResult::Error(_)) => ("failed".to_string(), true),
         };
-        let chip = truncate_chars(&format!("{} {}", meta.icon, text), 28);
+        let body = if degraded {
+            format!("⚠ {text}")
+        } else {
+            text
+        };
+        let chip = truncate_chars(&format!("{} {}", meta.icon, body), 28);
         let chip_w = chip.chars().count();
         let sep_w = if slot > 0 { sep.chars().count() } else { 0 };
 
         // Stop before overflow; show a "+N" tail for the remainder.
         if slot > 0 && used + sep_w + chip_w > avail.saturating_sub(4) {
-            let remaining = state.status_indices.len() - slot;
+            let remaining = state.glance_indices.len() - slot;
             spans.push(Span::styled(
                 format!("  +{remaining}"),
                 Style::default().fg(theme.text_dimmed),
@@ -1453,6 +1483,8 @@ fn render_glance_strip(
             Style::default()
                 .fg(theme.highlight_fg)
                 .bg(theme.highlight_bg)
+        } else if degraded {
+            Style::default().fg(theme.error)
         } else {
             Style::default().fg(theme.text_dimmed)
         };

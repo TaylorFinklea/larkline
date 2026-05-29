@@ -252,6 +252,11 @@ pub struct AppState {
     pub status_selected: usize,
     /// Plugin indices of active glance-strip status commands.
     pub status_indices: Vec<usize>,
+    /// Plugin indices actually shown in the glance strip: the `status_indices`
+    /// plus any degraded widgets demoted from their card. Rebuilt from
+    /// `status_indices` + `widget_indices` + the result cache. This is what the
+    /// strip renders and focuses over (`status_selected` indexes it).
+    pub glance_indices: Vec<usize>,
     /// Theme preset picker overlay (None = closed).
     pub theme_picker: Option<ThemePickerState>,
     /// Plugin manager state (shown in `Mode::PluginManager`).
@@ -637,6 +642,7 @@ impl App {
         app.rebuild_unified_list();
         crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
         crate::widgets::rebuild_status_indices(&mut app.state, &app.pm_config);
+        crate::widgets::rebuild_glance_indices(&mut app.state);
 
         // Apply default_plugin pre-selection: find the first Command row with the named plugin.
         if let Some(ref name) = config.general.default_plugin {
@@ -1011,6 +1017,9 @@ impl App {
                     {
                         self.rebuild_unified_list();
                     }
+                    // A result that just changed health (degraded ↔ healthy)
+                    // moves a widget between its card and a strip warning chip.
+                    crate::widgets::rebuild_glance_indices(&mut self.state);
                 }
                 ExecutionSource::UserSelected => {
                     let was_revalidating = matches!(
@@ -1420,11 +1429,11 @@ impl App {
             }
 
             Action::StatusFocus => {
-                if self.state.status_visible && !self.state.status_indices.is_empty() {
+                if !self.state.glance_indices.is_empty() {
                     self.state.status_focused = true;
                     self.state.widget_focused = false;
                     self.state.vim_mode = VimMode::Normal;
-                    if self.state.status_selected >= self.state.status_indices.len() {
+                    if self.state.status_selected >= self.state.glance_indices.len() {
                         self.state.status_selected = 0;
                     }
                 }
@@ -1441,7 +1450,7 @@ impl App {
             }
             Action::StatusMoveRight => {
                 if self.state.status_focused {
-                    let max = self.state.status_indices.len().saturating_sub(1);
+                    let max = self.state.glance_indices.len().saturating_sub(1);
                     if self.state.status_selected < max {
                         self.state.status_selected += 1;
                     }
@@ -1450,7 +1459,7 @@ impl App {
             Action::StatusItemOpen => {
                 if self.state.status_focused {
                     if let Some(&plugin_index) =
-                        self.state.status_indices.get(self.state.status_selected)
+                        self.state.glance_indices.get(self.state.status_selected)
                     {
                         self.state.status_focused = false;
                         self.open_plugin_in_view_output(plugin_index);
@@ -2307,6 +2316,7 @@ impl App {
                     self.rebuild_unified_list();
                     crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                     crate::widgets::rebuild_status_indices(&mut self.state, &self.pm_config);
+                    crate::widgets::rebuild_glance_indices(&mut self.state);
                 }
                 Err(e) => {
                     self.state.warnings = vec![format!("Refresh failed: {e}")];

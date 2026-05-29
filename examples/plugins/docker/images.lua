@@ -95,6 +95,7 @@ local function check_docker(plugin_name)
     if not which or not which:match("docker") then
         return {
             title = plugin_name,
+            level = "warn",
             items = { error_item({
                 label = "Docker not installed",
                 detail = "Install: https://docs.docker.com/get-docker/",

@@ -123,6 +123,12 @@ pub struct PluginOutput {
     /// the strip falls back to a truncated `title`.
     #[serde(default)]
     pub status: Option<String>,
+    /// Result health: `"warn"` or `"error"` marks a plugin's output as
+    /// degraded (e.g. a CLI isn't installed, a vault is locked). A degraded
+    /// widget is demoted from its full card to a compact ⚠ chip in the glance
+    /// strip; anything else (incl. `None`) is treated as healthy/`"ok"`.
+    #[serde(default)]
+    pub level: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

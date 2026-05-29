@@ -160,6 +160,7 @@ lark.register({
             if not v1 or not v1:match("docker%-compose") then
                 return {
                     title = "Compose",
+                    level = "warn",
                     items = { error_item({
                         label = "Docker Compose not installed",
                         detail = "Install: https://docs.docker.com/compose/install/",

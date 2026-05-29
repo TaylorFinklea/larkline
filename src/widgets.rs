@@ -1,7 +1,41 @@
 //! Widget state helpers: ordering, indexing, and preview sync for dashboard widgets.
 
-use crate::app::{AppState, UnifiedRow};
+use crate::app::{AppState, CachedResult, UnifiedRow};
 use crate::config::PluginManagerConfig;
+
+/// Whether a plugin's cached result is degraded — a hard execution error, or a
+/// successful result the plugin flagged `level = "warn"`/`"error"` (e.g. a CLI
+/// not installed). Loading / absent / healthy results are not degraded.
+#[must_use]
+pub fn is_degraded(state: &AppState, plugin_index: usize) -> bool {
+    match state.result_cache.get(&plugin_index) {
+        Some(CachedResult::Error(_)) => true,
+        Some(CachedResult::Ready(o) | CachedResult::Revalidating(o)) => {
+            matches!(o.level.as_deref(), Some("warn" | "error"))
+        }
+        _ => false,
+    }
+}
+
+/// Rebuild [`AppState::glance_indices`] — the strip's displayed/focusable set:
+/// every status chip, plus any widget currently degraded (demoted from its
+/// card). Degraded widgets that are also status chips appear once. Clears
+/// focus + clamps the cursor when the resulting strip is empty/shorter.
+pub fn rebuild_glance_indices(state: &mut AppState) {
+    let mut items = state.status_indices.clone();
+    for &w in &state.widget_indices {
+        if !items.contains(&w) && is_degraded(state, w) {
+            items.push(w);
+        }
+    }
+    state.glance_indices = items;
+    if state.glance_indices.is_empty() {
+        state.status_focused = false;
+    }
+    if state.status_selected >= state.glance_indices.len() {
+        state.status_selected = 0;
+    }
+}
 
 /// Ensure `widget_order` contains all current widget keys (for reordering).
 pub fn ensure_widget_order(state: &AppState, pm_config: &mut PluginManagerConfig) {
@@ -107,6 +141,42 @@ mod tests {
     use super::*;
     use crate::app::AppState;
     use crate::config::PluginManagerConfig;
+
+    #[test]
+    fn rebuild_glance_indices_demotes_degraded_widget() {
+        use crate::app::CachedResult;
+        use crate::plugin::traits::PluginOutput;
+
+        let mut state = AppState {
+            widget_indices: vec![3],
+            ..Default::default()
+        };
+        // A widget flagged level=warn (e.g. "Docker not installed") demotes.
+        state.result_cache.insert(
+            3,
+            CachedResult::Ready(PluginOutput {
+                title: "Containers".into(),
+                level: Some("warn".into()),
+                ..Default::default()
+            }),
+        );
+        rebuild_glance_indices(&mut state);
+        assert_eq!(state.glance_indices, vec![3], "degraded widget -> strip");
+
+        // A healthy widget stays a card (not in the strip).
+        state.result_cache.insert(
+            3,
+            CachedResult::Ready(PluginOutput {
+                title: "Containers".into(),
+                ..Default::default()
+            }),
+        );
+        rebuild_glance_indices(&mut state);
+        assert!(
+            state.glance_indices.is_empty(),
+            "healthy widget stays a card"
+        );
+    }
 
     #[test]
     fn rebuild_status_indices_clears_focus_when_strip_empties() {
