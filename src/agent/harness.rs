@@ -316,10 +316,7 @@ impl AgentHarness {
     /// invoked as a tool would fail to authenticate. The CLI passes the
     /// same resolved map it builds for the provider.
     #[must_use]
-    pub fn with_secrets(
-        mut self,
-        secrets: Arc<std::collections::HashMap<String, String>>,
-    ) -> Self {
+    pub fn with_secrets(mut self, secrets: Arc<std::collections::HashMap<String, String>>) -> Self {
         self.secrets = secrets;
         self
     }
@@ -469,13 +466,21 @@ impl AgentHarness {
         loop {
             let user_msg = match next_user_msg.take() {
                 Some(msg) => msg,
-                None => match self.queues.lock().expect("queue mutex").follow_up.pop_front() {
+                None => match self
+                    .queues
+                    .lock()
+                    .expect("queue mutex")
+                    .follow_up
+                    .pop_front()
+                {
                     Some(msg) => msg,
                     None => break,
                 },
             };
 
-            let result = self.run_single_turn(trace_id, user_msg, &mut on_event).await;
+            let result = self
+                .run_single_turn(trace_id, user_msg, &mut on_event)
+                .await;
             // Always return to Idle once a turn ends — success, abort, OR
             // error. Otherwise a transient provider/session failure would
             // leave the harness stuck in `Turn` and every later prompt()
@@ -545,15 +550,14 @@ impl AgentHarness {
             let provider_name = self.provider.name();
 
             let provider_started_at = std::time::Instant::now();
-            let provider_span = if let (Some(audit), Some(parent)) =
-                (self.audit.as_mut(), turn_span)
-            {
-                audit
-                    .provider_start(trace_id, parent, provider_name, &model)
-                    .ok()
-            } else {
-                None
-            };
+            let provider_span =
+                if let (Some(audit), Some(parent)) = (self.audit.as_mut(), turn_span) {
+                    audit
+                        .provider_start(trace_id, parent, provider_name, &model)
+                        .ok()
+                } else {
+                    None
+                };
 
             let (tx, mut rx) = mpsc::unbounded_channel::<ProviderEvent>();
             let mut acc = TurnAccumulator::default();
@@ -606,10 +610,12 @@ impl AgentHarness {
             {
                 let (in_tok, out_tok) = acc.usage.unwrap_or((0, 0));
                 let _ = audit.provider_end(
-                    trace_id, parent, span,
-                    u64::try_from(provider_started_at.elapsed().as_millis())
-                        .unwrap_or(u64::MAX),
-                    in_tok, out_tok,
+                    trace_id,
+                    parent,
+                    span,
+                    u64::try_from(provider_started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    in_tok,
+                    out_tok,
                     provider_error_kind,
                 );
             }
@@ -682,8 +688,7 @@ impl AgentHarness {
                     // them too so a reopened session stays well-formed.
                     let mut result_blocks = Vec::with_capacity(plan.calls.len());
                     for call in &plan.calls {
-                        let content =
-                            format!("Tool call rejected by approval hook: {reason}");
+                        let content = format!("Tool call rejected by approval hook: {reason}");
                         let result_id = self.session.append_tool_result(
                             call.id.clone(),
                             content.clone(),
@@ -823,17 +828,19 @@ impl AgentHarness {
                     // JoinHandle and turned into an error tool_result rather
                     // than unwinding the whole turn — matching engine.rs's
                     // execute_normal panic-isolation guarantee.
-                    let handle = tokio::spawn(engine::SECRETS.scope(
-                        secrets,
-                        engine::PLUGIN_LIST.scope(
-                            plugin_list,
-                            engine::INVOKE_DEPTH.scope(
-                                0,
-                                engine::CANCEL_TOKEN
-                                    .scope(cancel, async move { plugin.execute().await }),
+                    let handle = tokio::spawn(
+                        engine::SECRETS.scope(
+                            secrets,
+                            engine::PLUGIN_LIST.scope(
+                                plugin_list,
+                                engine::INVOKE_DEPTH.scope(
+                                    0,
+                                    engine::CANCEL_TOKEN
+                                        .scope(cancel, async move { plugin.execute().await }),
+                                ),
                             ),
                         ),
-                    ));
+                    );
                     let result = match handle.await {
                         Ok(r) => r,
                         Err(join_err) => Err(crate::plugin::traits::PluginError::ExecutionFailed(
@@ -845,10 +852,7 @@ impl AgentHarness {
                         Err(e) => (format!("Plugin error: {e}"), true),
                     }
                 }
-                None => (
-                    format!("Unknown tool: {}", call.tool_name),
-                    true,
-                ),
+                None => (format!("Unknown tool: {}", call.tool_name), true),
             };
 
             // Persist the tool_result in the session log, chaining
@@ -1271,10 +1275,7 @@ mod tests {
         let provider = Box::new(ScriptedProvider { events: vec![] });
         let mut h = AgentHarness::create_in(default_config(), provider, dir.path()).unwrap();
         h.phase = AgentPhase::Turn;
-        let err = h
-            .prompt(Message::user("hi"), |_| {})
-            .await
-            .unwrap_err();
+        let err = h.prompt(Message::user("hi"), |_| {}).await.unwrap_err();
         match err {
             AgentError::Busy {
                 current_phase,
@@ -1304,8 +1305,7 @@ mod tests {
         drop(h);
 
         let provider2 = Box::new(ScriptedProvider { events: vec![] });
-        let reopened =
-            AgentHarness::reopen(default_config(), provider2, &path).unwrap();
+        let reopened = AgentHarness::reopen(default_config(), provider2, &path).unwrap();
         assert_eq!(reopened.phase(), AgentPhase::Idle);
         assert_eq!(reopened.messages.len(), 2, "user + assistant");
     }
@@ -1328,8 +1328,8 @@ mod tests {
     #[test]
     fn steer_and_follow_up_are_independent_queues() {
         let dir = tempdir().unwrap();
-        let h = AgentHarness::create_in(default_config(), scripted_ok_provider(), dir.path())
-            .unwrap();
+        let h =
+            AgentHarness::create_in(default_config(), scripted_ok_provider(), dir.path()).unwrap();
         h.steer(Message::user("s1"));
         h.steer(Message::user("s2"));
         h.follow_up(Message::user("f1"));
@@ -1346,10 +1346,7 @@ mod tests {
         h.follow_up(Message::user("part 2"));
         h.follow_up(Message::user("part 3"));
 
-        let outcomes = h
-            .prompt(Message::user("part 1"), |_| {})
-            .await
-            .unwrap();
+        let outcomes = h.prompt(Message::user("part 1"), |_| {}).await.unwrap();
         assert_eq!(outcomes.len(), 3, "initial + 2 follow-ups = 3 turns");
         assert_eq!(h.queue_depths(), (0, 0), "queues drained");
         // 3 turns × (user + assistant + turn_end) = 9 messages in
@@ -1468,14 +1465,11 @@ mod tests {
             _request: AskRequest,
             events: mpsc::UnboundedSender<ProviderEvent>,
         ) -> Result<(), crate::agent::error::ProviderError> {
-            let script = self
-                .calls
-                .lock()
-                .unwrap()
-                .pop_front()
-                .unwrap_or_else(|| vec![ProviderEvent::Done {
+            let script = self.calls.lock().unwrap().pop_front().unwrap_or_else(|| {
+                vec![ProviderEvent::Done {
                     stop_reason: StopReason::EndTurn,
-                }]);
+                }]
+            });
             for ev in script {
                 let _ = events.send(ev);
             }
@@ -1496,10 +1490,8 @@ mod tests {
         }
         async fn execute(
             &self,
-        ) -> Result<
-            crate::plugin::traits::PluginOutput,
-            crate::plugin::traits::PluginError,
-        > {
+        ) -> Result<crate::plugin::traits::PluginOutput, crate::plugin::traits::PluginError>
+        {
             Ok(crate::plugin::traits::PluginOutput {
                 title: "tool".into(),
                 items: vec![],
@@ -1578,7 +1570,11 @@ mod tests {
             .prompt(Message::user("what's on my calendar"), |_| {})
             .await
             .unwrap();
-        assert_eq!(outcomes.len(), 1, "still one turn — multi-call cycle inside");
+        assert_eq!(
+            outcomes.len(),
+            1,
+            "still one turn — multi-call cycle inside"
+        );
 
         // Message history: user, assistant(text+tool_use), user(tool_result),
         // assistant(text). 4 messages.
@@ -1624,12 +1620,10 @@ mod tests {
         // Turn finishes (hook block ends the loop), with hook_blocked stop reason.
         assert_eq!(outcomes.len(), 1);
         match &outcomes[0] {
-            TurnOutcome::Completed { stop_reason, .. } => {
-                match stop_reason {
-                    StopReason::Other(s) => assert_eq!(s, "hook_blocked"),
-                    other => panic!("expected hook_blocked, got {other:?}"),
-                }
-            }
+            TurnOutcome::Completed { stop_reason, .. } => match stop_reason {
+                StopReason::Other(s) => assert_eq!(s, "hook_blocked"),
+                other => panic!("expected hook_blocked, got {other:?}"),
+            },
             other => panic!("expected Completed, got {other:?}"),
         }
         // The hook rejection is appended as a user message whose content is
@@ -1661,9 +1655,9 @@ mod tests {
             })
             .collect();
         for id in tool_use_ids {
-            let answered = h.messages.iter().flat_map(|m| &m.content).any(|b| {
-                matches!(b, ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id)
-            });
+            let answered = h.messages.iter().flat_map(|m| &m.content).any(
+                |b| matches!(b, ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id),
+            );
             assert!(answered, "tool_use {id} has no matching tool_result");
         }
     }
@@ -1684,10 +1678,8 @@ mod tests {
         }
         async fn execute(
             &self,
-        ) -> Result<
-            crate::plugin::traits::PluginOutput,
-            crate::plugin::traits::PluginError,
-        > {
+        ) -> Result<crate::plugin::traits::PluginOutput, crate::plugin::traits::PluginError>
+        {
             let val = crate::plugin::engine::SECRETS
                 .try_with(|s| s.get("TEST_SECRET").cloned())
                 .ok()

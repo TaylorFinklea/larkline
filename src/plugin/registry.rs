@@ -299,9 +299,7 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
                             .widget_refresh_secs
                             .unwrap_or(p.widget_refresh_secs.unwrap_or(60)),
                         mini_app: cmd.mini_app.unwrap_or(p.mini_app.unwrap_or(false)),
-                        agent_callable: cmd
-                            .agent_callable
-                            .unwrap_or(plugin_default_agent_callable),
+                        agent_callable: cmd.agent_callable.unwrap_or(plugin_default_agent_callable),
                         destructive: cmd.destructive.unwrap_or(plugin_default_destructive),
                     },
                     plugin_dir: plugin_dir_buf.clone(),

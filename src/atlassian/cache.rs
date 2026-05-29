@@ -194,7 +194,14 @@ mod tests {
         };
         let raw = serde_json::to_string_pretty(&cached).unwrap();
         super::write_private(&path, &raw).expect("write");
-        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "pre-existing file must be tightened to 0600, got {mode:o}");
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "pre-existing file must be tightened to 0600, got {mode:o}"
+        );
     }
 }

@@ -90,14 +90,17 @@ pub async fn wait_for_code(listener: TcpListener, expected_state: &str) -> Resul
     loop {
         let (mut stream, _peer) = listener.accept().await.context("accepting callback")?;
 
-        let req_bytes =
-            match tokio::time::timeout(PER_CONNECTION_READ_TIMEOUT, read_request(&mut stream)).await
-            {
-                Ok(Ok(bytes)) => bytes,
-                Ok(Err(e)) => return Err(e),
-                // Connected but sent nothing in time — not our redirect; skip it.
-                Err(_) => continue,
-            };
+        let req_bytes = match tokio::time::timeout(
+            PER_CONNECTION_READ_TIMEOUT,
+            read_request(&mut stream),
+        )
+        .await
+        {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(e)) => return Err(e),
+            // Connected but sent nothing in time — not our redirect; skip it.
+            Err(_) => continue,
+        };
         let req = String::from_utf8_lossy(&req_bytes);
         let first_line = req.lines().next().unwrap_or("");
 

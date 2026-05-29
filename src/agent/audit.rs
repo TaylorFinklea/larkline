@@ -358,7 +358,8 @@ mod tests {
         let mut log = AuditLog::open(&path).unwrap();
         let trace = Uuid::now_v7();
         let span = log.turn_start(trace).unwrap();
-        log.turn_end(trace, span, 0, &StopReason::EndTurn, 1, 1).unwrap();
+        log.turn_end(trace, span, 0, &StopReason::EndTurn, 1, 1)
+            .unwrap();
         let prov = log
             .provider_start(trace, span, "anthropic", "secret-model-name")
             .unwrap();

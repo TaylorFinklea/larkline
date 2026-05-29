@@ -1096,8 +1096,7 @@ impl App {
                             // Detect Markdown/Table/RawText/List from the
                             // output shape — single source of truth so
                             // markdown responses render (not literal `**`).
-                            self.state.output_mode =
-                                crate::app_output::output_mode_for(&output);
+                            self.state.output_mode = crate::app_output::output_mode_for(&output);
                             self.state.markdown_cache = None;
                             self.state.plugin_output = Some(output);
                             // Reset any active output-search filter: its indices
@@ -1817,16 +1816,12 @@ impl App {
                         // the available options to the status bar.
                         if rest.is_empty() || rest.eq_ignore_ascii_case("auto") {
                             self.state.layout_profile_override = None;
-                            self.state.status_message = Some((
-                                "layout: auto".to_string(),
-                                std::time::Instant::now(),
-                            ));
+                            self.state.status_message =
+                                Some(("layout: auto".to_string(), std::time::Instant::now()));
                         } else if let Some(p) = crate::tui::profile::LayoutProfile::parse(rest) {
                             self.state.layout_profile_override = Some(p);
-                            self.state.status_message = Some((
-                                format!("layout: {}", p.label()),
-                                std::time::Instant::now(),
-                            ));
+                            self.state.status_message =
+                                Some((format!("layout: {}", p.label()), std::time::Instant::now()));
                         } else {
                             self.state.status_message = Some((
                                 "layout: phone|narrow|medium|wide|auto".to_string(),
@@ -1930,8 +1925,7 @@ impl App {
                                 ) {
                                     pane.scroll_offset = usize::MAX / 2;
                                 } else {
-                                    pane.selected =
-                                        pane.content.items.len().saturating_sub(1);
+                                    pane.selected = pane.content.items.len().saturating_sub(1);
                                 }
                             }
                         }
@@ -2192,7 +2186,7 @@ impl App {
                         self.execute_item_action(&action);
                     }
                 }
-            },
+            }
         }
     }
 
@@ -3008,9 +3002,7 @@ mod tests {
         // item" category with digit keys. Keeps the per-item shortcuts
         // discoverable without needing to remember `:` to open the
         // searchable palette.
-        use crate::plugin::traits::{
-            ActionKind, ItemAction, OutputItem, PluginOutput,
-        };
+        use crate::plugin::traits::{ActionKind, ItemAction, OutputItem, PluginOutput};
         let mut app = App::with_stubs();
         app.state.mode = Mode::ViewOutput;
         app.state.output_mode = OutputMode::List;

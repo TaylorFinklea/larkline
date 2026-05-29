@@ -378,8 +378,8 @@ Options:
     let declared_keys: Vec<&str> = config::AI_SECRET_KEYS.to_vec();
     config::resolve_keychain_secrets(&mut secrets, &declared_keys);
 
-    let provider = agent::build_provider(&cfg.ai, &secrets)
-        .with_context(|| "failed to build AI provider")?;
+    let provider =
+        agent::build_provider(&cfg.ai, &secrets).with_context(|| "failed to build AI provider")?;
 
     let model = model_override.unwrap_or_else(|| cfg.ai.resolved_model().to_string());
     let max_tokens = max_tokens_override.or_else(|| cfg.ai.resolved_max_tokens());

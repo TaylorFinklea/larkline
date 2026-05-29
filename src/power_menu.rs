@@ -241,38 +241,37 @@ pub fn build_power_menu_categories(state: &AppState) -> Vec<PowerMenuCategory> {
             // with digit keys (1-9). Discoverable without remembering `:`
             // to open the searchable palette. Falls through to lowercase
             // letters if the row carries more than 9 actions.
-            let item_category =
-                crate::app_output::selected_output_item(state).and_then(|item| {
-                    if item.actions.is_empty() {
-                        return None;
-                    }
-                    let items = item
-                        .actions
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, action)| {
-                            // 1-9, then a-z for overflow.
-                            let key = if idx < 9 {
-                                char::from_digit(u32::try_from(idx + 1).ok()?, 10)?
-                            } else if idx - 9 < 26 {
-                                let off = u8::try_from(idx - 9).ok()?;
-                                (b'a' + off) as char
-                            } else {
-                                return None;
-                            };
-                            Some(PowerMenuItem {
-                                key,
-                                key_hint: key.to_string(),
-                                label: action.label.clone(),
-                                action: Action::RunFocusedItemAt(idx),
-                            })
+            let item_category = crate::app_output::selected_output_item(state).and_then(|item| {
+                if item.actions.is_empty() {
+                    return None;
+                }
+                let items = item
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, action)| {
+                        // 1-9, then a-z for overflow.
+                        let key = if idx < 9 {
+                            char::from_digit(u32::try_from(idx + 1).ok()?, 10)?
+                        } else if idx - 9 < 26 {
+                            let off = u8::try_from(idx - 9).ok()?;
+                            (b'a' + off) as char
+                        } else {
+                            return None;
+                        };
+                        Some(PowerMenuItem {
+                            key,
+                            key_hint: key.to_string(),
+                            label: action.label.clone(),
+                            action: Action::RunFocusedItemAt(idx),
                         })
-                        .collect::<Vec<_>>();
-                    Some(PowerMenuCategory {
-                        name: "This item".to_string(),
-                        items,
                     })
-                });
+                    .collect::<Vec<_>>();
+                Some(PowerMenuCategory {
+                    name: "This item".to_string(),
+                    items,
+                })
+            });
 
             let actions_category = {
                 let mut action_items = vec![
@@ -321,58 +320,58 @@ pub fn build_power_menu_categories(state: &AppState) -> Vec<PowerMenuCategory> {
             }
             cats.push(actions_category);
             cats.extend(vec![
-            PowerMenuCategory {
-                name: "Display".to_string(),
-                items: vec![
-                    PowerMenuItem {
-                        key: 't',
-                        key_hint: "t".to_string(),
-                        label: "Toggle View".to_string(),
-                        action: Action::ToggleOutputMode,
-                    },
-                    PowerMenuItem {
-                        key: '/',
-                        key_hint: "/".to_string(),
-                        label: "Search".to_string(),
-                        action: Action::OutputEnterSearch,
-                    },
-                    PowerMenuItem {
-                        key: 's',
-                        key_hint: "s".to_string(),
-                        label: "Sidebar".to_string(),
-                        action: Action::ToggleSidebar,
-                    },
-                    PowerMenuItem {
-                        key: 'T',
-                        key_hint: "T".to_string(),
-                        label: "Theme".to_string(),
-                        action: Action::ThemePickerOpen,
-                    },
-                ],
-            },
-            PowerMenuCategory {
-                name: "App".to_string(),
-                items: vec![
-                    PowerMenuItem {
-                        key: 'r',
-                        key_hint: "r".to_string(),
-                        label: "Rerun".to_string(),
-                        action: Action::RerunCommand,
-                    },
-                    PowerMenuItem {
-                        key: 'd',
-                        key_hint: "d".to_string(),
-                        label: "Descriptions".to_string(),
-                        action: Action::ToggleDescriptions,
-                    },
-                    PowerMenuItem {
-                        key: 'q',
-                        key_hint: "q".to_string(),
-                        label: "Quit".to_string(),
-                        action: Action::Quit,
-                    },
-                ],
-            },
+                PowerMenuCategory {
+                    name: "Display".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: 't',
+                            key_hint: "t".to_string(),
+                            label: "Toggle View".to_string(),
+                            action: Action::ToggleOutputMode,
+                        },
+                        PowerMenuItem {
+                            key: '/',
+                            key_hint: "/".to_string(),
+                            label: "Search".to_string(),
+                            action: Action::OutputEnterSearch,
+                        },
+                        PowerMenuItem {
+                            key: 's',
+                            key_hint: "s".to_string(),
+                            label: "Sidebar".to_string(),
+                            action: Action::ToggleSidebar,
+                        },
+                        PowerMenuItem {
+                            key: 'T',
+                            key_hint: "T".to_string(),
+                            label: "Theme".to_string(),
+                            action: Action::ThemePickerOpen,
+                        },
+                    ],
+                },
+                PowerMenuCategory {
+                    name: "App".to_string(),
+                    items: vec![
+                        PowerMenuItem {
+                            key: 'r',
+                            key_hint: "r".to_string(),
+                            label: "Rerun".to_string(),
+                            action: Action::RerunCommand,
+                        },
+                        PowerMenuItem {
+                            key: 'd',
+                            key_hint: "d".to_string(),
+                            label: "Descriptions".to_string(),
+                            action: Action::ToggleDescriptions,
+                        },
+                        PowerMenuItem {
+                            key: 'q',
+                            key_hint: "q".to_string(),
+                            label: "Quit".to_string(),
+                            action: Action::Quit,
+                        },
+                    ],
+                },
             ]);
             cats
         }

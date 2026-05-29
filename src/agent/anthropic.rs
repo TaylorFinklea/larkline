@@ -284,7 +284,10 @@ fn extract_retry_after(body: &str) -> Option<u64> {
     let val: JsonValue = serde_json::from_str(body).ok()?;
     val.get("retry_after")
         .and_then(JsonValue::as_u64)
-        .or_else(|| val.pointer("/error/retry_after").and_then(JsonValue::as_u64))
+        .or_else(|| {
+            val.pointer("/error/retry_after")
+                .and_then(JsonValue::as_u64)
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -296,11 +299,24 @@ fn extract_retry_after(body: &str) -> Option<u64> {
 #[derive(Debug, PartialEq, Eq)]
 enum SseEvent {
     /// Carries the prompt token count — the only event that reports it.
-    MessageStart { input_tokens: Option<u32> },
-    ContentBlockStart { index: usize, block: BlockKind },
-    ContentBlockDelta { index: usize, delta: DeltaKind },
-    ContentBlockStop { index: usize },
-    MessageDelta { stop_reason: Option<String>, output_tokens: Option<u32> },
+    MessageStart {
+        input_tokens: Option<u32>,
+    },
+    ContentBlockStart {
+        index: usize,
+        block: BlockKind,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: DeltaKind,
+    },
+    ContentBlockStop {
+        index: usize,
+    },
+    MessageDelta {
+        stop_reason: Option<String>,
+        output_tokens: Option<u32>,
+    },
     MessageStop,
     Error(String),
 }
@@ -506,9 +522,7 @@ impl SseDispatcher {
                         &block.partial_json
                     };
                     let args: JsonValue = serde_json::from_str(raw).map_err(|e| {
-                        ProviderError::Malformed(format!(
-                            "tool_use input JSON: {e} in {raw}"
-                        ))
+                        ProviderError::Malformed(format!("tool_use input JSON: {e} in {raw}"))
                     })?;
                     out.push(ProviderEvent::ToolUse {
                         id: block.id,
@@ -656,9 +670,7 @@ mod tests {
             r#"{"index": 0, "delta": {"type": "input_json_delta", "partial_json": " \"SF\"}"}}"#,
         )
         .unwrap();
-        let out = d
-            .handle("content_block_stop", r#"{"index": 0}"#)
-            .unwrap();
+        let out = d.handle("content_block_stop", r#"{"index": 0}"#).unwrap();
         assert_eq!(out.len(), 1);
         match &out[0] {
             ProviderEvent::ToolUse { id, name, args } => {

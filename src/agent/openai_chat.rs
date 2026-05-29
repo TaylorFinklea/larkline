@@ -223,10 +223,7 @@ pub fn build_request_body(request: &AskRequest) -> JsonValue {
     let mut messages = serialize_messages(&request.messages);
     if let Some(system) = request.system.as_ref().filter(|s| !s.is_empty()) {
         // Prepend a system-role message so callers don't have to.
-        messages.insert(
-            0,
-            json!({"role": "system", "content": system}),
-        );
+        messages.insert(0, json!({"role": "system", "content": system}));
     }
 
     let mut body = json!({
@@ -370,7 +367,8 @@ fn map_http_error(status: reqwest::StatusCode, body: &str) -> ProviderError {
 
 fn extract_retry_after(body: &str) -> Option<u64> {
     let val: JsonValue = serde_json::from_str(body).ok()?;
-    val.pointer("/error/retry_after").and_then(JsonValue::as_u64)
+    val.pointer("/error/retry_after")
+        .and_then(JsonValue::as_u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -489,11 +487,14 @@ impl SseDispatcher {
                     let Some(idx) = tc.get("index").and_then(JsonValue::as_u64) else {
                         continue;
                     };
-                    let entry = self.tool_calls.entry(idx).or_insert_with(|| ToolCallBuilder {
-                        id: String::new(),
-                        name: String::new(),
-                        arguments: String::new(),
-                    });
+                    let entry = self
+                        .tool_calls
+                        .entry(idx)
+                        .or_insert_with(|| ToolCallBuilder {
+                            id: String::new(),
+                            name: String::new(),
+                            arguments: String::new(),
+                        });
                     if let Some(id) = tc.get("id").and_then(JsonValue::as_str) {
                         if !id.is_empty() {
                             entry.id = id.to_string();
@@ -666,7 +667,10 @@ mod tests {
         assert_eq!(tools[0]["type"], json!("function"));
         // Function spec is nested under "function", unlike Responses API.
         assert_eq!(tools[0]["function"]["name"], json!("get_weather"));
-        assert_eq!(tools[0]["function"]["parameters"], json!({"type": "object"}));
+        assert_eq!(
+            tools[0]["function"]["parameters"],
+            json!({"type": "object"})
+        );
     }
 
     #[test]

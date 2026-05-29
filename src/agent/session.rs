@@ -402,10 +402,7 @@ mod tests {
         drop(log);
 
         let (_log, entries) = SessionLog::reopen(&path).unwrap();
-        let SessionEntry::Session {
-            id: session_id, ..
-        } = entries[0]
-        else {
+        let SessionEntry::Session { id: session_id, .. } = entries[0] else {
             panic!("missing header");
         };
         let SessionEntry::User { parent_id: p1, .. } = entries[1] else {
@@ -461,7 +458,10 @@ mod tests {
         drop(log);
 
         // Append a torn (partial-JSON) final line.
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         f.write_all(b"{\"type\":\"user\",\"id\":\"00000000-0000-7000-8000-0000")
             .unwrap();
         drop(f);

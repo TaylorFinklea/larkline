@@ -151,15 +151,15 @@ mod tests {
 }
 
 pub use audit::{AuditError, AuditKind, AuditLog, AuditRecord};
-pub use hooks::{
-    AgentHook, BeforeToolCallCtx, BlockDecision, DefaultApprovalHook, PlannedCall, ToolCallPlan,
-};
-pub use registry::{build_tools, tool_name_for};
 pub use error::ProviderError;
 pub use harness::{
     AgentConfig, AgentError, AgentHarness, AgentPhase, ThinkingLevel, TurnOutcome, TurnSnapshot,
 };
+pub use hooks::{
+    AgentHook, BeforeToolCallCtx, BlockDecision, DefaultApprovalHook, PlannedCall, ToolCallPlan,
+};
 pub use provider::{
     AskRequest, ContentBlock, Message, Provider, ProviderEvent, Role, StopReason, ToolDefinition,
 };
-pub use session::{SessionEntry, SessionError, SessionLog, SESSION_VERSION};
+pub use registry::{build_tools, tool_name_for};
+pub use session::{SESSION_VERSION, SessionEntry, SessionError, SessionLog};

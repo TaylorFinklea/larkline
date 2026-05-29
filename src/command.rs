@@ -81,7 +81,10 @@ pub fn matching(input: &str) -> Vec<&'static CommandSpec> {
             .filter(|c| c.name == verb || c.aliases.contains(&verb))
             .collect();
     }
-    COMMANDS.iter().filter(|c| c.matches_prefix(input)).collect()
+    COMMANDS
+        .iter()
+        .filter(|c| c.matches_prefix(input))
+        .collect()
 }
 
 /// Longest common prefix to complete `input` to, given the matching

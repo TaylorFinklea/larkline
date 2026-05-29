@@ -58,8 +58,10 @@ pub fn resolve_plugin<'a>(
             .ok_or_else(|| format!("plugin not found: no command {cmd:?} in group {group:?}"));
     }
 
-    let matches: Vec<&'a Arc<dyn Plugin>> =
-        plugins.iter().filter(|p| p.metadata().name == query).collect();
+    let matches: Vec<&'a Arc<dyn Plugin>> = plugins
+        .iter()
+        .filter(|p| p.metadata().name == query)
+        .collect();
     match matches.as_slice() {
         [] => Err(format!("plugin not found: {query}")),
         [only] => Ok(only),
@@ -148,9 +150,8 @@ mod resolve_tests {
             meta("Inbox", Some("Mail")),
             meta("Inbox", Some("Harness Deck")),
         ]);
-        let err = match resolve_plugin(&ps, "Inbox") {
-            Err(e) => e,
-            Ok(_) => panic!("expected ambiguous error"),
+        let Err(err) = resolve_plugin(&ps, "Inbox") else {
+            panic!("expected ambiguous error");
         };
         assert!(err.contains("ambiguous"));
         assert!(err.contains("Mail:Inbox"));

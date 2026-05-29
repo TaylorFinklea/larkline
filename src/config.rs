@@ -578,11 +578,7 @@ impl AiConfig {
 /// All AI-provider Keychain/env keys we want resolved at startup. Passed
 /// to [`resolve_keychain_secrets`] so users can store credentials with
 /// `lark secret set <KEY>` and never see them in plaintext config files.
-pub const AI_SECRET_KEYS: [&str; 3] = [
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "OPENROUTER_API_KEY",
-];
+pub const AI_SECRET_KEYS: [&str; 3] = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"];
 
 /// Color theme configuration.
 ///

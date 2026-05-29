@@ -297,7 +297,9 @@ pub async fn login_command(_args: &[String]) -> Result<()> {
     )
     .await
     .map_err(|_| {
-        anyhow::anyhow!("Atlassian authorization timed out after 5 minutes — re-run `lark atlassian login`")
+        anyhow::anyhow!(
+            "Atlassian authorization timed out after 5 minutes — re-run `lark atlassian login`"
+        )
     })??;
     let tokens = exchange_code(&code, &redirect_uri, &verifier).await?;
     let refresh = tokens.refresh_token.as_deref().context(

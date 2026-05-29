@@ -32,13 +32,13 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     // Width-based layout profile gates widgets / preview pane / status
     // hints when the terminal isn't wide enough to show them legibly.
     // User can lock via `:layout <profile>` when auto-detection lies.
-    let profile = state.layout_profile_override
+    let profile = state
+        .layout_profile_override
         .unwrap_or_else(|| crate::tui::profile::LayoutProfile::from_width(area.width));
 
     // Vertical split: search bar | [widgets] | content area | status bar
-    let has_widgets = state.widgets_visible
-        && !state.widget_indices.is_empty()
-        && profile.allows_widget_row();
+    let has_widgets =
+        state.widgets_visible && !state.widget_indices.is_empty() && profile.allows_widget_row();
     let widget_height = if has_widgets { 6 } else { 0 };
 
     let chunks = Layout::default()
@@ -1139,7 +1139,8 @@ fn render_widget_row(
     // Per-profile cap keeps each card at >= ~25 cols so the title and
     // first line are legible. The user's pin order chooses which cards
     // survive when the profile cap drops below the pinned count.
-    let profile = state.layout_profile_override
+    let profile = state
+        .layout_profile_override
         .unwrap_or_else(|| crate::tui::profile::LayoutProfile::from_width(area.width));
     let cap = profile.max_widget_cards();
     if cap == 0 {
@@ -1475,11 +1476,7 @@ fn render_status_bar(
                     }
                     many if !many.is_empty() => {
                         // Multiple matches: list names, Tab to complete.
-                        let names = many
-                            .iter()
-                            .map(|c| c.name)
-                            .collect::<Vec<_>>()
-                            .join("  ");
+                        let names = many.iter().map(|c| c.name).collect::<Vec<_>>().join("  ");
                         spans.push(Span::styled(
                             format!("  {names}"),
                             Style::default().fg(theme.text_dimmed),
@@ -1531,10 +1528,9 @@ fn render_status_bar(
                                 }
                             }
                         }
-                        let profile = state.layout_profile_override
-                            .unwrap_or_else(|| {
-                                crate::tui::profile::LayoutProfile::from_width(area.width)
-                            });
+                        let profile = state.layout_profile_override.unwrap_or_else(|| {
+                            crate::tui::profile::LayoutProfile::from_width(area.width)
+                        });
                         for (key, label) in hints.iter().take(profile.max_status_hints()) {
                             spans.extend(key_hint(key, label, theme));
                         }
@@ -1606,10 +1602,9 @@ fn render_status_bar(
                                     hints.push(("o", "help"));
                                 }
                             }
-                            let profile = state.layout_profile_override
-                                .unwrap_or_else(|| {
-                                    crate::tui::profile::LayoutProfile::from_width(area.width)
-                                });
+                            let profile = state.layout_profile_override.unwrap_or_else(|| {
+                                crate::tui::profile::LayoutProfile::from_width(area.width)
+                            });
                             for (key, label) in hints.iter().take(profile.max_status_hints()) {
                                 spans.extend(key_hint(key, label, theme));
                             }

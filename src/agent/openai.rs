@@ -213,7 +213,11 @@ fn serialize_input(messages: &[Message]) -> JsonValue {
                         "arguments": serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string()),
                     }));
                 }
-                ContentBlock::ToolResult { tool_use_id, content, is_error: _ } => {
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error: _,
+                } => {
                     // is_error has no native equivalent in the Responses
                     // API; callers convey error state via the `output`
                     // string itself.
@@ -275,7 +279,8 @@ fn map_http_error(status: reqwest::StatusCode, body: &str) -> ProviderError {
 
 fn extract_retry_after(body: &str) -> Option<u64> {
     let val: JsonValue = serde_json::from_str(body).ok()?;
-    val.pointer("/error/retry_after").and_then(JsonValue::as_u64)
+    val.pointer("/error/retry_after")
+        .and_then(JsonValue::as_u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -379,13 +384,16 @@ impl SseDispatcher {
                 // output_item.added event (e.g. provider bug). The
                 // distinction matters when later turns need to send
                 // function_call_output entries back.
-                let call_id = self.function_call_ids.remove(&output_index).unwrap_or_else(|| {
-                    value
-                        .get("item_id")
-                        .and_then(JsonValue::as_str)
-                        .unwrap_or_default()
-                        .to_string()
-                });
+                let call_id = self
+                    .function_call_ids
+                    .remove(&output_index)
+                    .unwrap_or_else(|| {
+                        value
+                            .get("item_id")
+                            .and_then(JsonValue::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    });
                 Ok(vec![ProviderEvent::ToolUse {
                     id: call_id,
                     name,
@@ -654,10 +662,7 @@ mod tests {
     fn error_event_maps_to_provider_error() {
         let mut d = SseDispatcher::new();
         let err = d
-            .handle(
-                "response.error",
-                r#"{"error": {"message": "rate limit"}}"#,
-            )
+            .handle("response.error", r#"{"error": {"message": "rate limit"}}"#)
             .unwrap_err();
         assert!(matches!(err, ProviderError::Api(_)));
     }
@@ -666,7 +671,11 @@ mod tests {
     fn unknown_event_types_are_silently_ignored() {
         let mut d = SseDispatcher::new();
         assert!(d.handle("response.in_progress", "{}").unwrap().is_empty());
-        assert!(d.handle("response.audio.delta", r#"{"delta": "x"}"#).unwrap().is_empty());
+        assert!(
+            d.handle("response.audio.delta", r#"{"delta": "x"}"#)
+                .unwrap()
+                .is_empty()
+        );
         assert!(d.handle("response.created", "{}").unwrap().is_empty());
     }
 
