@@ -154,6 +154,14 @@ impl PluginEngine {
         self.execute_with_source(plugin_index, ExecutionSource::UserSelected);
     }
 
+    /// Re-run a plugin in the BACKGROUND (prefetch source): the result updates
+    /// the result cache only and must NOT take over the foreground view. Used
+    /// by the widget/glance-strip auto-refresh ticks — `execute()` would emit
+    /// `UserSelected` events that yank the main pane to the refreshed plugin.
+    pub fn refresh(&self, plugin_index: usize) {
+        self.execute_with_source(plugin_index, ExecutionSource::Prefetch);
+    }
+
     /// Execute all prefetch-eligible plugins in the background.
     ///
     /// Called on startup and after refresh. Only runs plugins with `prefetch == true`.

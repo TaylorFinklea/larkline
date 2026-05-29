@@ -839,7 +839,10 @@ impl App {
                 if !due.is_empty() {
                     for pidx in &due {
                         self.state.widget_last_refresh.insert(*pidx, now);
-                        self.engine.execute(*pidx);
+                        // Background refresh: updates the card's cache without
+                        // hijacking the foreground view (execute() = UserSelected
+                        // would force the main pane to the refreshed widget).
+                        self.engine.refresh(*pidx);
                     }
                     self.rebuild_unified_list();
                 }
@@ -878,7 +881,8 @@ impl App {
                     .collect();
                 for pidx in &due {
                     self.state.status_last_refresh.insert(*pidx, now);
-                    self.engine.execute(*pidx);
+                    // Background refresh — must not steal the foreground view.
+                    self.engine.refresh(*pidx);
                 }
             }
 
@@ -984,14 +988,13 @@ impl App {
                 ExecutionSource::Prefetch => {
                     match result {
                         Ok(output) => {
-                            let entry = self
-                                .state
+                            // Always store the fresh result. (Previously only
+                            // Loading→Ready was promoted, so a re-run never
+                            // updated an existing Ready entry — the widget card /
+                            // glance chip stayed frozen at its first value.)
+                            self.state
                                 .result_cache
-                                .entry(plugin_index)
-                                .or_insert(CachedResult::Ready(output.clone()));
-                            if matches!(entry, CachedResult::Loading(_)) {
-                                *entry = CachedResult::Ready(output);
-                            }
+                                .insert(plugin_index, CachedResult::Ready(output));
                         }
                         Err(e) => {
                             self.state
