@@ -67,7 +67,10 @@ impl ScriptPlugin {
 
         let mut cmd = tokio::process::Command::new(&self.entry_path);
         cmd.current_dir(&self.plugin_dir)
-            .env("LARK_STORE_PATH", &store_path);
+            .env("LARK_STORE_PATH", &store_path)
+            // Reap the child if the timeout future below is dropped, so a hung
+            // script is not orphaned past its timeout.
+            .kill_on_drop(true);
 
         // Inject secrets from .env as environment variables.
         if let Ok(secrets) = crate::plugin::engine::SECRETS.try_with(Clone::clone) {

@@ -353,6 +353,8 @@ impl PluginEngine {
                     .env("LARK_STORE_PATH", &store_path)
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::null())
+                    // Reap the child if this timeout future is dropped mid-stream.
+                    .kill_on_drop(true)
                     .spawn()
                 {
                     Ok(c) => c,

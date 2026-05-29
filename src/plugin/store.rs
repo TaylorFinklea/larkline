@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use thiserror::Error;
 
@@ -96,8 +97,11 @@ impl PluginStore {
     pub fn set(&mut self, key: String, value: serde_json::Value) -> Result<(), StoreError> {
         let old = self.data.insert(key.clone(), value);
 
-        // Check total serialized size.
-        let size = serde_json::to_vec(&self.data)
+        // Check total serialized size against the SAME serializer `save()` uses
+        // (pretty). Validating compact here while `save()` enforces pretty let a
+        // sequence of `set()`s each succeed and then `save()` fail — silently
+        // dropping the whole batch of writes.
+        let size = serde_json::to_vec_pretty(&self.data)
             .expect("HashMap<String, Value> is always serializable")
             .len();
 
@@ -126,6 +130,34 @@ impl PluginStore {
         keys.sort();
         keys
     }
+}
+
+// ---------------------------------------------------------------------------
+// Process-wide shared store registry
+// ---------------------------------------------------------------------------
+
+/// A store shared by all executions touching the same file.
+pub type SharedStore = Arc<Mutex<PluginStore>>;
+
+fn registry() -> &'static Mutex<HashMap<PathBuf, SharedStore>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, SharedStore>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Get the shared in-memory store for `path`, loading from disk on first access.
+///
+/// All executions resolving to the same store file share one instance. This is
+/// what makes `lark.invoke` across the same `plugin_group` (or a self-invoke)
+/// safe: the outer and inner plugin mutate the SAME in-memory map, so the
+/// outer's final `save()` no longer overwrites the inner's writes with a stale
+/// copy loaded before the invoke. Within a single process the in-memory store
+/// is authoritative; the file is only re-read on first access (e.g. next launch).
+#[must_use]
+pub fn shared(path: PathBuf) -> SharedStore {
+    let mut reg = registry().lock().expect("store registry lock");
+    reg.entry(path.clone())
+        .or_insert_with(|| Arc::new(Mutex::new(PluginStore::load(path))))
+        .clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -311,5 +343,22 @@ mod tests {
     fn sanitize_name_empty_falls_back() {
         assert_eq!(sanitize_name(""), "_unnamed");
         assert_eq!(sanitize_name("___"), "_unnamed");
+    }
+
+    #[test]
+    fn shared_returns_same_instance_for_same_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("shared.json");
+
+        let a = shared(path.clone());
+        let b = shared(path.clone());
+        // A write through one handle is visible through the other (same map),
+        // which is what prevents lark.invoke lost-update overwrites.
+        a.lock()
+            .unwrap()
+            .set("k".to_string(), serde_json::json!(1))
+            .unwrap();
+        assert_eq!(b.lock().unwrap().get("k"), Some(&serde_json::json!(1)));
+        assert!(Arc::ptr_eq(&a, &b));
     }
 }

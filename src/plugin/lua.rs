@@ -114,6 +114,9 @@ impl LuaPlugin {
         let exec_fn = lua
             .create_async_function(|_, (cmd, args): (String, Option<Vec<String>>)| async move {
                 let mut command = tokio::process::Command::new(&cmd);
+                // Reap the child if the enclosing plugin-timeout future is dropped,
+                // so a hung subprocess is not orphaned.
+                command.kill_on_drop(true);
                 if let Some(ref args) = args {
                     command.args(args);
                 }
@@ -145,6 +148,8 @@ impl LuaPlugin {
                 |lua, (cmd, args, opts): (String, Option<Vec<String>>, Option<mlua::Table>)| async move {
                     use tokio::io::AsyncWriteExt;
                     let mut command = tokio::process::Command::new(&cmd);
+                    // Reap the child if the enclosing plugin-timeout future is dropped.
+                    command.kill_on_drop(true);
                     if let Some(ref args) = args {
                         command.args(args);
                     }
@@ -159,20 +164,33 @@ impl LuaPlugin {
                     command.stderr(std::process::Stdio::piped());
 
                     let mut child = command.spawn().map_err(LuaError::external)?;
-                    if let Some(payload) = stdin_payload {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            stdin
-                                .write_all(payload.as_bytes())
-                                .await
-                                .map_err(LuaError::external)?;
+                    // Take stdin out before moving `child` into wait_with_output so the
+                    // write runs CONCURRENTLY with draining stdout/stderr. Writing all of
+                    // stdin first and only then reading output deadlocks when the child
+                    // fills its stdout pipe buffer (~64KB) while we're still blocked
+                    // writing its stdin — the classic pipe-buffer deadlock.
+                    let mut stdin_handle = child.stdin.take();
+                    let write_stdin = async {
+                        if let (Some(payload), Some(mut stdin)) =
+                            (stdin_payload, stdin_handle.take())
+                        {
+                            if let Err(e) = stdin.write_all(payload.as_bytes()).await {
+                                // The child may close stdin / exit before consuming
+                                // everything (e.g. `head`); a broken pipe is a normal
+                                // end-of-write, not a failure.
+                                if e.kind() != std::io::ErrorKind::BrokenPipe {
+                                    return Err(e);
+                                }
+                            }
                             // Drop closes stdin so the child sees EOF.
                             drop(stdin);
                         }
-                    }
-                    let output = child
-                        .wait_with_output()
-                        .await
-                        .map_err(LuaError::external)?;
+                        Ok::<(), std::io::Error>(())
+                    };
+                    let (write_res, output_res) =
+                        tokio::join!(write_stdin, child.wait_with_output());
+                    write_res.map_err(LuaError::external)?;
+                    let output = output_res.map_err(LuaError::external)?;
                     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
                     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
                     let exit_code = output.status.code().unwrap_or(-1);
@@ -573,9 +591,9 @@ impl LuaPlugin {
             &self.metadata.name,
             self.metadata.plugin_group.as_deref(),
         );
-        let store = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::plugin::store::PluginStore::load(store_path),
-        ));
+        // Shared per-path instance so a same-group `lark.invoke` (or self-invoke)
+        // operates on the same in-memory store and writes are not lost.
+        let store = crate::plugin::store::shared(store_path);
         let store_for_save = store.clone();
 
         // Run the entire Lua execution inside a timeout.
@@ -682,9 +700,9 @@ impl LuaPlugin {
             &self.metadata.name,
             self.metadata.plugin_group.as_deref(),
         );
-        let store = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::plugin::store::PluginStore::load(store_path),
-        ));
+        // Shared per-path instance so a same-group `lark.invoke` (or self-invoke)
+        // operates on the same in-memory store and writes are not lost.
+        let store = crate::plugin::store::shared(store_path);
         let store_for_save = store.clone();
 
         tokio::time::timeout(timeout, async move {
