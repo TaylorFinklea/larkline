@@ -1,7 +1,7 @@
 [plugin]
 name = "Caffeinate"
-description = "Keep your Mac awake — Spotlight Caffeinate control"
-version = "0.2.0"
+description = "Keep your Mac awake — built-in macOS caffeinate"
+version = "0.3.0"
 author = "taylor"
 icon = "☕"
 icon_nerd = "󰛊"

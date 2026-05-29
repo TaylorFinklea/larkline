@@ -1,119 +1,96 @@
--- Caffeinate: Status — current caffeinate state with stop action.
--- Requires spotlight-caffeinate-cli in PATH.
+-- Caffeinate: Status — state of OUR keep-awake session. We own it via the
+-- built-in macOS `caffeinate` command (no third-party CLI): a detached
+-- `caffeinate -d -i [-t SECS]` whose PID + end time live in lark.store.
+-- Canonical helpers in lib.lua; inlined here (mlua sandbox has no require()).
+
+-- SHARED: now / pid_alive / stop (canonical in lib.lua)
+local function now()
+    return tonumber((lark.exec("date", { "+%s" }) or ""):match("%d+")) or 0
+end
+
+local function pid_alive(pid)
+    if not pid or tostring(pid) == "" then
+        return false
+    end
+    local comm = lark.exec("ps", { "-p", tostring(pid), "-o", "comm=" })
+    return comm ~= nil and comm:find("caffeinate", 1, true) ~= nil
+end
+
+local function clear_state()
+    lark.store.delete("pid")
+    lark.store.delete("ending_at")
+end
+
+local function fmt_remaining(secs)
+    if secs <= 0 then
+        return "0s"
+    end
+    local h = math.floor(secs / 3600)
+    local m = math.floor((secs % 3600) / 60)
+    if h > 0 then
+        return h .. "h " .. m .. "m"
+    end
+    if m > 0 then
+        return m .. "m"
+    end
+    return secs .. "s"
+end
 
 lark.register({
     on_run = function()
-        local raw = lark.exec("spotlight-caffeinate-cli", { "status" })
+        local pid = lark.store.get("pid")
 
-        if not raw or raw == "" then
+        if not pid_alive(pid) then
+            -- Nothing running (or it ended / was killed) — heal stale state.
+            clear_state()
             return {
-                title = "Caffeinate",
-                status = "n/a",
+                title = "Caffeinate — idle",
+                status = "off",
                 items = { {
-                    label  = "spotlight-caffeinate-cli not found",
-                    detail = "Install Spotlight Caffeinate",
-                    icon   = "⚠",
+                    label  = "Inactive",
+                    detail = "Mac will sleep normally — use Start to keep it awake",
+                    icon   = "💤",
                 } },
             }
         end
 
-        -- Try JSON first (newer CLI versions).
-        local ok, status = pcall(lark.json.decode, raw)
-        if ok and type(status) == "table" then
-            local items = {}
-            local is_active = status.active or status.is_active or false
-            local chip
-
-            if is_active then
-                local remaining = status.remaining_minutes or status.remaining or "?"
-                chip = tostring(remaining) .. "m"
-                items[#items + 1] = {
-                    label  = "Active — " .. tostring(remaining) .. " min remaining",
-                    detail = "Mac is staying awake",
-                    icon   = "☕",
-                }
-                items[#items + 1] = {
-                    label   = "Stop",
-                    icon    = "⏹",
-                    actions = {
-                        { label = "Stop caffeinate", kind = "shell", args = { "spotlight-caffeinate-cli", "stop" } },
-                    },
-                }
-            else
-                chip = "off"
-                items[#items + 1] = {
-                    label  = "Inactive",
-                    detail = "Mac will sleep normally — use Start to activate",
-                    icon   = "💤",
-                }
-            end
-            return { title = "Caffeinate", status = chip, items = items }
-        end
-
-        -- Fallback: parse key-value text format (e.g. "State: idle\nRemaining: 0s\n...").
+        local ending_at = tonumber(lark.store.get("ending_at")) or 0
         local items = {}
-        local state_value = "unknown"
-        local remaining_value = nil
+        local chip
 
-        for line in raw:gmatch("[^\r\n]+") do
-            local key, value = line:match("^([^:]+):%s*(.+)$")
-            if key and value then
-                key = key:match("^%s*(.-)%s*$")
-                value = value:match("^%s*(.-)%s*$")
-                if key == "State" then state_value = value end
-                if key == "Remaining" then remaining_value = value end
-
-                local icon = "📋"
-                if key == "State" then
-                    icon = value == "idle" and "💤" or "☕"
-                elseif key == "Remaining" then
-                    icon = "⏱"
-                elseif key == "PID" then
-                    icon = "🔧"
-                elseif key == "Mode" or key == "Preset" then
-                    icon = "⚙️"
-                end
-
-                items[#items + 1] = {
-                    label  = key,
-                    detail = value,
-                    icon   = icon,
-                    copy_text = value,
-                }
+        if ending_at > 0 then
+            local remaining = ending_at - now()
+            if remaining < 0 then
+                remaining = 0
             end
-        end
-
-        if #items == 0 then
-            items[#items + 1] = { label = raw:gsub("%s+$", ""), icon = "☕" }
-        end
-
-        if state_value ~= "idle" and state_value ~= "unknown" then
+            chip = fmt_remaining(remaining)
             items[#items + 1] = {
-                label   = "Stop",
-                icon    = "⏹",
-                actions = {
-                    { label = "Stop caffeinate", kind = "shell", args = { "spotlight-caffeinate-cli", "stop" } },
-                },
+                label  = "Active — " .. chip .. " remaining",
+                detail = "Mac is staying awake (caffeinate -d -i)",
+                icon   = "☕",
+            }
+        else
+            chip = "on"
+            items[#items + 1] = {
+                label  = "Active — indefinite",
+                detail = "Mac is staying awake until you stop it",
+                icon   = "☕",
             }
         end
 
-        -- Chip: when active, prefer the time remaining (e.g. "23m") over the
-        -- bare state word; fall back to the state if no useful remaining value.
-        local active = state_value ~= "idle" and state_value ~= "unknown"
-        local chip
-        if active then
-            if remaining_value and remaining_value ~= "" and remaining_value ~= "0s" then
-                -- Drop the trailing seconds ("28m 16s" -> "28m"); the chip only
-                -- refreshes every status_refresh_secs, so second-precision is
-                -- misleading. Keep a bare "45s" when that's all there is.
-                local compact = (remaining_value:gsub("%s+%d+s$", ""))
-                chip = (compact ~= "" and compact) or remaining_value
-            else
-                chip = state_value
-            end
-        else
-            chip = "off"
-        end
-        return { title = "Caffeinate — " .. state_value, status = chip, items = items }
+        items[#items + 1] = {
+            label     = "PID " .. tostring(pid),
+            icon      = "🔧",
+            copy_text = tostring(pid),
+        }
+        items[#items + 1] = {
+            label   = "Stop",
+            icon    = "⏹",
+            actions = {
+                { label = "Stop caffeinate", kind = "shell", args = { "kill", tostring(pid) } },
+            },
+        }
+
+        return { title = "Caffeinate — active", status = chip, items = items }
     end,
 })

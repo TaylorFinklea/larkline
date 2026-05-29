@@ -1,6 +1,27 @@
 # Current State
 
-> Updated: 2026-05-28
+> Updated: 2026-05-29
+
+## Caffeinate rewrite — own it via built-in `caffeinate` (2026-05-29)
+
+Dropped the `spotlight-caffeinate-cli` dependency; the plugin now owns the
+keep-awake session using the built-in macOS `caffeinate`:
+- Start launches a detached `nohup caffeinate -d -i [-t SECS] & echo $!`,
+  records `pid` + `ending_at` (unix secs, "0"=indefinite) in `lark.store`
+  (group `caffeinate.json`). Time comes from `date +%s` (sandbox has no `os`).
+- Status reads the store, checks liveness via `ps -p <pid> -o comm=` (matches
+  "caffeinate" → survives PID recycling, unlike bare `kill -0`), computes
+  remaining, shows the chip (`28m` / `1h 5m` / `on`), and self-heals stale
+  state to idle when the process is gone. Stop = `kill <pid>`.
+- Extend = restart with (remaining + N) min; indefinite stays indefinite.
+- Canonical helpers in new `lib.lua`; inlined per-file w/ SHARED markers
+  (no `require`). Manifest desc updated, bumped to 0.3.0.
+- **Verified headless**: real caffeinate + store → Status chip `2m`, Stop
+  targets right PID, dead-PID heals to `off` + clears store. **Start/Extend
+  form-submit only reachable in the TUI** (CLI `invoke` can't submit forms) —
+  needs Taylor to exercise Start/Extend live. Pushed.
+- Note: any pre-existing `spotlight-caffeinate-cli` session is now invisible to
+  the plugin (shows idle); it just expires on its own timer.
 
 ## Bug sweep + fixes (2026-05-28) — advances Phase 10
 
