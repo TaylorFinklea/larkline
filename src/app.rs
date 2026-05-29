@@ -818,18 +818,22 @@ impl App {
                     .iter()
                     .copied()
                     .filter(|pidx| {
-                        let meta = &self.state.plugins[*pidx];
+                        let Some(meta) = self.state.plugins.get(*pidx) else {
+                            return false;
+                        };
+                        // Same absent-key fix as the status strip: unwrap_or(now)
+                        // made widgets never auto-refresh on their interval (only
+                        // at startup / manual R). map_or(true) treats a
+                        // never-refreshed index as due.
                         meta.widget_refresh_secs > 0
-                            && now
-                                .duration_since(
-                                    self.state
-                                        .widget_last_refresh
-                                        .get(pidx)
-                                        .copied()
-                                        .unwrap_or(now),
-                                )
-                                .as_secs()
-                                >= meta.widget_refresh_secs
+                            && self
+                                .state
+                                .widget_last_refresh
+                                .get(pidx)
+                                .copied()
+                                .is_none_or(|t| {
+                                    now.duration_since(t).as_secs() >= meta.widget_refresh_secs
+                                })
                     })
                     .collect();
                 if !due.is_empty() {
@@ -852,21 +856,24 @@ impl App {
                     .iter()
                     .copied()
                     .filter(|pidx| {
-                        let meta = &self.state.plugins[*pidx];
+                        // Bounds-safe: status_indices may briefly lag state.plugins
+                        // (e.g. between a plugin-list rebuild and index rebuild).
+                        let Some(meta) = self.state.plugins.get(*pidx) else {
+                            return false;
+                        };
                         let interval = if meta.status_refresh_secs > 0 {
                             meta.status_refresh_secs
                         } else {
                             30
                         };
-                        now.duration_since(
-                            self.state
-                                .status_last_refresh
-                                .get(pidx)
-                                .copied()
-                                .unwrap_or(now),
-                        )
-                        .as_secs()
-                            >= interval
+                        // An absent last-refresh key means "never refreshed" → due
+                        // now. (unwrap_or(now) would make duration 0 < interval, so
+                        // the chip would never auto-refresh — froze the countdown.)
+                        self.state
+                            .status_last_refresh
+                            .get(pidx)
+                            .copied()
+                            .is_none_or(|t| now.duration_since(t).as_secs() >= interval)
                     })
                     .collect();
                 for pidx in &due {
@@ -1199,6 +1206,17 @@ impl App {
                 {
                     return;
                 }
+                // Glance strip focused: k steps up/out to the command list
+                // (the strip is the bottom-most row). Otherwise j/k would
+                // silently scroll the hidden list while the chip stays lit.
+                if self.state.status_focused
+                    && self.state.action_palette.is_none()
+                    && self.state.copy_menu.is_none()
+                    && self.state.theme_picker.is_none()
+                {
+                    self.state.status_focused = false;
+                    return;
+                }
                 // Action palette is its own list — navigate within it, not
                 // the rows behind it. Must come before mode-based branches
                 // since the palette renders over ViewOutput.
@@ -1278,6 +1296,16 @@ impl App {
                     && self.state.theme_picker.is_none()
                 {
                     self.state.widget_focused = false;
+                    return;
+                }
+                // Glance strip focused: j stays in the strip (it's the
+                // bottom-most row — nothing below). Captures the key so it
+                // doesn't scroll the hidden list.
+                if self.state.status_focused
+                    && self.state.action_palette.is_none()
+                    && self.state.copy_menu.is_none()
+                    && self.state.theme_picker.is_none()
+                {
                     return;
                 }
                 // Action palette is its own list — navigate within it, not
@@ -1423,6 +1451,9 @@ impl App {
                     {
                         self.state.status_focused = false;
                         self.open_plugin_in_view_output(plugin_index);
+                    } else {
+                        // Stale/empty selection — step out instead of a dead key.
+                        self.state.status_focused = false;
                     }
                 }
             }
@@ -2264,8 +2295,15 @@ impl App {
                     self.state.result_cache.clear();
                     self.state.viewing_plugin_index = None;
                     self.state.navigation_history.clear();
+                    // The plugin list was replaced, so widget/status indices (and
+                    // their per-index refresh timestamps) point into the OLD list —
+                    // rebuild them or a stale index panics the render/refresh.
+                    self.state.widget_last_refresh.clear();
+                    self.state.status_last_refresh.clear();
                     self.engine.execute_all();
                     self.rebuild_unified_list();
+                    crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
+                    crate::widgets::rebuild_status_indices(&mut self.state, &self.pm_config);
                 }
                 Err(e) => {
                     self.state.warnings = vec![format!("Refresh failed: {e}")];

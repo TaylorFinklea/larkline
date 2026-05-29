@@ -55,6 +55,10 @@ pub fn rebuild_widget_indices(state: &mut AppState, pm_config: &PluginManagerCon
 
     state.widget_indices = indices;
     state.widgets_visible = !state.widget_indices.is_empty();
+    if state.widget_indices.is_empty() {
+        // Don't leave focus on a row that no longer exists.
+        state.widget_focused = false;
+    }
     if state.widget_selected >= state.widget_indices.len() {
         state.widget_selected = 0;
     }
@@ -79,6 +83,10 @@ pub fn rebuild_status_indices(state: &mut AppState, pm_config: &PluginManagerCon
 
     state.status_indices = indices;
     state.status_visible = !state.status_indices.is_empty();
+    if state.status_indices.is_empty() {
+        // Don't strand focus on a strip that no longer renders.
+        state.status_focused = false;
+    }
     if state.status_selected >= state.status_indices.len() {
         state.status_selected = 0;
     }
@@ -92,4 +100,29 @@ pub fn sync_preview_index(state: &mut AppState) {
         .map(|r| match r {
             UnifiedRow::Command { plugin_index, .. } => *plugin_index,
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::AppState;
+    use crate::config::PluginManagerConfig;
+
+    #[test]
+    fn rebuild_status_indices_clears_focus_when_strip_empties() {
+        // No plugins → no status items; a lingering focus must be dropped so
+        // the input layer doesn't capture h/l/Enter against an invisible strip.
+        let mut state = AppState {
+            status_focused: true,
+            status_visible: true,
+            ..Default::default()
+        };
+        rebuild_status_indices(&mut state, &PluginManagerConfig::default());
+        assert!(state.status_indices.is_empty());
+        assert!(!state.status_visible);
+        assert!(
+            !state.status_focused,
+            "focus must clear when the strip empties"
+        );
+    }
 }

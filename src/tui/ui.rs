@@ -1418,7 +1418,10 @@ fn render_glance_strip(
     // span is pushed, only an early `break`, so `slot > 0` == "a chip already
     // rendered" (used for the separator + overflow guard).
     for (slot, &pidx) in state.status_indices.iter().enumerate() {
-        let meta = &state.plugins[pidx];
+        // Bounds-safe, mirroring render_widget_row — a stale index never panics.
+        let Some(meta) = state.plugins.get(pidx) else {
+            continue;
+        };
         let text = match state.result_cache.get(&pidx) {
             Some(CachedResult::Ready(o) | CachedResult::Revalidating(o)) => o
                 .status
