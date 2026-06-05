@@ -1,43 +1,32 @@
-# Session Handoff Template
+# current-state.md template
 
-Copy this template and fill it in at the end of each work session. Update `current-state.md` and the **Now / Next / Later** section of `roadmap.md` with the same information.
+`current-state.md` is a **loop-state** file: ≤20 lines, fragments only — not a
+journal. It holds only what the NEXT iteration needs to resume. Each other kind
+of content has exactly ONE home (see the AGENTS.md routing table):
+
+- What happened + why → `git log` + `decisions.md`
+- Pending actions / discovered tasks → `roadmap.md` Now (caveats inline)
+- Multi-session design detail → `phases/<slug>-spec.md`
+
+Copy the shape below. Keep it terse.
 
 ---
 
-## Session Summary
+**Branch:** `<branch>` — `<ahead/behind origin>`; `<build/test status in one line>`
 
-**Date:** YYYY-MM-DD
-**Branch:** main (or feature branch name)
-**Commits this session:**
-- `abc1234` Short description
-- `def5678` Short description
+## Plan
 
-## What Changed
+<!-- The ONE active roadmap Now item, expanded into phase checkboxes.
+     Empty when no item is active. Each step carries its own Verify. -->
 
-- Bullet list of functional changes, not file-level diffs
-- Focus on behavior the next session needs to know about
+- [ ] First step — Verify: `<command>` or `human: <named check>`
+- [ ] Second step — Verify: `<command>`
+- [?] Step awaiting human verify
 
-## Files Modified
+## Blockers
 
-- `src/app.rs` — what changed and why
-- `src/tui/ui.rs` — what changed and why
+- `<fragment: what's blocked + why>`
 
-## Decisions Made
+## Open questions
 
-If any architectural decisions were made, add them to `.docs/ai/decisions.md` as a new ADR entry.
-
-## Current State
-
-- Tests: passing / failing (which?)
-- Clippy: clean / warnings (which?)
-- Branch: clean / uncommitted changes
-
-## Next Session Should
-
-1. Exact first action (e.g. "Implement sidebar width ratio change in `src/tui/ui.rs`")
-2. Second action
-3. Third action
-
-## Open Questions for Taylor
-
-- Any product decisions that need Taylor's input before proceeding
+- `<product/design decision needing the user>`
