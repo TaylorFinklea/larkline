@@ -111,3 +111,9 @@ The trait-change route remains available if v1.x wants explicit per-call cancell
 - Session forward-compat `#[serde(other)]` skip → v1.x (needs cross-cutting `SessionEntry` match churn; every variant assumes an `id`). The doc comment was corrected to stop claiming skip-on-unknown works today.
 - `cargo clippy --all-targets` has 5 pre-existing test-code lints (wildcard-over-2-variant matches, a boxed test-provider helper, items-after-test-module). Not introduced by the sweep and not gated by the project's `--bin lark` gate; left untouched to respect scope.
 - `home_dir()` falls back to the per-user temp dir (private `$TMPDIR` on macOS) when `HOME` is unset, rather than a full `Result`-returning refactor of `config_path`/`env_path`/`default_plugin_dir` and all their callers (large ripple for a low-severity, uncommon trigger).
+
+## ADR-011: harness-deck reports for larkline live central, not in-repo (2026-06-05)
+
+**Context:** The harness-deck integration asked where larkline's `report.json` artifacts should live — in-repo `.harness/` (travels with code) or the central `~/.harness/reports/larkline/` (clean git). Taylor answered via the dashboard ask `report-location`.
+
+**Decision:** **Central** — `~/.harness/reports/larkline/<run>/report.json`. Agents must NOT create or commit an in-repo `.harness/` for larkline; report artifacts stay out of the repo working tree. The original setup run (`setup-20260527-214533`) was migrated from `.harness/` to the central path and the in-repo dir slated for removal to enact "clean git."
