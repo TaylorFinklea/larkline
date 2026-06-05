@@ -61,7 +61,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
   - **Verify:** `luac -p` on all three dirs && `cargo test --bin lark` && `lark invoke "Docker:Containers"` (no crash w/ Docker absent).
   - **Tier:** Sonnet — large mechanical refactor, order-sensitive. <!-- caveat: missing one lib.lua helper leaves errors silent; convert ALL exec calls per file -->
 
-- [ ] **Theme polish (Phase 10)** — 4 concrete sub-tasks:
+- [x] **Theme polish (Phase 10)** — audit + objective fixes done 2026-06-05 (workflow, 20 findings). Added `separator` color (fixed nord/tokyo dividers below 3:1); fixed default focused-chip inversion + nord/gruvbox error AA. Subtask 4 (gallery) is Taylor's visual call → QA. error/highlight_bg pairings intentionally not forced (never rendered). 4 concrete sub-tasks:
   1. **Contrast audit:** error/accent vs `status_bar_bg` + `highlight_bg` across all 6 presets (WCAG AA 4.5:1). The degraded ⚠ chip reuses `theme.error` — verify it's visible on each preset's background.
   2. **Focused-chip inversion:** confirm `highlight_bg`/`highlight_fg` actually invert (some presets, e.g. Gruvbox, use close values).
   3. **If gaps found:** add a `separator` color to the Theme struct (additive; update all presets) — dividers currently reuse `text_dimmed`.
@@ -85,6 +85,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 - [ ] **Mail mutating actions** — archive/flag/delete on a real mailbox. Runbook: `phases/v1.0-phase-4-mail-smoke-runbook.md`.
 - [ ] **Caffeinate Start/Extend** — Start (e.g. 5 min) → chip counts down → Extend → Stop in the live TUI (CLI can't submit forms).
 - [ ] **Web search submit path** — in the TUI, run Web Search Shortcuts:Google, type a query w/ spaces (e.g. "rust async"), Enter → confirm the browser opens the encoded URL (CLI can't submit forms).
+- [ ] **Theme gallery (Phase 10 subtask 4)** — run the TUI in each of the 6 presets, screenshot glance strip + 2 widgets + a degraded ⚠ chip + a focused chip → `.docs/screenshots/themes-v1.0/<preset>.png`; pick the 2-3 for the Medium post. Verify the `default` preset's named-ANSI colors look right in your actual terminal (its computed ratios are reference-only).
 - [ ] **Re-link k8s plugin** — `~/.config/larkline/plugins/k8s` is a stale COPY (not a symlink; missing recent commands like deployments/logs/namespaces), so the from_exit migration + newer k8s commands aren't live. Re-link it to `examples/plugins/k8s` (mirror docker/bitwarden/caffeinate symlinks) or `lark plugin sync`. Worth auditing whether other installed plugins are stale copies too.
 
 ## Completed Milestones
