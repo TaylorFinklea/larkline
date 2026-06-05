@@ -46,7 +46,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 
 ### Agent-doable (v1.0 features)
 
-- [ ] **Web search shortcuts plugin (Phase 9a)**
+- [x] **Web search shortcuts plugin (Phase 9a)** — built + adversarially verified 2026-06-05 (luac clean, form invoke works, open-action shape + urlencode code-reviewed). Symlinked into live config. Submit→browser hop is TUI-only (see QA).
   - **Scope:** self-contained Lua example plugin — Raycast-style web-search commands (Google, DuckDuckGo, GitHub, MDN, npm) that take a query and open the result URL.
   - **Files:** `examples/plugins/web-search-shortcuts/{manifest.toml,google.lua,duckduckgo.lua,github.lua,mdn.lua,npm.lua}` (new).
   - **Pattern (mirror, don't guess):** `examples/plugins/quicklinks/` structure; the `kind = "open"` URL action in `github/my-prs.lua` + `hackernews/init.lua`; form input like `caffeinate/start.lua`. URL-encode the query inline (no `os`/HTTP in sandbox).
@@ -84,6 +84,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 - [ ] **Agent cancellation** — abort mid-turn against a real provider (no production caller until the TUI agent loop; verify abort → `TurnOutcome::Aborted`).
 - [ ] **Mail mutating actions** — archive/flag/delete on a real mailbox. Runbook: `phases/v1.0-phase-4-mail-smoke-runbook.md`.
 - [ ] **Caffeinate Start/Extend** — Start (e.g. 5 min) → chip counts down → Extend → Stop in the live TUI (CLI can't submit forms).
+- [ ] **Web search submit path** — in the TUI, run Web Search Shortcuts:Google, type a query w/ spaces (e.g. "rust async"), Enter → confirm the browser opens the encoded URL (CLI can't submit forms).
 
 ## Completed Milestones
 

@@ -1,0 +1,43 @@
+[plugin]
+name = "Web Search Shortcuts"
+description = "Raycast-style web-search commands — type a query, open the result in your browser"
+version = "0.1.0"
+author = "larkline"
+icon = "🔍"
+icon_nerd = "󰱼"
+category = "web"
+
+[[commands]]
+name = "Google"
+description = "Search Google"
+entry = "google.lua"
+timeout_seconds = 5
+quickkey = "ws"
+
+[[commands]]
+name = "DuckDuckGo"
+description = "Search DuckDuckGo"
+entry = "duckduckgo.lua"
+timeout_seconds = 5
+quickkey = "dd"
+
+[[commands]]
+name = "GitHub"
+description = "Search GitHub"
+entry = "github.lua"
+timeout_seconds = 5
+quickkey = "gh"
+
+[[commands]]
+name = "MDN"
+description = "Search MDN Web Docs"
+entry = "mdn.lua"
+timeout_seconds = 5
+quickkey = "md"
+
+[[commands]]
+name = "npm"
+description = "Search the npm registry"
+entry = "npm.lua"
+timeout_seconds = 5
+quickkey = "npm"
