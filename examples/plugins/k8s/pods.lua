@@ -129,18 +129,21 @@ end
 
 lark.register({
     on_run = function()
-        local raw = lark.exec("kubectl", { "get", "pods", "-A", "-o", "json" })
+        local res = lark.exec_io("kubectl", { "get", "pods", "-A", "-o", "json" })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Kubernetes Pods",
-                items = { error_item({
-                    label = "kubectl unavailable or cluster unreachable",
-                    detail = "Install kubectl and configure a cluster",
-                    help_url = "https://kubernetes.io/docs/tasks/tools/install-kubectl/",
-                }) },
+                level = "warn",
+                items = { from_exit(res.stderr, { cli = "kubectl", install_url = "https://kubernetes.io/docs/tasks/tools/" })
+                    or error_item({
+                        label = "kubectl unavailable or cluster unreachable",
+                        detail = "Install kubectl and configure a cluster",
+                        help_url = "https://kubernetes.io/docs/tasks/tools/install-kubectl/",
+                    }) },
             }
         end
+        local raw = res.stdout
 
         local ok, data = pcall(lark.json.decode, raw)
         if not ok or not data or not data.items then

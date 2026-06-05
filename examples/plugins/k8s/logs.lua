@@ -98,18 +98,21 @@ lark.register({
         local ns_raw = lark.exec("kubectl", { "config", "view", "--minify", "-o", "jsonpath={.contexts[0].context.namespace}" })
         local ns = (ns_raw and ns_raw ~= "") and ns_raw or "default"
 
-        local raw = lark.exec("kubectl", { "get", "pods", "-n", ns, "-o", "json" })
+        local res = lark.exec_io("kubectl", { "get", "pods", "-n", ns, "-o", "json" })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Logs (" .. ns .. ")",
-                items = { error_item({
-                    label = "kubectl unavailable or no pods in " .. ns,
-                    detail = "Switch namespace or check cluster",
-                    help_url = "https://kubernetes.io/docs/tasks/tools/install-kubectl/",
-                }) },
+                level = "warn",
+                items = { from_exit(res.stderr, { cli = "kubectl", install_url = "https://kubernetes.io/docs/tasks/tools/" })
+                    or error_item({
+                        label = "kubectl unavailable or no pods in " .. ns,
+                        detail = "Switch namespace or check cluster",
+                        help_url = "https://kubernetes.io/docs/tasks/tools/install-kubectl/",
+                    }) },
             }
         end
+        local raw = res.stdout
 
         local ok, data = pcall(lark.json.decode, raw)
         if not ok or not data or not data.items then

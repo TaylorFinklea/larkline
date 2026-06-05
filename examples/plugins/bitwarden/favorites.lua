@@ -129,16 +129,18 @@ end
 local function run_bw(session, args, title)
     local full = { "--session", session, "--response" }
     for _, a in ipairs(args) do full[#full + 1] = a end
-    local raw = lark.exec("bw", full)
-    if not raw or raw == "" then
-        local translated = from_exit(raw or "", {
+    local res = lark.exec_io("bw", full)
+    if res.exit_code ~= 0 or res.stdout == "" then
+        local translated = from_exit(res.stderr, {
             cli = "bw",
             service = "Bitwarden",
+            login_command = "bw login",
             install_url = BW_HELP_URL,
             login_help_url = BW_LOCKED_HELP_URL,
         })
-        return nil, { title = title, items = { translated or error_item({ label = "No response from bw CLI", detail = "Is `bw` installed and on $PATH?", help_url = BW_HELP_URL }) } }
+        return nil, { title = title, level = "warn", items = { translated or error_item({ label = "No response from bw CLI", detail = "Is `bw` installed and on $PATH?", help_url = BW_HELP_URL }) } }
     end
+    local raw = res.stdout
     local ok, parsed = pcall(lark.json.decode, raw)
     if not ok or type(parsed) ~= "table" then
         return nil, { title = title, items = { error_item({ label = "Failed to parse bw response", detail = raw:sub(1, 120), help_url = BW_HELP_URL }) } }

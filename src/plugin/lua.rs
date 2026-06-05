@@ -163,7 +163,24 @@ impl LuaPlugin {
                     command.stdout(std::process::Stdio::piped());
                     command.stderr(std::process::Stdio::piped());
 
-                    let mut child = command.spawn().map_err(LuaError::external)?;
+                    // Spawn failure (binary not on PATH) is surfaced via the
+                    // result table — stderr carries the OS message ("No such
+                    // file or directory", which from_exit translates to a
+                    // "<cli> not found" item) and exit_code = 127 (the shell
+                    // convention for command-not-found) — rather than raising a
+                    // Lua error. This matches lark.exec's graceful degradation
+                    // and this fn's documented contract above; a plugin's own
+                    // `if res.exit_code ~= 0` guard then handles it.
+                    let mut child = match command.spawn() {
+                        Ok(child) => child,
+                        Err(e) => {
+                            let result = lua.create_table()?;
+                            result.set("stdout", "")?;
+                            result.set("stderr", format!("{cmd}: {e}"))?;
+                            result.set("exit_code", 127)?;
+                            return Ok(result);
+                        }
+                    };
                     // Take stdin out before moving `child` into wait_with_output so the
                     // write runs CONCURRENTLY with draining stdout/stderr. Writing all of
                     // stdin first and only then reading output deadlocks when the child
@@ -1019,5 +1036,30 @@ lark.register({
         );
         let output = plugin.execute().await.expect("execution failed");
         assert_eq!(output.title, "stdout=|stderr=my-stderr|code=7");
+    }
+
+    #[tokio::test]
+    async fn lark_exec_io_surfaces_spawn_failure_via_table() {
+        // A binary that does not exist must NOT raise — exec_io surfaces the
+        // spawn error through the result table (exit_code 127 + stderr) so a
+        // plugin's `if res.exit_code ~= 0` guard / from_exit can handle it
+        // gracefully. Locks in the documented contract.
+        let plugin = lua_plugin_from_source(
+            "exec-io-spawn-fail-test",
+            r#"
+lark.register({
+    on_run = function()
+        local r = lark.exec_io("larkline-no-such-binary-xyz", { "arg" })
+        return {
+            title = string.format("code=%d|has_stderr=%s",
+                r.exit_code, tostring(r.stderr ~= nil and r.stderr ~= "")),
+            items = {}
+        }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution must not raise");
+        assert_eq!(output.title, "code=127|has_stderr=true");
     }
 }

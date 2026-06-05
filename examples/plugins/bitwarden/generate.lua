@@ -126,20 +126,22 @@ lark.register({
                 if fv.ambiguous == "true" then table.insert(args, "--ambiguous") end
             end
 
-            local raw = lark.exec("bw", args)
-            if not raw or raw == "" then
-                local translated = from_exit(raw or "", {
+            local res = lark.exec_io("bw", args)
+            if res.exit_code ~= 0 or res.stdout == "" then
+                local translated = from_exit(res.stderr, {
                     cli = "bw",
                     service = "Bitwarden",
+                    login_command = "bw login",
                     install_url = BW_HELP_URL,
                     login_help_url = BW_LOCKED_HELP_URL,
                 })
                 return {
                     title = "Generate Password",
+                    level = "warn",
                     items = { translated or error_item({ label = "bw generate returned no output", help_url = BW_HELP_URL }) },
                 }
             end
-            local pw = raw:gsub("%s+$", "")
+            local pw = res.stdout:gsub("%s+$", "")
 
             -- Pack the exact bw args (minus the leading "generate" verb) into
             -- the chain context so "Generate another" repeats the user's
@@ -226,16 +228,17 @@ lark.register({
                 end
             end
 
-            local raw = lark.exec("bw", bw_args)
-            local pw = (raw or ""):gsub("%s+$", "")
-            if pw == "" then
-                local translated = from_exit(raw or "", {
+            local res = lark.exec_io("bw", bw_args)
+            local pw = (res.stdout or ""):gsub("%s+$", "")
+            if res.exit_code ~= 0 or pw == "" then
+                local translated = from_exit(res.stderr, {
                     cli = "bw",
                     service = "Bitwarden",
+                    login_command = "bw login",
                     install_url = BW_HELP_URL,
                     login_help_url = BW_LOCKED_HELP_URL,
                 })
-                return { title = "Regenerate", items = { translated or error_item({ label = "bw generate returned no output", help_url = BW_HELP_URL }) } }
+                return { title = "Regenerate", level = "warn", items = { translated or error_item({ label = "bw generate returned no output", help_url = BW_HELP_URL }) } }
             end
 
             -- Derive a detail line that reflects the actual options used so

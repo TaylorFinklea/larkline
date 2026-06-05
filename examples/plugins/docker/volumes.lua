@@ -148,15 +148,19 @@ lark.register({
         local err = check_docker("Volumes")
         if err then return err end
 
-        local raw = lark.exec("docker", {
+        local res = lark.exec_io("docker", {
             "volume", "ls", "--format",
             "{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}"
         })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Volumes",
-                items = { error_item({
+                level = "warn",
+                items = { from_exit(res.stderr, {
+                    cli = "docker",
+                    install_url = "https://docs.docker.com/get-docker/",
+                }) or error_item({
                     label = "No volumes found",
                     detail = "Or Docker daemon may not be running",
                     icon = "📭",
@@ -164,6 +168,7 @@ lark.register({
                 }) },
             }
         end
+        local raw = res.stdout
 
         local items = {}
 

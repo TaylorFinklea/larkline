@@ -149,15 +149,19 @@ lark.register({
         if err then return err end
 
         -- Get container list with all details.
-        local raw = lark.exec("docker", {
+        local res = lark.exec_io("docker", {
             "ps", "-a", "--format",
             "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.State}}\t{{.Ports}}\t{{.Size}}"
         })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Containers",
-                items = { error_item({
+                level = "warn",
+                items = { from_exit(res.stderr, {
+                    cli = "docker",
+                    install_url = "https://docs.docker.com/get-docker/",
+                }) or error_item({
                     label = "No containers or Docker daemon not running",
                     detail = "Start Docker Desktop or run `docker info` to verify",
                     icon = "📭",
@@ -165,6 +169,7 @@ lark.register({
                 }) },
             }
         end
+        local raw = res.stdout
 
         -- Get live stats for running containers (non-streaming).
         local stats_map = {}

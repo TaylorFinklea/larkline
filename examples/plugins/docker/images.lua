@@ -148,15 +148,19 @@ lark.register({
         local err = check_docker("Images")
         if err then return err end
 
-        local raw = lark.exec("docker", {
+        local res = lark.exec_io("docker", {
             "images", "--format",
             "{{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.ID}}\t{{.CreatedSince}}"
         })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Images",
-                items = { error_item({
+                level = "warn",
+                items = { from_exit(res.stderr, {
+                    cli = "docker",
+                    install_url = "https://docs.docker.com/get-docker/",
+                }) or error_item({
                     label = "No images or Docker daemon not running",
                     detail = "Start Docker Desktop or run `docker info` to verify",
                     icon = "📭",
@@ -164,6 +168,7 @@ lark.register({
                 }) },
             }
         end
+        local raw = res.stdout
 
         local items = {}
         local dangling = 0

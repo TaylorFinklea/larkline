@@ -94,18 +94,21 @@ end
 
 lark.register({
     on_run = function()
-        local raw = lark.exec("kubectl", { "config", "get-contexts", "--no-headers" })
+        local res = lark.exec_io("kubectl", { "config", "get-contexts", "--no-headers" })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Kubernetes Contexts",
-                items = { error_item({
-                    label = "No kubectl contexts found",
-                    detail = "Run: kubectl config set-context",
-                    help_url = "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/",
-                }) },
+                level = "warn",
+                items = { from_exit(res.stderr, { cli = "kubectl", install_url = "https://kubernetes.io/docs/tasks/tools/" })
+                    or error_item({
+                        label = "No kubectl contexts found",
+                        detail = "Run: kubectl config set-context",
+                        help_url = "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/",
+                    }) },
             }
         end
+        local raw = res.stdout
 
         local items = {}
         for line in raw:gmatch("[^\n]+") do

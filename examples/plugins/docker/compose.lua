@@ -171,17 +171,21 @@ lark.register({
         end
 
         -- List all compose projects.
-        local raw
+        local res
         if use_v2 then
-            raw = lark.exec("docker", { "compose", "ls", "--format", "table", "--all" })
+            res = lark.exec_io("docker", { "compose", "ls", "--format", "table", "--all" })
         else
-            raw = lark.exec("docker-compose", { "ls" })
+            res = lark.exec_io("docker-compose", { "ls" })
         end
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Compose",
-                items = { error_item({
+                level = "warn",
+                items = { from_exit(res.stderr, {
+                    cli = "docker",
+                    install_url = "https://docs.docker.com/get-docker/",
+                }) or error_item({
                     label = "No Compose projects found",
                     detail = "Run `docker compose up` in a project directory first",
                     icon = "📭",
@@ -189,6 +193,7 @@ lark.register({
                 }) },
             }
         end
+        local raw = res.stdout
 
         local items = {}
         local first = true

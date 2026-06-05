@@ -148,15 +148,19 @@ lark.register({
         local err = check_docker("Networks")
         if err then return err end
 
-        local raw = lark.exec("docker", {
+        local res = lark.exec_io("docker", {
             "network", "ls", "--format",
             "{{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}"
         })
 
-        if not raw or raw == "" then
+        if res.exit_code ~= 0 or res.stdout == "" then
             return {
                 title = "Networks",
-                items = { error_item({
+                level = "warn",
+                items = { from_exit(res.stderr, {
+                    cli = "docker",
+                    install_url = "https://docs.docker.com/get-docker/",
+                }) or error_item({
                     label = "No networks found",
                     detail = "Or Docker daemon may not be running",
                     icon = "📭",
@@ -164,6 +168,7 @@ lark.register({
                 }) },
             }
         end
+        local raw = res.stdout
 
         local items = {}
         local builtin = { bridge = true, host = true, none = true }
