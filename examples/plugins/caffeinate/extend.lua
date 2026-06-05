@@ -28,6 +28,11 @@ end
 
 local function start_session(secs)
     stop_session()
+    -- Cap finite sessions at 7 days. If `date +%s` ever fails, now() falls back
+    -- to 0 and extend's (ending_at - now()) computes a ~55-year remaining; this
+    -- chokepoint (the only place `caffeinate -t` is built) bounds that and any
+    -- user typo. A nil / <= 0 duration stays a true indefinite session.
+    if secs and secs > 604800 then secs = 604800 end
     local cmd
     if secs and secs > 0 then
         cmd = "nohup caffeinate -d -i -t " .. tostring(secs) .. " >/dev/null 2>&1 & echo $!"

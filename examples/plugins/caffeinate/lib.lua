@@ -43,6 +43,10 @@ end
 -- any running session. Returns the new pid string, or nil on failure.
 function M.start(secs)
     M.stop()
+    -- Cap finite sessions at 7 days so a date-failure miscalc (now() == 0 makes
+    -- extend compute a ~55-year remaining) or a user typo can't keep the Mac
+    -- awake for years. A nil / <= 0 duration stays a true indefinite session.
+    if secs and secs > 604800 then secs = 604800 end
     local cmd
     if secs and secs > 0 then
         cmd = "nohup caffeinate -d -i -t " .. tostring(secs) .. " >/dev/null 2>&1 & echo $!"

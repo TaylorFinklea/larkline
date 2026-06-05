@@ -27,6 +27,9 @@ end
 
 local function start_session(secs)
     stop_session()
+    -- Cap finite sessions at 7 days so a user typo (or a date-failure miscalc in
+    -- extend) can't keep the Mac awake for years. <= 0 / nil stays indefinite.
+    if secs and secs > 604800 then secs = 604800 end
     local cmd
     if secs and secs > 0 then
         cmd = "nohup caffeinate -d -i -t " .. tostring(secs) .. " >/dev/null 2>&1 & echo $!"
