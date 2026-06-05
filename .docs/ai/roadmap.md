@@ -88,6 +88,18 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 - [ ] **Theme gallery (Phase 10 subtask 4)** — run the TUI in each of the 6 presets, screenshot glance strip + 2 widgets + a degraded ⚠ chip + a focused chip → `.docs/screenshots/themes-v1.0/<preset>.png`; pick the 2-3 for the Medium post. Verify the `default` preset's named-ANSI colors look right in your actual terminal (its computed ratios are reference-only).
 - [ ] **Re-link k8s plugin** — `~/.config/larkline/plugins/k8s` is a stale COPY (not a symlink; missing recent commands like deployments/logs/namespaces), so the from_exit migration + newer k8s commands aren't live. Re-link it to `examples/plugins/k8s` (mirror docker/bitwarden/caffeinate symlinks) or `lark plugin sync`. Worth auditing whether other installed plugins are stale copies too.
 
+### Known issues — deferred from the 2026-06-05 bug bash (low priority)
+
+22 confirmed defects found + verified; the substantive ones are fixed (Docker/k8s
+empty-success regression, preview-pane panic guard, .env 0600 + `/tmp`→temp_dir,
+caffeinate 7-day clamp, glance focus-follows, exec_io write/spawn graceful, http
+header skip). Deferred with rationale:
+
+- [ ] **Prefetch can overwrite a fresh UserSelected cache entry** (`app.rs` PluginFinished). Near-zero impact (both fetch in the same window; widgets self-correct next tick); fix needs sequence-tracking in the just-stabilized prefetch/focus machinery. Skipped — revisit if stale widget data is ever observed.
+- [ ] **Blocking `std::fs::write` for store save on the async runtime** (`lua.rs`). Store files are <KB so the stall is µs; the suggested `block_in_place` *panics* on a current-thread runtime, so the "fix" is riskier than the issue. Won't-fix unless store writes grow.
+- [ ] **Unbounded agent audit + session logs** (`audit.rs`, `session.rs`). No rotation/cap — a feature (rotation), not a v1.0 blocker. Add size/age rotation in v1.x.
+- [ ] **Glance overflow: selection can point past the last rendered chip** (multi-chip narrow strip only; documented in the glance-strip spec's Known Limitations). Not reachable with the single shipped chip.
+
 ## Completed Milestones
 
 | Phase | Summary |
