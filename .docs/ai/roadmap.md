@@ -21,7 +21,9 @@ v1.0 scope (12 phases, ~22 weeks):
 - **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
 - **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
 
-Phases 1-5 done (2026-05-18). **Phases 6 + 7 + 8 code complete (2026-05-25)** — committed on `v1.0-prep`, pending real-provider smoke. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + matching TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). **Bug sweep (2026-05-28) — advances Phase 10:** 48 verified defects found + all fixed across 11 commits (`c5d5757`..`0f1260e`), ~25 regression tests added, 62 lib + 247 bin + integration pass, clippy/fmt clean; see `current-state.md` and harness-deck `20260528-bug-sweep-fixes`. Remaining v1.0 work: smoke + Phases 9–12 (web search, onboarding, finish QA/theme polish, beta, tag). Taylor smoke-testing Mail + mobile-layout + AI providers in parallel.
+Phases 1–8 code-complete on `v1.0-prep`. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). **Bug sweep (2026-05-28):** 48 defects found + all fixed (`c5d5757`..`0f1260e`), ~25 tests; harness-deck `20260528-bug-sweep-fixes`. **Glance strip + caffeinate rewrite (2026-05-29 → 06-05):** compact status-chip strip w/ degraded-widget demotion; caffeinate now owns keep-awake via built-in `caffeinate`; AI Projects/Nebular/Tesela example plugins removed; harness-deck reports go central (ADR-011). Build green throughout (62 lib + 247 bin, clippy `--all-targets -D warnings`, fmt).
+
+**Remaining v1.0 work is itemized in the [`## Backlog`](#backlog) below** — agent-doable features (web search, `from_exit`, theme polish, onboarding) + Taylor-gated real-provider/TUI smoke (Phases 5/6/8 + Mail + caffeinate). Then Phases 11–12 (beta, Medium post, tag).
 
 ### Next (after v1.0 ships)
 
@@ -37,6 +39,51 @@ Phases 1-5 done (2026-05-18). **Phases 6 + 7 + 8 code complete (2026-05-25)** �
 - `cargo-dist` evaluation — replace `scripts/release.sh` + `release.yml`.
 - PagerDuty / 1Password CLI plugin deep-dives.
 - Atlassian `switch` for multi-cloud orgs.
+
+## Backlog
+
+Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acceptance / Verify / Tier). Code-grounded by the 2026-06-05 scoping pass. Agent-doable first; Taylor-gated QA last.
+
+### Agent-doable (v1.0 features)
+
+- [ ] **Web search shortcuts plugin (Phase 9a)**
+  - **Scope:** self-contained Lua example plugin — Raycast-style web-search commands (Google, DuckDuckGo, GitHub, MDN, npm) that take a query and open the result URL.
+  - **Files:** `examples/plugins/web-search-shortcuts/{manifest.toml,google.lua,duckduckgo.lua,github.lua,mdn.lua,npm.lua}` (new).
+  - **Pattern (mirror, don't guess):** `examples/plugins/quicklinks/` structure; the `kind = "open"` URL action in `github/my-prs.lua` + `hackernews/init.lua`; form input like `caffeinate/start.lua`. URL-encode the query inline (no `os`/HTTP in sandbox).
+  - **Acceptance:** 5 commands w/ quickkeys (ws/dd/gh/md/npm); each takes a query, builds the search URL, returns a `kind="open"` action.
+  - **Verify:** `luac -p examples/plugins/web-search-shortcuts/*.lua` && `lark invoke "Web Search Shortcuts:Google"` returns a form.
+  - **Tier:** Haiku — scaffold over existing patterns.
+
+- [ ] **Stderr-aware `lark.exec` — activate dormant `from_exit`**
+  - **Scope:** migrate Docker/k8s/Bitwarden shell plugins from `lark.exec` (stdout only) to `lark.exec_io` (stdout+stderr+exit_code), passing `result.stderr` to the dormant v0.15.0 `from_exit` translator so failures (missing CLI, auth, rate-limit, network) become structured error items instead of silent empty strings. Host already ships stderr — pure plugin-side migration.
+  - **Files:** `examples/plugins/docker/*.lua` (incl. `lib.lua`), `examples/plugins/k8s/*.lua`, `examples/plugins/bitwarden/*.lua` (~21 files). **NOT** Home Assistant (uses `lark.http`).
+  - **Acceptance:** every `lark.exec` in those plugins — including `check_docker`/`check_k8s` helpers in `lib.lua` — becomes `lark.exec_io` + `from_exit(result.stderr, hints)` BEFORE the empty-stdout fallback.
+  - **Verify:** `luac -p` on all three dirs && `cargo test --bin lark` && `lark invoke "Docker:Containers"` (no crash w/ Docker absent).
+  - **Tier:** Sonnet — large mechanical refactor, order-sensitive. <!-- caveat: missing one lib.lua helper leaves errors silent; convert ALL exec calls per file -->
+
+- [ ] **Theme polish (Phase 10)** — 4 concrete sub-tasks:
+  1. **Contrast audit:** error/accent vs `status_bar_bg` + `highlight_bg` across all 6 presets (WCAG AA 4.5:1). The degraded ⚠ chip reuses `theme.error` — verify it's visible on each preset's background.
+  2. **Focused-chip inversion:** confirm `highlight_bg`/`highlight_fg` actually invert (some presets, e.g. Gruvbox, use close values).
+  3. **If gaps found:** add a `separator` color to the Theme struct (additive; update all presets) — dividers currently reuse `text_dimmed`.
+  4. **Theme gallery:** screenshot glance strip + 2 widgets + error state per preset → `.docs/screenshots/themes-v1.0/<preset>.png` (Taylor runs TUI; final selection is his visual call).
+  - **Files:** `src/config.rs:610-735` (Theme struct + presets), `src/tui/ui.rs` (render_glance_strip / render_widget_row / render_status_bar).
+  - **Verify:** `cargo test --bin lark` if Theme struct changes; sub-tasks 1/2/4 are visual (Taylor).
+  - **Tier:** Haiku for audit/struct change; #4 + final pick need Taylor's eye.
+
+- [ ] **Onboarding wizard (Phase 9b)** — resolve a UX decision before building:
+  - **Scope:** guided first-run — theme pick, AI provider + key, optional plugin sync; write a first-run flag so it doesn't re-trigger.
+  - **OPEN DECISION (blocks start):** dedicated TUI `Mode::Onboarding` (cleaner, heavier — new render/event path) vs. auto-launched interactive plugin (reuses form infra, feels meta). Also: first-run detection — `config::generate_default_if_missing()` returns `Ok(())` even when it creates the file (no signal); must return whether it created.
+  - **Files:** `src/main.rs` (~1344), `src/config.rs` (~843-919 template/gen), `src/app.rs` (App::new ~596), + new surface per the decision.
+  - **Acceptance:** first run collects theme+provider+key (+sync), applies theme, saves config + Keychain/.env, sets flag; second run skips.
+  - **Verify:** rm `config.toml` + `plugin-manager.json` → `lark` triggers wizard → config written w/ `[theme]`+`[ai]`+flag → re-run skips.
+  - **Tier:** Sonnet — but settle the entry-point decision with Taylor first.
+
+### Taylor-gated QA (product test; not headless)
+
+- [ ] **AI providers real-API smoke** — `lark ai-ask` + `lark agent-ask` + provider switching (Anthropic/OpenAI/OpenRouter/Ollama). Runbooks: `phases/v1.0-phase-{5,6,8}-*-smoke-runbook.md`. Gates Phases 5/6/8 → ✅.
+- [ ] **Agent cancellation** — abort mid-turn against a real provider (no production caller until the TUI agent loop; verify abort → `TurnOutcome::Aborted`).
+- [ ] **Mail mutating actions** — archive/flag/delete on a real mailbox. Runbook: `phases/v1.0-phase-4-mail-smoke-runbook.md`.
+- [ ] **Caffeinate Start/Extend** — Start (e.g. 5 min) → chip counts down → Extend → Stop in the live TUI (CLI can't submit forms).
 
 ## Completed Milestones
 
