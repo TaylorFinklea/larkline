@@ -20,6 +20,7 @@ mod form_actions;
 mod history;
 mod input;
 mod mini_app;
+mod onboarding;
 mod plugin;
 mod plugin_manager_actions;
 mod plugin_manager_state;
@@ -94,7 +95,8 @@ Commands:
     --max-tokens <N>      Cap on output tokens (default: provider default)
   agent-ask <PROMPT>      Multi-turn AI agent that calls plugins as tools
     --system / --model / --max-tokens   (same as ai-ask)
-    --yes                 Auto-approve destructive tools (default: block)"
+    --yes                 Auto-approve destructive tools (default: block)
+  setup                   Interactive wizard: pick a theme + AI provider"
     );
 }
 
@@ -1323,6 +1325,7 @@ async fn dispatch_subcommand(args: &[String]) -> Result<Option<()>> {
         "action" => handle_action_command(&args[2..]).await.map(Some),
         "ai-ask" => handle_ai_ask_command(&args[2..]).await.map(Some),
         "agent-ask" => handle_agent_ask_command(&args[2..]).await.map(Some),
+        "setup" => onboarding::run_setup().map(Some),
         _ => Ok(None),
     }
 }
@@ -1341,13 +1344,24 @@ async fn main() -> Result<()> {
         .position(|a| a == "--query")
         .and_then(|i| args.get(i + 1).cloned());
 
-    // Generate a commented default config on first run.
-    // Errors here are non-fatal — silently fall through.
+    // Detect first run BEFORE we create the default config (which makes the
+    // file exist). Generate a commented default config on first run; errors
+    // here are non-fatal — silently fall through.
+    let first_run = !config::config_path().exists();
     if let Err(e) = config::generate_default_if_missing() {
         eprintln!("larkline: could not generate default config ({e})");
     }
     if let Err(e) = config::generate_env_if_missing() {
         eprintln!("larkline: could not generate default .env ({e})");
+    }
+
+    // On first run, offer the setup wizard before the TUI grabs the screen, so
+    // its theme/provider choices are already on disk when config::load() runs
+    // just below. Non-interactive / declined just points at `lark setup`.
+    if first_run {
+        if let Err(e) = onboarding::first_run() {
+            eprintln!("larkline: onboarding skipped ({e})");
+        }
     }
 
     // Load config first so we can use the configured log level.

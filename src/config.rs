@@ -826,6 +826,44 @@ pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Persist the selected AI provider (and optionally model) to the user's
+/// config file. Mirrors [`save_theme_preset`]: edits (or creates) the `[ai]`
+/// table via `toml_edit`, preserving every other section + comments. An empty
+/// `model` is removed so the provider's `default_model()` applies.
+pub fn save_ai_provider(provider: &str, model: &str) -> anyhow::Result<()> {
+    let path = config_path();
+    let content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+    // Refuse to rewrite a malformed (but recoverable) config — same guard as
+    // save_theme_preset; a blank-document fallback would nuke the user's file.
+    let mut doc = if content.trim().is_empty() {
+        toml_edit::DocumentMut::default()
+    } else {
+        content.parse::<toml_edit::DocumentMut>().map_err(|e| {
+            anyhow::anyhow!("refusing to rewrite malformed config.toml ({e}); fix it by hand first")
+        })?
+    };
+    if doc.get("ai").is_none() {
+        doc["ai"] = toml_edit::table();
+    }
+    doc["ai"]["provider"] = toml_edit::value(provider);
+    if model.is_empty() {
+        if let Some(table) = doc["ai"].as_table_mut() {
+            table.remove("model");
+        }
+    } else {
+        doc["ai"]["model"] = toml_edit::value(model);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, doc.to_string())?;
+    Ok(())
+}
+
 /// Parse a color string into a ratatui `Color`.
 ///
 /// Supported formats:
