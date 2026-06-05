@@ -70,7 +70,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
   - **Verify:** `cargo test --bin lark` if Theme struct changes; sub-tasks 1/2/4 are visual (Taylor).
   - **Tier:** Haiku for audit/struct change; #4 + final pick need Taylor's eye.
 
-- [ ] **Onboarding wizard (Phase 9b)** — resolve a UX decision before building:
+- [~] **Onboarding wizard (Phase 9b)** — first pass done 2026-06-05 as a **CLI wizard** (`src/onboarding.rs`): `lark setup` + first-run auto-prompt; theme + AI provider + Keychain key, persisted via `save_theme_preset` / new `save_ai_provider` (toml_edit, no clobber). PTY-verified e2e. Decision taken: CLI over `Mode::Onboarding` (isolated/low-risk; logic factored for a future in-TUI reskin). Deferred: plugin-sync step, in-TUI rendering, live theme preview, a re-trigger flag (currently keys off config.toml absence). **In-TUI onboarding mode = the v2.**
   - **Scope:** guided first-run — theme pick, AI provider + key, optional plugin sync; write a first-run flag so it doesn't re-trigger.
   - **OPEN DECISION (blocks start):** dedicated TUI `Mode::Onboarding` (cleaner, heavier — new render/event path) vs. auto-launched interactive plugin (reuses form infra, feels meta). Also: first-run detection — `config::generate_default_if_missing()` returns `Ok(())` even when it creates the file (no signal); must return whether it created.
   - **Files:** `src/main.rs` (~1344), `src/config.rs` (~843-919 template/gen), `src/app.rs` (App::new ~596), + new surface per the decision.
@@ -86,6 +86,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 - [ ] **Caffeinate Start/Extend** — Start (e.g. 5 min) → chip counts down → Extend → Stop in the live TUI (CLI can't submit forms).
 - [ ] **Web search submit path** — in the TUI, run Web Search Shortcuts:Google, type a query w/ spaces (e.g. "rust async"), Enter → confirm the browser opens the encoded URL (CLI can't submit forms).
 - [ ] **Theme gallery (Phase 10 subtask 4)** — run the TUI in each of the 6 presets, screenshot glance strip + 2 widgets + a degraded ⚠ chip + a focused chip → `.docs/screenshots/themes-v1.0/<preset>.png`; pick the 2-3 for the Medium post. Verify the `default` preset's named-ANSI colors look right in your actual terminal (its computed ratios are reference-only).
+- [ ] **Onboarding wizard** — run `lark setup`: step through theme + provider + key, confirm config.toml + Keychain are written and the TUI picks up the theme. Also test first-run: move `~/.config/larkline/config.toml` aside, run `lark`, confirm the wizard offers itself before the app opens (and that declining still launches). NOTE: deciding "first run" by config.toml absence means it re-offers if you delete the config — a real flag is deferred.
 - [ ] **Re-link k8s plugin** — `~/.config/larkline/plugins/k8s` is a stale COPY (not a symlink; missing recent commands like deployments/logs/namespaces), so the from_exit migration + newer k8s commands aren't live. Re-link it to `examples/plugins/k8s` (mirror docker/bitwarden/caffeinate symlinks) or `lark plugin sync`. Worth auditing whether other installed plugins are stale copies too.
 
 ### Known issues — deferred from the 2026-06-05 bug bash (low priority)
