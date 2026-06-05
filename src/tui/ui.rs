@@ -1476,7 +1476,7 @@ fn render_glance_strip(
         }
 
         if slot > 0 {
-            spans.push(Span::styled(sep, Style::default().fg(theme.text_dimmed)));
+            spans.push(Span::styled(sep, Style::default().fg(theme.separator)));
             used += sep_w;
         }
         let style = if state.status_focused && slot == state.status_selected {
@@ -1507,7 +1507,7 @@ fn render_status_bar(
         .fg(theme.status_bar_bg)
         .bg(theme.accent)
         .add_modifier(Modifier::BOLD);
-    let sep = Span::styled(" │ ", Style::default().fg(theme.text_dimmed));
+    let sep = Span::styled(" │ ", Style::default().fg(theme.separator));
 
     // Config warnings take priority.
     if let Some(warning) = state.warnings.first() {

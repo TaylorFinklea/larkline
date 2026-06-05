@@ -212,6 +212,7 @@ mod tests {
             accent: Color::Cyan,
             text: Color::White,
             text_dimmed: Color::Gray,
+            separator: Color::Gray,
             highlight_bg: Color::DarkGray,
             highlight_fg: Color::White,
             error: Color::Red,

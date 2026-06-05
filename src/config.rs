@@ -595,6 +595,10 @@ pub struct ThemeConfig {
     pub text: Option<String>,
     /// Dimmed text — descriptions, inactive borders.
     pub text_dimmed: Option<String>,
+    /// Separator/divider color — glance-strip bullets, status-bar pipes.
+    /// Kept distinct from `text_dimmed` so dividers can carry guaranteed
+    /// contrast against `status_bar_bg` without lightening dimmed body text.
+    pub separator: Option<String>,
     /// Background color for the highlighted list row.
     pub highlight_bg: Option<String>,
     /// Foreground color for the highlighted list row.
@@ -611,6 +615,7 @@ pub struct Theme {
     pub accent: Color,
     pub text: Color,
     pub text_dimmed: Color,
+    pub separator: Color,
     pub highlight_bg: Color,
     pub highlight_fg: Color,
     pub error: Color,
@@ -652,6 +657,7 @@ struct PresetColors {
     accent: &'static str,
     text: &'static str,
     text_dimmed: &'static str,
+    separator: &'static str,
     highlight_bg: &'static str,
     highlight_fg: &'static str,
     error: &'static str,
@@ -673,7 +679,8 @@ fn preset_colors(name: &str) -> &'static PresetColors {
         accent: "cyan",
         text: "white",
         text_dimmed: "darkgray",
-        highlight_bg: "darkgray",
+        separator: "darkgray",
+        highlight_bg: "#262626",
         highlight_fg: "white",
         error: "red",
         status_bar_bg: "black",
@@ -682,6 +689,7 @@ fn preset_colors(name: &str) -> &'static PresetColors {
         accent: "#cba6f7",
         text: "#cdd6f4",
         text_dimmed: "#6c7086",
+        separator: "#6c7086",
         highlight_bg: "#313244",
         highlight_fg: "#cdd6f4",
         error: "#f38ba8",
@@ -691,15 +699,17 @@ fn preset_colors(name: &str) -> &'static PresetColors {
         accent: "#88c0d0",
         text: "#eceff4",
         text_dimmed: "#4c566a",
+        separator: "#738aa4",
         highlight_bg: "#3b4252",
         highlight_fg: "#eceff4",
-        error: "#bf616a",
+        error: "#e08888",
         status_bar_bg: "#2e3440",
     };
     static TOKYO_NIGHT: PresetColors = PresetColors {
         accent: "#7aa2f7",
         text: "#c0caf5",
         text_dimmed: "#565f89",
+        separator: "#7080b0",
         highlight_bg: "#292e42",
         highlight_fg: "#c0caf5",
         error: "#f7768e",
@@ -709,6 +719,7 @@ fn preset_colors(name: &str) -> &'static PresetColors {
         accent: "#bd93f9",
         text: "#f8f8f2",
         text_dimmed: "#6272a4",
+        separator: "#6272a4",
         highlight_bg: "#44475a",
         highlight_fg: "#f8f8f2",
         error: "#ff5555",
@@ -718,9 +729,10 @@ fn preset_colors(name: &str) -> &'static PresetColors {
         accent: "#d79921",
         text: "#ebdbb2",
         text_dimmed: "#928374",
+        separator: "#928374",
         highlight_bg: "#3c3836",
         highlight_fg: "#ebdbb2",
-        error: "#cc241d",
+        error: "#fe5a3a",
         status_bar_bg: "#282828",
     };
 
@@ -746,6 +758,7 @@ impl ThemeConfig {
             accent: parse_color(self.accent.as_deref().unwrap_or(base.accent))?,
             text: parse_color(self.text.as_deref().unwrap_or(base.text))?,
             text_dimmed: parse_color(self.text_dimmed.as_deref().unwrap_or(base.text_dimmed))?,
+            separator: parse_color(self.separator.as_deref().unwrap_or(base.separator))?,
             highlight_bg: parse_color(self.highlight_bg.as_deref().unwrap_or(base.highlight_bg))?,
             highlight_fg: parse_color(self.highlight_fg.as_deref().unwrap_or(base.highlight_fg))?,
             error: parse_color(self.error.as_deref().unwrap_or(base.error))?,
@@ -762,6 +775,7 @@ impl ThemeConfig {
             accent: parse_color(base.accent).expect("preset colors are always valid"),
             text: parse_color(base.text).expect("preset colors are always valid"),
             text_dimmed: parse_color(base.text_dimmed).expect("preset colors are always valid"),
+            separator: parse_color(base.separator).expect("preset colors are always valid"),
             highlight_bg: parse_color(base.highlight_bg).expect("preset colors are always valid"),
             highlight_fg: parse_color(base.highlight_fg).expect("preset colors are always valid"),
             error: parse_color(base.error).expect("preset colors are always valid"),
@@ -882,6 +896,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# ~/.config/larkline/config.toml
 # accent        = "cyan"
 # text          = "white"
 # text_dimmed   = "darkgray"
+# separator     = "darkgray"
 # highlight_bg  = "darkgray"
 # highlight_fg  = "white"
 # error         = "red"
