@@ -28,6 +28,7 @@ pub fn widget_disable(app: &mut App) {
                 tracing::warn!(error = %e, "failed to save widget config");
             }
             crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
+            crate::widgets::rebuild_glance_indices(&mut app.state);
             app.state.status_message =
                 Some((format!("Hidden widget: {name}"), std::time::Instant::now()));
         }
@@ -160,6 +161,7 @@ pub fn widget_picker_toggle(app: &mut App) {
                         }
                         crate::widgets::rebuild_widget_indices(&mut app.state, &app.pm_config);
                         app.state.widgets_visible = !app.state.widget_indices.is_empty();
+                        crate::widgets::rebuild_glance_indices(&mut app.state);
                     }
                     crate::app::PickerItemKind::Status => {
                         app.pm_config.toggle_status(gk, cmd);
@@ -168,6 +170,7 @@ pub fn widget_picker_toggle(app: &mut App) {
                             tracing::warn!(error = %e, "failed to save status config");
                         }
                         crate::widgets::rebuild_status_indices(&mut app.state, &app.pm_config);
+                        crate::widgets::rebuild_glance_indices(&mut app.state);
                     }
                 }
             }
