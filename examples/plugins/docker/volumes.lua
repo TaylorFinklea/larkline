@@ -153,7 +153,7 @@ lark.register({
             "{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}"
         })
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        if res.exit_code ~= 0 then
             return {
                 title = "Volumes",
                 level = "warn",
@@ -161,14 +161,21 @@ lark.register({
                     cli = "docker",
                     install_url = "https://docs.docker.com/get-docker/",
                 }) or error_item({
-                    label = "No volumes found",
-                    detail = "Or Docker daemon may not be running",
+                    label = "Docker daemon not running",
+                    detail = "Start Docker Desktop or run `docker info` to verify",
                     icon = "📭",
                     help_url = "https://docs.docker.com/engine/reference/commandline/docker/",
                 }) },
             }
         end
         local raw = res.stdout
+        if raw == "" then
+            -- Success with no rows: healthy empty, NOT a degraded/warn state.
+            return {
+                title = "Volumes",
+                items = { { label = "No volumes found", icon = "📭" } },
+            }
+        end
 
         local items = {}
 

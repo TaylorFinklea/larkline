@@ -153,7 +153,7 @@ lark.register({
             "{{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.ID}}\t{{.CreatedSince}}"
         })
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        if res.exit_code ~= 0 then
             return {
                 title = "Images",
                 level = "warn",
@@ -161,7 +161,7 @@ lark.register({
                     cli = "docker",
                     install_url = "https://docs.docker.com/get-docker/",
                 }) or error_item({
-                    label = "No images or Docker daemon not running",
+                    label = "Docker daemon not running",
                     detail = "Start Docker Desktop or run `docker info` to verify",
                     icon = "📭",
                     help_url = "https://docs.docker.com/config/daemon/start/",
@@ -169,6 +169,13 @@ lark.register({
             }
         end
         local raw = res.stdout
+        if raw == "" then
+            -- Success with no rows: healthy empty, NOT a degraded/warn state.
+            return {
+                title = "Images",
+                items = { { label = "No images found", icon = "📭" } },
+            }
+        end
 
         local items = {}
         local dangling = 0

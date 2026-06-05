@@ -96,7 +96,10 @@ lark.register({
     on_run = function()
         local res = lark.exec_io("kubectl", { "config", "get-contexts", "--no-headers" })
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        -- Only a real failure (non-zero exit) is degraded. `get-contexts
+        -- --no-headers` prints nothing when no contexts exist (a healthy empty
+        -- state), so empty stdout falls through to "No contexts found" below.
+        if res.exit_code ~= 0 then
             return {
                 title = "Kubernetes Contexts",
                 level = "warn",

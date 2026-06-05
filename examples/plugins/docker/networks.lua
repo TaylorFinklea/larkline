@@ -153,7 +153,7 @@ lark.register({
             "{{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}"
         })
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        if res.exit_code ~= 0 then
             return {
                 title = "Networks",
                 level = "warn",
@@ -161,14 +161,21 @@ lark.register({
                     cli = "docker",
                     install_url = "https://docs.docker.com/get-docker/",
                 }) or error_item({
-                    label = "No networks found",
-                    detail = "Or Docker daemon may not be running",
+                    label = "Docker daemon not running",
+                    detail = "Start Docker Desktop or run `docker info` to verify",
                     icon = "📭",
                     help_url = "https://docs.docker.com/engine/reference/commandline/docker/",
                 }) },
             }
         end
         local raw = res.stdout
+        if raw == "" then
+            -- Success with no rows: healthy empty, NOT a degraded/warn state.
+            return {
+                title = "Networks",
+                items = { { label = "No networks found", icon = "📭" } },
+            }
+        end
 
         local items = {}
         local builtin = { bridge = true, host = true, none = true }

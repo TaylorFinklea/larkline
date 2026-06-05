@@ -178,7 +178,9 @@ lark.register({
             res = lark.exec_io("docker-compose", { "ls" })
         end
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        -- Only a real failure (non-zero exit) is degraded; empty/headers-only
+        -- output falls through to the "No Compose projects found" item below.
+        if res.exit_code ~= 0 then
             return {
                 title = "Compose",
                 level = "warn",

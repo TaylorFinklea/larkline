@@ -154,7 +154,10 @@ lark.register({
             "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.State}}\t{{.Ports}}\t{{.Size}}"
         })
 
-        if res.exit_code ~= 0 or res.stdout == "" then
+        -- Only a real failure (non-zero exit) is degraded. Empty stdout with a
+        -- zero exit = no containers; fall through to the "No containers found"
+        -- item below so a healthy empty state isn't demoted to a ⚠ chip.
+        if res.exit_code ~= 0 then
             return {
                 title = "Containers",
                 level = "warn",
