@@ -1436,9 +1436,12 @@ fn render_glance_strip(
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0usize;
 
-    // `slot` doubles as the rendered-so-far count: there's no skip before the
-    // span is pushed, only an early `break`, so `slot > 0` == "a chip already
-    // rendered" (used for the separator + overflow guard).
+    // `slot` is the enumeration index into glance_indices. The `plugins.get()`
+    // guard below *can* `continue` (skipping a chip), but glance_indices is
+    // always rebuilt from valid plugin indices, so in practice no entry is stale
+    // and `slot` equals the rendered-so-far count — used for the separator
+    // (`slot > 0`) + overflow guard. If that invariant ever breaks, switch to a
+    // separate rendered counter.
     for (slot, &pidx) in state.glance_indices.iter().enumerate() {
         // Bounds-safe, mirroring render_widget_row — a stale index never panics.
         let Some(meta) = state.plugins.get(pidx) else {

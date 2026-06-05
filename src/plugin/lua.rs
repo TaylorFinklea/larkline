@@ -328,7 +328,9 @@ impl LuaPlugin {
                 if let Some(ref opts) = opts {
                     if let Ok(headers) = opts.get::<LuaTable>("headers") {
                         for pair in headers.pairs::<String, String>() {
-                            let (k, v) = pair?;
+                            // Skip a malformed header (non-string key/value)
+                            // rather than failing the entire request.
+                            let Ok((k, v)) = pair else { continue };
                             req = req.header(&k, &v);
                         }
                     }
@@ -365,7 +367,9 @@ impl LuaPlugin {
                     if let Some(ref opts) = opts {
                         if let Ok(headers) = opts.get::<LuaTable>("headers") {
                             for pair in headers.pairs::<String, String>() {
-                                let (k, v) = pair?;
+                                // Skip a malformed header rather than failing
+                                // the entire request.
+                                let Ok((k, v)) = pair else { continue };
                                 req = req.header(&k, &v);
                             }
                         }

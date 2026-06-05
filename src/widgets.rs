@@ -20,8 +20,12 @@ pub fn is_degraded(state: &AppState, plugin_index: usize) -> bool {
 /// Rebuild [`AppState::glance_indices`] — the strip's displayed/focusable set:
 /// every status chip, plus any widget currently degraded (demoted from its
 /// card). Degraded widgets that are also status chips appear once. Clears
-/// focus + clamps the cursor when the resulting strip is empty/shorter.
+/// focus when the strip empties; otherwise keeps the cursor on the SAME plugin
+/// across the rebuild (so focus doesn't silently jump to a different chip when
+/// a degraded widget heals and leaves the strip), clamping if it's gone.
 pub fn rebuild_glance_indices(state: &mut AppState) {
+    let focused_plugin = state.glance_indices.get(state.status_selected).copied();
+
     let mut items = state.status_indices.clone();
     for &w in &state.widget_indices {
         if !items.contains(&w) && is_degraded(state, w) {
@@ -29,10 +33,18 @@ pub fn rebuild_glance_indices(state: &mut AppState) {
         }
     }
     state.glance_indices = items;
+
     if state.glance_indices.is_empty() {
         state.status_focused = false;
-    }
-    if state.status_selected >= state.glance_indices.len() {
+        state.status_selected = 0;
+    } else if let Some(pidx) = focused_plugin {
+        // Follow the plugin to its new slot; if it left the strip, clamp.
+        state.status_selected = state
+            .glance_indices
+            .iter()
+            .position(|&i| i == pidx)
+            .unwrap_or_else(|| state.status_selected.min(state.glance_indices.len() - 1));
+    } else if state.status_selected >= state.glance_indices.len() {
         state.status_selected = 0;
     }
 }
@@ -175,6 +187,46 @@ mod tests {
         assert!(
             state.glance_indices.is_empty(),
             "healthy widget stays a card"
+        );
+    }
+
+    #[test]
+    fn rebuild_glance_indices_focus_follows_plugin() {
+        use crate::app::CachedResult;
+        use crate::plugin::traits::PluginOutput;
+
+        let warn = || {
+            CachedResult::Ready(PluginOutput {
+                title: "x".into(),
+                level: Some("warn".into()),
+                ..Default::default()
+            })
+        };
+        let mut state = AppState {
+            widget_indices: vec![3, 4],
+            status_focused: true,
+            ..Default::default()
+        };
+        state.result_cache.insert(3, warn());
+        state.result_cache.insert(4, warn());
+        rebuild_glance_indices(&mut state);
+        assert_eq!(state.glance_indices, vec![3, 4]);
+
+        // Focus the second chip (plugin 4), then heal plugin 3 so the strip
+        // collapses to [4] and plugin 4 shifts from slot 1 to slot 0.
+        state.status_selected = 1;
+        state.result_cache.insert(
+            3,
+            CachedResult::Ready(PluginOutput {
+                title: "x".into(),
+                ..Default::default()
+            }),
+        );
+        rebuild_glance_indices(&mut state);
+        assert_eq!(state.glance_indices, vec![4]);
+        assert_eq!(
+            state.status_selected, 0,
+            "focus follows plugin 4 to its new slot, not the old index"
         );
     }
 
