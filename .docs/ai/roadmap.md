@@ -54,7 +54,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
   - **Verify:** `luac -p examples/plugins/web-search-shortcuts/*.lua` && `lark invoke "Web Search Shortcuts:Google"` returns a form.
   - **Tier:** Haiku — scaffold over existing patterns.
 
-- [ ] **Stderr-aware `lark.exec` — activate dormant `from_exit`**
+- [x] **Stderr-aware `lark.exec` — activate dormant `from_exit`** — done 2026-06-05 (workflow, 3 groups). Primary fetches migrated in docker (5 cmds), k8s (6), bitwarden (run_bw + 6). **Host bug found+fixed:** `lark.exec_io` raised on spawn failure instead of surfacing it via `exit_code` (contradicted its own doc); now returns `{stderr, exit_code=127}` so missing-CLI flows through `from_exit`. +1 regression test, 250 bin tests pass. Best-effort calls (system.lua info rows, etc.) left as-is. Known gap: `docker/dashboard.lua` get_containers still generic on daemon-down. <!-- k8s install is a stale COPY, not a symlink — repo migration won't apply until re-linked; see QA -->
   - **Scope:** migrate Docker/k8s/Bitwarden shell plugins from `lark.exec` (stdout only) to `lark.exec_io` (stdout+stderr+exit_code), passing `result.stderr` to the dormant v0.15.0 `from_exit` translator so failures (missing CLI, auth, rate-limit, network) become structured error items instead of silent empty strings. Host already ships stderr — pure plugin-side migration.
   - **Files:** `examples/plugins/docker/*.lua` (incl. `lib.lua`), `examples/plugins/k8s/*.lua`, `examples/plugins/bitwarden/*.lua` (~21 files). **NOT** Home Assistant (uses `lark.http`).
   - **Acceptance:** every `lark.exec` in those plugins — including `check_docker`/`check_k8s` helpers in `lib.lua` — becomes `lark.exec_io` + `from_exit(result.stderr, hints)` BEFORE the empty-stdout fallback.
@@ -85,6 +85,7 @@ Self-contained items per the AGENTS.md Backlog Conventions (Scope / Files / Acce
 - [ ] **Mail mutating actions** — archive/flag/delete on a real mailbox. Runbook: `phases/v1.0-phase-4-mail-smoke-runbook.md`.
 - [ ] **Caffeinate Start/Extend** — Start (e.g. 5 min) → chip counts down → Extend → Stop in the live TUI (CLI can't submit forms).
 - [ ] **Web search submit path** — in the TUI, run Web Search Shortcuts:Google, type a query w/ spaces (e.g. "rust async"), Enter → confirm the browser opens the encoded URL (CLI can't submit forms).
+- [ ] **Re-link k8s plugin** — `~/.config/larkline/plugins/k8s` is a stale COPY (not a symlink; missing recent commands like deployments/logs/namespaces), so the from_exit migration + newer k8s commands aren't live. Re-link it to `examples/plugins/k8s` (mirror docker/bitwarden/caffeinate symlinks) or `lark plugin sync`. Worth auditing whether other installed plugins are stale copies too.
 
 ## Completed Milestones
 
