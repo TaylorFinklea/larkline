@@ -1155,21 +1155,33 @@ pub fn generate_env_if_missing() -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(
-        &path,
-        "\
+    // Create 0600 — this file is where users put plaintext API keys, so it must
+    // not be world-readable. `path.exists()` above guarantees we're creating it
+    // fresh, so atomic mode-at-creation is enough (mirrors atlassian/cache.rs).
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        f.write_all(
+            b"\
 # Larkline Secrets
 # Add API keys here. Plugins access them via lark.env(\"KEY_NAME\").
 # This file should never be committed to version control.
 #
-# Fallback order: .env → process environment → macOS Keychain.
+# Fallback order: .env \xe2\x86\x92 process environment \xe2\x86\x92 macOS Keychain.
 # To store a secret in Keychain instead of here:
 #   security add-generic-password -U -a \"$USER\" -s KEY_NAME -w 'value'
 #
 # GITHUB_TOKEN=ghp_your_token_here
 # OPENAI_API_KEY=sk-your_key_here
 ",
-    )?;
+        )?;
+    }
     Ok(())
 }
 
@@ -1203,8 +1215,10 @@ fn plugin_manager_path() -> std::path::PathBuf {
     let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         std::path::PathBuf::from(xdg).join("larkline")
     } else {
+        // HOME unset: per-user private temp dir, not world-writable /tmp
+        // (mirrors home_dir()'s fallback; avoids symlink/clobber attacks).
         let home = std::env::var("HOME").map_or_else(
-            |_| std::path::PathBuf::from("/tmp"),
+            |_| std::env::temp_dir(),
             std::path::PathBuf::from,
         );
         home.join(".local").join("share").join("larkline")

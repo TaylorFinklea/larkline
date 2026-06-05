@@ -307,7 +307,17 @@ fn render_preview_pane(
         return;
     };
 
-    let meta = &state.plugins[idx];
+    let Some(meta) = state.plugins.get(idx) else {
+        // Stale preview index (plugins reloaded after it was set) — render an
+        // empty block instead of panicking, mirroring render_widget_row /
+        // render_glance_strip's bounds-safe .get() handling.
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.text_dimmed));
+        frame.render_widget(block, area);
+        return;
+    };
     let icon_str = if state.show_icons {
         format!("{} ", meta.icon)
     } else {

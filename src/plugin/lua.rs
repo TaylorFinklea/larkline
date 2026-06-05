@@ -206,11 +206,35 @@ impl LuaPlugin {
                     };
                     let (write_res, output_res) =
                         tokio::join!(write_stdin, child.wait_with_output());
-                    write_res.map_err(LuaError::external)?;
-                    let output = output_res.map_err(LuaError::external)?;
+
+                    // Failure to collect the child's output is surfaced via the
+                    // result table (exit_code -1), not raised — same graceful
+                    // contract as the spawn-failure path above.
+                    let output = match output_res {
+                        Ok(o) => o,
+                        Err(e) => {
+                            let result = lua.create_table()?;
+                            result.set("stdout", "")?;
+                            result.set("stderr", format!("{cmd}: {e}"))?;
+                            result.set("exit_code", -1)?;
+                            return Ok(result);
+                        }
+                    };
                     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
                     let exit_code = output.status.code().unwrap_or(-1);
+
+                    // A non-BrokenPipe stdin write error is reported in stderr
+                    // rather than raised (BrokenPipe is already treated as a
+                    // normal early-EOF inside write_stdin), so plugins can branch
+                    // on it via the result table like any other failure.
+                    if let Err(e) = write_res {
+                        use std::fmt::Write as _;
+                        if !stderr.is_empty() {
+                            stderr.push('\n');
+                        }
+                        let _ = write!(stderr, "stdin write failed: {e}");
+                    }
 
                     let result = lua.create_table()?;
                     result.set("stdout", stdout)?;

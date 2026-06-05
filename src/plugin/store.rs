@@ -222,7 +222,10 @@ fn data_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         PathBuf::from(xdg).join("larkline")
     } else {
-        let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
+        // HOME unset (cron/daemon/sandbox): fall back to the per-user private
+        // temp dir ($TMPDIR, e.g. /var/folders/... on macOS) rather than the
+        // world-writable /tmp, so store files aren't exposed to other users.
+        let home = std::env::var("HOME").map_or_else(|_| std::env::temp_dir(), PathBuf::from);
         home.join(".local").join("share").join("larkline")
     }
 }
