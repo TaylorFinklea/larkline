@@ -1,6 +1,13 @@
 # Current State
 
-> Updated: 2026-05-09
+> Updated: 2026-07-01
+
+## Maintenance (out of milestone)
+
+- 2026-07-01 `f5e3b13` — ccusage plugin fixed for ccusage 20.x multi-agent
+  schema (route all 5 commands through `ccusage claude <sub>`; restores legacy
+  Claude-only schema + scopes to Claude). Tracked: bead `larkline-bbz` (closed);
+  gotcha saved via `bd remember` key `ccusage-multiagent-schema`.
 
 ## Next Milestone — v1.0 Agent Palette
 
