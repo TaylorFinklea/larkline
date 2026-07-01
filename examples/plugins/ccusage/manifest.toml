@@ -1,7 +1,7 @@
 [plugin]
 name = "Claude Usage"
 description = "Claude Code API token and cost tracking via ccusage"
-version = "0.2.0"
+version = "0.3.0"
 author = "larkline"
 icon = "📊"
 icon_nerd = "󰄨"

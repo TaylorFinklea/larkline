@@ -35,7 +35,7 @@ end
 
 lark.register({
     on_run = function()
-        local args = { "ccusage", "blocks", "--json", "--order", "desc" }
+        local args = { "ccusage", "claude", "blocks", "--json", "--order", "desc" }
         local since = get_since()
         if since ~= "" then
             args[#args + 1] = "--since"
