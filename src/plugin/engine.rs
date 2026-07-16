@@ -28,6 +28,9 @@ tokio::task_local! {
     /// "trait change" wording in ADR-008 in favor of the same outcome
     /// with one-tenth the surface area. See ADR-009.
     pub static CANCEL_TOKEN: tokio_util::sync::CancellationToken;
+    /// Marks plugin tasks whose panics are caught and converted to
+    /// [`PluginError`], so the process-level hook leaves the active TUI alone.
+    pub static PLUGIN_PANIC_ISOLATED: ();
 }
 
 /// Indicates whether a plugin execution was triggered by the user or by prefetch.
@@ -243,13 +246,16 @@ impl PluginEngine {
         let secrets = self.secrets.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let handle = tokio::spawn(SECRETS.scope(
-                secrets,
-                PLUGIN_LIST.scope(
-                    all_plugins,
-                    INVOKE_DEPTH.scope(0, async move {
-                        plugin.execute_action(&callback_id, &context).await
-                    }),
+            let handle = tokio::spawn(PLUGIN_PANIC_ISOLATED.scope(
+                (),
+                SECRETS.scope(
+                    secrets,
+                    PLUGIN_LIST.scope(
+                        all_plugins,
+                        INVOKE_DEPTH.scope(0, async move {
+                            plugin.execute_action(&callback_id, &context).await
+                        }),
+                    ),
                 ),
             ));
             let result = match handle.await {
@@ -290,13 +296,15 @@ impl PluginEngine {
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
-            let handle = tokio::spawn(SECRETS.scope(
-                secrets,
-                PLUGIN_LIST.scope(
-                    all_plugins,
-                    INVOKE_DEPTH.scope(
-                        0,
-                        async move { plugin.execute_with_form(form_values).await },
+            let handle = tokio::spawn(PLUGIN_PANIC_ISOLATED.scope(
+                (),
+                SECRETS.scope(
+                    secrets,
+                    PLUGIN_LIST.scope(
+                        all_plugins,
+                        INVOKE_DEPTH.scope(0, async move {
+                            plugin.execute_with_form(form_values).await
+                        }),
                     ),
                 ),
             ));
@@ -344,11 +352,14 @@ impl PluginEngine {
                 })
                 .await;
             let started = std::time::Instant::now();
-            let handle = tokio::spawn(SECRETS.scope(
-                secrets,
-                PLUGIN_LIST.scope(
-                    all_plugins,
-                    INVOKE_DEPTH.scope(0, async move { plugin.execute().await }),
+            let handle = tokio::spawn(PLUGIN_PANIC_ISOLATED.scope(
+                (),
+                SECRETS.scope(
+                    secrets,
+                    PLUGIN_LIST.scope(
+                        all_plugins,
+                        INVOKE_DEPTH.scope(0, async move { plugin.execute().await }),
+                    ),
                 ),
             ));
             let result = match handle.await {

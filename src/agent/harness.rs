@@ -829,14 +829,17 @@ impl AgentHarness {
                     // than unwinding the whole turn — matching engine.rs's
                     // execute_normal panic-isolation guarantee.
                     let handle = tokio::spawn(
-                        engine::SECRETS.scope(
-                            secrets,
-                            engine::PLUGIN_LIST.scope(
-                                plugin_list,
-                                engine::INVOKE_DEPTH.scope(
-                                    0,
-                                    engine::CANCEL_TOKEN
-                                        .scope(cancel, async move { plugin.execute().await }),
+                        engine::PLUGIN_PANIC_ISOLATED.scope(
+                            (),
+                            engine::SECRETS.scope(
+                                secrets,
+                                engine::PLUGIN_LIST.scope(
+                                    plugin_list,
+                                    engine::INVOKE_DEPTH.scope(
+                                        0,
+                                        engine::CANCEL_TOKEN
+                                            .scope(cancel, async move { plugin.execute().await }),
+                                    ),
                                 ),
                             ),
                         ),
