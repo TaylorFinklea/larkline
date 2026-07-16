@@ -198,7 +198,9 @@ fn remove_pane_from_tree(layout: &mut MiniAppLayout, target_id: &str) -> bool {
                     children.remove(pos);
                     let extra = removed_size / children.len() as u16;
                     for child in children.iter_mut() {
-                        child.size += extra;
+                        // Sizes are untrusted plugin input — saturate rather
+                        // than overflow-panic on absurd declared sizes.
+                        child.size = child.size.saturating_add(extra);
                     }
                     return true;
                 }
@@ -364,6 +366,36 @@ mod tests {
     fn pane_order_single_pane() {
         let layout = pane("main");
         assert_eq!(pane_order(&layout), vec!["main"]);
+    }
+
+    #[test]
+    fn close_pane_size_redistribution_saturates_instead_of_overflowing() {
+        // Plugin-declared sizes are untrusted u16s; children "should" sum to
+        // 100 but nothing validates that.
+        let mut layout = MiniAppLayout::Split {
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                LayoutChild {
+                    size: u16::MAX,
+                    layout: pane("a"),
+                },
+                LayoutChild {
+                    size: u16::MAX,
+                    layout: pane("b"),
+                },
+                LayoutChild {
+                    size: u16::MAX,
+                    layout: pane("c"),
+                },
+            ],
+        };
+
+        assert!(remove_pane_from_tree(&mut layout, "a"));
+
+        let MiniAppLayout::Split { children, .. } = layout else {
+            panic!("split must survive a 3-child close");
+        };
+        assert_eq!(children.len(), 2);
     }
 
     #[test]

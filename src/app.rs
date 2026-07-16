@@ -2509,8 +2509,11 @@ impl App {
                             self.state.output_mode,
                             OutputMode::Markdown | OutputMode::RawText
                         ) {
-                            // Set a large scroll offset; Paragraph rendering clamps naturally.
-                            self.state.scroll_offset = usize::MAX / 2;
+                            // Clamp to the last content line. A huge sentinel
+                            // offset truncates at the u16 render cast and
+                            // ratatui's Paragraph does NOT clamp scroll — the
+                            // pane blanks irrecoverably.
+                            self.state.scroll_offset = self.viewed_scroll_limit();
                         } else {
                             let max = crate::app_output::visible_output_count(&self.state)
                                 .saturating_sub(1);
@@ -2524,7 +2527,13 @@ impl App {
                                     pane.output_mode,
                                     OutputMode::Markdown | OutputMode::RawText
                                 ) {
-                                    pane.scroll_offset = usize::MAX / 2;
+                                    // Same clamp as ViewOutput above.
+                                    pane.scroll_offset = pane
+                                        .content
+                                        .raw_text
+                                        .as_deref()
+                                        .map_or(0, |raw| raw.lines().count())
+                                        .saturating_sub(1);
                                 } else {
                                     pane.selected = pane.content.items.len().saturating_sub(1);
                                 }
@@ -2929,6 +2938,27 @@ impl App {
                     Some(crate::tui::markdown::markdown_to_text(raw, &self.theme));
             }
         }
+    }
+
+    /// Last valid scroll offset for the viewed output: the rendered markdown
+    /// line count when the cache is populated (accurate — rendering changes
+    /// the line count), else the raw text's line count.
+    fn viewed_scroll_limit(&self) -> usize {
+        let rendered = if self.state.output_mode == OutputMode::Markdown {
+            self.state.markdown_cache.as_ref().map(|t| t.lines.len())
+        } else {
+            None
+        };
+        rendered
+            .or_else(|| {
+                self.state
+                    .plugin_output
+                    .as_ref()
+                    .and_then(|o| o.raw_text.as_ref())
+                    .map(|raw| raw.lines().count())
+            })
+            .unwrap_or(0)
+            .saturating_sub(1)
     }
 
     /// Sync the content-addressed ANSI text cache with the raw buffers the
@@ -3740,6 +3770,81 @@ mod tests {
             app.state.result_cache.get(&0),
             Some(CachedResult::Revalidating(output)) if output.title == "stale"
         ));
+    }
+
+    #[test]
+    fn go_to_last_clamps_scroll_to_content_lines() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.output_mode = OutputMode::RawText;
+        app.state.plugin_output = Some(PluginOutput {
+            raw_text: Some("l1\nl2\nl3\nl4\nl5".to_string()),
+            ..Default::default()
+        });
+
+        app.handle_action(Action::GoToLast);
+
+        assert_eq!(
+            app.state.scroll_offset, 4,
+            "G must land on the last content line, not a huge sentinel that \
+             truncates at the u16 render cast and blanks the pane"
+        );
+    }
+
+    #[test]
+    fn go_to_last_uses_rendered_markdown_line_count() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.output_mode = OutputMode::Markdown;
+        app.state.plugin_output = Some(PluginOutput {
+            raw_text: Some("# heading\nbody".to_string()),
+            ..Default::default()
+        });
+        // Rendered markdown line count differs from the raw source's.
+        app.state.markdown_cache = Some(ratatui::text::Text::from(vec![
+            ratatui::text::Line::raw("heading"),
+            ratatui::text::Line::raw(""),
+            ratatui::text::Line::raw("body"),
+        ]));
+
+        app.handle_action(Action::GoToLast);
+
+        assert_eq!(
+            app.state.scroll_offset, 2,
+            "markdown G must clamp against the rendered cache, not raw lines"
+        );
+    }
+
+    #[test]
+    fn go_to_last_in_mini_app_pane_clamps_scroll() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::MiniApp;
+        let pane = PaneState {
+            content: crate::plugin::traits::PaneContent {
+                raw_text: Some("a\nb\nc".to_string()),
+                ..Default::default()
+            },
+            output_mode: OutputMode::RawText,
+            ..Default::default()
+        };
+        app.state.mini_app = Some(MiniAppState {
+            plugin_index: 0,
+            layout: crate::plugin::traits::MiniAppLayout::Pane {
+                id: "main".to_string(),
+                content: crate::plugin::traits::PaneContent::default(),
+            },
+            panes: std::iter::once(("main".to_string(), pane)).collect(),
+            focused_pane: "main".to_string(),
+            pane_order: vec!["main".to_string()],
+        });
+
+        app.handle_action(Action::GoToLast);
+
+        let mini = app.state.mini_app.as_ref().expect("mini app state");
+        assert_eq!(
+            mini.panes["main"].scroll_offset, 2,
+            "mini-app G must clamp to the pane's content lines"
+        );
     }
 
     #[test]

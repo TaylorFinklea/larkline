@@ -335,8 +335,10 @@ impl LuaPlugin {
                         }
                     }
                     if let Ok(timeout_secs) = opts.get::<f64>("timeout") {
-                        if timeout_secs.is_finite() && timeout_secs >= 0.0 {
-                            req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                        // try_from rejects negative/NaN/overflow (1e20 would
+                        // panic in from_secs_f64) — skip invalid timeouts.
+                        if let Ok(timeout) = Duration::try_from_secs_f64(timeout_secs) {
+                            req = req.timeout(timeout);
                         }
                     }
                 }
@@ -374,8 +376,9 @@ impl LuaPlugin {
                             }
                         }
                         if let Ok(timeout_secs) = opts.get::<f64>("timeout") {
-                            if timeout_secs.is_finite() && timeout_secs >= 0.0 {
-                                req = req.timeout(Duration::from_secs_f64(timeout_secs));
+                            // Same guard as http.get — see above.
+                            if let Ok(timeout) = Duration::try_from_secs_f64(timeout_secs) {
+                                req = req.timeout(timeout);
                             }
                         }
                     }
@@ -857,6 +860,25 @@ lark.register({
         assert_eq!(output.title, "Hello from Lua");
         assert_eq!(output.items.len(), 1);
         assert_eq!(output.items[0].label, "Greeting");
+    }
+
+    #[tokio::test]
+    async fn http_timeout_overflow_does_not_panic() {
+        let plugin = lua_plugin_from_source(
+            "http-timeout-test",
+            r#"
+lark.register({
+    on_run = function()
+        -- 1e20 seconds overflows Duration; must not abort the app.
+        lark.http.get("http://127.0.0.1:1/", { timeout = 1e20 })
+        return { title = "reached", items = {} }
+    end
+})
+"#,
+        );
+        // The request itself fails (nothing listens on port 1) — the panic
+        // in the timeout conversion is the bug under test.
+        let _ = plugin.execute().await;
     }
 
     #[tokio::test]

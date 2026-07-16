@@ -4,10 +4,10 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Next hardening: Week 1 remainder `mkv.7` (panic sites) via `bd ready`;
-  `mkv.2` ANSI cache, `mkv.3` scoped md invalidation, `mkv.5` single-flight refresh landed;
-  `mkv.4` closed already-done (mkv.10 covers it). `mkv.11` later subsumes the
-  `prefetch_in_flight` guard into the command_id in-flight registry.
+- Week 1 hardening COMPLETE: `mkv.1`–`mkv.7`, `mkv.9`, `mkv.10` all closed
+  (`mkv.4` already-done via mkv.10; `mkv.8` deferred v1.1). Next via `bd ready`:
+  launch-gate `.12/.13` async dispatch, or `mkv.11` (subsumes the
+  `prefetch_in_flight` guard into the command_id in-flight registry).
 - Launch gate remaining: `.12/.13` async dispatch; `.9` execution identity + `.10` cache owner landed.
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
 

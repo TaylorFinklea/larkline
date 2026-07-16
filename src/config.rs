@@ -798,9 +798,12 @@ impl Theme {
 /// Uses `toml_edit` to update (or create) the `[theme] preset` key while
 /// preserving all other config content and comments.
 pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
-    let path = config_path();
+    save_theme_preset_to(&config_path(), preset)
+}
+
+fn save_theme_preset_to(path: &std::path::Path, preset: &str) -> anyhow::Result<()> {
     let content = if path.exists() {
-        std::fs::read_to_string(&path)?
+        std::fs::read_to_string(path)?
     } else {
         String::new()
     };
@@ -818,11 +821,18 @@ pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
     if doc.get("theme").is_none() {
         doc["theme"] = toml_edit::table();
     }
+    // Indexing a non-table item panics inside toml_edit — same refusal as
+    // malformed TOML above: the user's `theme` value is theirs to fix.
+    if !doc["theme"].is_table_like() {
+        anyhow::bail!(
+            "refusing to rewrite config.toml: `theme` is not a table; fix it by hand first"
+        );
+    }
     doc["theme"]["preset"] = toml_edit::value(preset);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, doc.to_string())?;
+    std::fs::write(path, doc.to_string())?;
     Ok(())
 }
 
@@ -831,9 +841,12 @@ pub fn save_theme_preset(preset: &str) -> anyhow::Result<()> {
 /// table via `toml_edit`, preserving every other section + comments. An empty
 /// `model` is removed so the provider's `default_model()` applies.
 pub fn save_ai_provider(provider: &str, model: &str) -> anyhow::Result<()> {
-    let path = config_path();
+    save_ai_provider_to(&config_path(), provider, model)
+}
+
+fn save_ai_provider_to(path: &std::path::Path, provider: &str, model: &str) -> anyhow::Result<()> {
     let content = if path.exists() {
-        std::fs::read_to_string(&path)?
+        std::fs::read_to_string(path)?
     } else {
         String::new()
     };
@@ -849,6 +862,10 @@ pub fn save_ai_provider(provider: &str, model: &str) -> anyhow::Result<()> {
     if doc.get("ai").is_none() {
         doc["ai"] = toml_edit::table();
     }
+    // Same non-table guard as save_theme_preset_to.
+    if !doc["ai"].is_table_like() {
+        anyhow::bail!("refusing to rewrite config.toml: `ai` is not a table; fix it by hand first");
+    }
     doc["ai"]["provider"] = toml_edit::value(provider);
     if model.is_empty() {
         if let Some(table) = doc["ai"].as_table_mut() {
@@ -860,7 +877,7 @@ pub fn save_ai_provider(provider: &str, model: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, doc.to_string())?;
+    std::fs::write(path, doc.to_string())?;
     Ok(())
 }
 
@@ -1550,6 +1567,44 @@ mod tests {
         assert_eq!(
             contents, "# custom",
             "existing file must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn save_theme_preset_errors_on_non_table_theme_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"not-a-table\"\n").unwrap();
+
+        let result = save_theme_preset_to(&path, "nord");
+
+        assert!(
+            result.is_err(),
+            "a non-table `theme` key must error, not panic"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "theme = \"not-a-table\"\n",
+            "the user's config must be left untouched"
+        );
+    }
+
+    #[test]
+    fn save_ai_provider_errors_on_non_table_ai_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "ai = 5\n").unwrap();
+
+        let result = save_ai_provider_to(&path, "openai", "gpt-4o");
+
+        assert!(
+            result.is_err(),
+            "a non-table `ai` key must error, not panic"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "ai = 5\n",
+            "the user's config must be left untouched"
         );
     }
 
