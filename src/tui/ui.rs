@@ -14,14 +14,13 @@ use ratatui::{
     },
 };
 
-use ansi_to_tui::IntoText;
-
 use crate::app::{
     AppState, MiniAppState, Mode, OutputMode, PaneState, PowerMenuState, ThemePickerState,
     UnifiedRow, VimMode,
 };
 use crate::config::Theme;
 use crate::plugin::traits::{MiniAppLayout, SplitDirection};
+use crate::tui::ansi_cache::AnsiTextCache;
 
 const SPINNER_CHARS: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
@@ -90,7 +89,7 @@ pub fn render(frame: &mut Frame, state: &AppState, theme: &Theme) {
     // Mini app mode: full content area for split panes.
     if state.mode == Mode::MiniApp {
         if let Some(ref mini) = state.mini_app {
-            render_mini_app(frame, mini, theme, content_area);
+            render_mini_app(frame, mini, theme, &state.ansi_cache, content_area);
         }
     // Plugin Manager takes full content area.
     } else if state.mode == Mode::PluginManager {
@@ -403,8 +402,14 @@ fn render_preview_pane(
 // ---------------------------------------------------------------------------
 
 /// Render the mini app layout tree into the given area.
-fn render_mini_app(frame: &mut Frame, mini: &MiniAppState, theme: &Theme, area: Rect) {
-    render_layout_node(frame, mini, theme, &mini.layout, area);
+fn render_mini_app(
+    frame: &mut Frame,
+    mini: &MiniAppState,
+    theme: &Theme,
+    ansi_cache: &AnsiTextCache,
+    area: Rect,
+) {
+    render_layout_node(frame, mini, theme, ansi_cache, &mini.layout, area);
 }
 
 /// Recursively render a layout node — either a leaf pane or a split container.
@@ -412,6 +417,7 @@ fn render_layout_node(
     frame: &mut Frame,
     mini: &MiniAppState,
     theme: &Theme,
+    ansi_cache: &AnsiTextCache,
     node: &MiniAppLayout,
     area: Rect,
 ) {
@@ -419,7 +425,7 @@ fn render_layout_node(
         MiniAppLayout::Pane { id, .. } => {
             if let Some(pane_state) = mini.panes.get(id) {
                 let is_focused = mini.focused_pane == *id;
-                render_pane(frame, pane_state, theme, area, is_focused);
+                render_pane(frame, pane_state, theme, ansi_cache, area, is_focused);
             }
         }
         MiniAppLayout::Split {
@@ -440,7 +446,7 @@ fn render_layout_node(
                 .split(area);
             for (i, child) in children.iter().enumerate() {
                 if let Some(&chunk) = chunks.get(i) {
-                    render_layout_node(frame, mini, theme, &child.layout, chunk);
+                    render_layout_node(frame, mini, theme, ansi_cache, &child.layout, chunk);
                 }
             }
         }
@@ -448,7 +454,14 @@ fn render_layout_node(
 }
 
 /// Render a single pane with its content and border.
-fn render_pane(frame: &mut Frame, pane: &PaneState, theme: &Theme, area: Rect, is_focused: bool) {
+fn render_pane(
+    frame: &mut Frame,
+    pane: &PaneState,
+    theme: &Theme,
+    ansi_cache: &AnsiTextCache,
+    area: Rect,
+    is_focused: bool,
+) {
     let border_color = if is_focused {
         theme.accent
     } else {
@@ -517,13 +530,15 @@ fn render_pane(frame: &mut Frame, pane: &PaneState, theme: &Theme, area: Rect, i
 
     // Raw text / markdown.
     if let Some(ref raw) = content.raw_text {
-        use ansi_to_tui::IntoText as _;
         let text = if content.output_format.as_deref() == Some("markdown") {
             crate::tui::markdown::markdown_to_text(raw, theme)
         } else {
-            raw.as_bytes()
-                .into_text()
-                .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()))
+            // Served from the pre-draw ANSI cache; parse inline only if a
+            // render path the cache sync doesn't know about reaches here.
+            ansi_cache
+                .get(raw)
+                .cloned()
+                .unwrap_or_else(|| crate::tui::ansi_cache::parse_ansi(raw))
         };
         #[allow(clippy::cast_possible_truncation)]
         let scroll = pane.scroll_offset as u16;
@@ -786,10 +801,11 @@ fn render_output_pane(
                     return;
                 }
                 if let Some(ref raw) = output.raw_text {
-                    let text = raw
-                        .as_bytes()
-                        .into_text()
-                        .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
+                    let text = state
+                        .ansi_cache
+                        .get(raw)
+                        .cloned()
+                        .unwrap_or_else(|| crate::tui::ansi_cache::parse_ansi(raw));
                     let paragraph = Paragraph::new(text).block(block);
                     frame.render_widget(paragraph, area);
                     return;
@@ -799,10 +815,11 @@ fn render_output_pane(
                 #[allow(clippy::cast_possible_truncation)]
                 let scroll = state.scroll_offset as u16;
                 if let Some(ref raw) = output.raw_text {
-                    let text = raw
-                        .as_bytes()
-                        .into_text()
-                        .unwrap_or_else(|_| ratatui::text::Text::raw(raw.as_str()));
+                    let text = state
+                        .ansi_cache
+                        .get(raw)
+                        .cloned()
+                        .unwrap_or_else(|| crate::tui::ansi_cache::parse_ansi(raw));
                     let paragraph = Paragraph::new(text)
                         .block(block)
                         .wrap(Wrap { trim: false })

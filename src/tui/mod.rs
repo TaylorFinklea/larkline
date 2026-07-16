@@ -1,5 +1,6 @@
 //! Terminal initialization and teardown.
 
+pub mod ansi_cache;
 pub mod highlight;
 pub mod markdown;
 pub mod profile;

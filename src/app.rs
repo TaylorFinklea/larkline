@@ -280,6 +280,9 @@ pub struct AppState {
     pub power_menu: Option<PowerMenuState>,
     /// Cached rendered markdown `Text` — avoids re-parsing every frame.
     pub markdown_cache: Option<ratatui::text::Text<'static>>,
+    /// Content-addressed cache of ANSI-parsed raw text — avoids re-parsing
+    /// every frame (see [`crate::tui::ansi_cache`]).
+    pub ansi_cache: crate::tui::ansi_cache::AnsiTextCache,
     /// Pending `g` key — waiting for second `g` to trigger `GoToFirst`.
     pub pending_g: bool,
     /// Whether the sidebar is hidden in `ViewOutput` mode.
@@ -1149,6 +1152,7 @@ impl App {
         while !self.state.should_quit {
             let frame_started = std::time::Instant::now();
             self.refresh_markdown_cache();
+            self.refresh_ansi_cache();
             let draw_started = std::time::Instant::now();
             terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
             let draw = draw_started.elapsed();
@@ -2870,6 +2874,16 @@ impl App {
                     Some(crate::tui::markdown::markdown_to_text(raw, &self.theme));
             }
         }
+    }
+
+    /// Sync the content-addressed ANSI text cache with the raw buffers the
+    /// next frame will render, so raw output is parsed once per output
+    /// change instead of once per frame. Stale entries are evicted by the
+    /// sync itself — no invalidation call sites needed.
+    fn refresh_ansi_cache(&mut self) {
+        let mut cache = std::mem::take(&mut self.state.ansi_cache);
+        cache.sync(&crate::tui::ansi_cache::live_raw_buffers(&self.state));
+        self.state.ansi_cache = cache;
     }
 
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
