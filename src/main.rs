@@ -25,6 +25,8 @@ mod plugin;
 mod plugin_manager_actions;
 mod plugin_manager_state;
 mod power_menu;
+#[cfg(test)]
+mod test_tracing;
 mod tui;
 mod update;
 mod widget_actions;
@@ -1337,6 +1339,7 @@ async fn main() -> Result<()> {
     if let Some(()) = dispatch_subcommand(&args).await? {
         return Ok(());
     }
+    let startup_started = std::time::Instant::now();
 
     // Parse --query flag (pre-fill search on launch).
     let initial_query = args
@@ -1427,7 +1430,7 @@ async fn main() -> Result<()> {
     if let Some(query) = initial_query {
         app.set_initial_query(&query);
     }
-    let result = app.run(&mut terminal).await;
+    let result = app.run(&mut terminal, startup_started).await;
     tui::restore()?;
 
     result

@@ -2,3 +2,6 @@
 
 pub mod actions;
 pub mod plugin;
+
+#[cfg(test)]
+mod test_tracing;

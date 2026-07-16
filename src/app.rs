@@ -613,6 +613,65 @@ pub struct PluginManagerState {
 /// Maximum entries in the navigation history stack.
 const MAX_NAV_HISTORY: usize = 10;
 
+const SLOW_TUI_FRAME_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(16);
+
+#[derive(Debug)]
+struct FrameTiming {
+    total: std::time::Duration,
+    draw: std::time::Duration,
+    input_wait: std::time::Duration,
+    input_drain: std::time::Duration,
+    engine_drain: std::time::Duration,
+    input_events: usize,
+    engine_events: usize,
+}
+
+impl FrameTiming {
+    fn active(&self) -> std::time::Duration {
+        self.total.saturating_sub(self.input_wait)
+    }
+
+    fn is_slow(&self) -> bool {
+        self.active() >= SLOW_TUI_FRAME_THRESHOLD
+    }
+
+    fn log(&self) {
+        let frame_ms = self.active().as_millis();
+        if self.is_slow() {
+            tracing::warn!(
+                frame_ms,
+                draw_ms = self.draw.as_millis(),
+                input_wait_ms = self.input_wait.as_millis(),
+                input_drain_ms = self.input_drain.as_millis(),
+                engine_drain_ms = self.engine_drain.as_millis(),
+                input_events = self.input_events,
+                engine_events = self.engine_events,
+                "slow tui frame"
+            );
+        } else {
+            tracing::trace!(
+                frame_ms,
+                draw_ms = self.draw.as_millis(),
+                input_wait_ms = self.input_wait.as_millis(),
+                input_drain_ms = self.input_drain.as_millis(),
+                engine_drain_ms = self.engine_drain.as_millis(),
+                input_events = self.input_events,
+                engine_events = self.engine_events,
+                "tui frame"
+            );
+        }
+    }
+}
+
+fn log_first_paint(startup: std::time::Duration, draw: std::time::Duration, plugin_count: usize) {
+    tracing::info!(
+        startup_ms = startup.as_millis(),
+        draw_ms = draw.as_millis(),
+        plugin_count,
+        "first paint"
+    );
+}
+
 /// Snapshot of `ViewOutput` state saved when navigating to another plugin.
 #[derive(Debug, Clone)]
 pub struct NavigationEntry {
@@ -1062,7 +1121,11 @@ impl App {
     // The event loop uses crossterm's sync poll + tokio::spawn for plugins.
     // No direct .await calls here, but `run` must be async so main can await it.
     #[allow(clippy::unused_async, clippy::too_many_lines)]
-    pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    pub async fn run(
+        mut self,
+        terminal: &mut DefaultTerminal,
+        startup_started: std::time::Instant,
+    ) -> Result<()> {
         // Kick off background prefetch for all eligible plugins.
         self.dispatch_all_prefetch();
 
@@ -1081,19 +1144,34 @@ impl App {
             drop(update_tx);
         }
         let mut update_rx = Some(update_rx);
+        let mut first_paint_pending = true;
 
         while !self.state.should_quit {
+            let frame_started = std::time::Instant::now();
             self.refresh_markdown_cache();
+            let draw_started = std::time::Instant::now();
             terminal.draw(|frame| ui::render(frame, &self.state, &self.theme))?;
+            let draw = draw_started.elapsed();
+            if first_paint_pending {
+                log_first_paint(startup_started.elapsed(), draw, self.state.plugins.len());
+                first_paint_pending = false;
+            }
 
             // Block up to 16ms waiting for input, then drain every queued event
             // before re-rendering. Draining matters on terminals that emit
             // non-Key events (resize, paste, focus) interleaved with keys —
             // otherwise each non-Key event wastes a frame and the next press
             // appears to "not register" until another key is pressed.
-            if event::poll(std::time::Duration::from_millis(16))? {
+            let input_wait_started = std::time::Instant::now();
+            let input_ready = event::poll(std::time::Duration::from_millis(16))?;
+            let input_wait = input_wait_started.elapsed();
+            let input_drain_started = std::time::Instant::now();
+            let mut input_events = 0;
+            if input_ready {
                 loop {
-                    match event::read()? {
+                    let event = event::read()?;
+                    input_events += 1;
+                    match event {
                         Event::Key(key)
                             if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
                         {
@@ -1132,11 +1210,16 @@ impl App {
                     }
                 }
             }
+            let input_drain = input_drain_started.elapsed();
 
             // Drain engine events (non-blocking).
+            let engine_drain_started = std::time::Instant::now();
+            let mut engine_events = 0;
             while let Ok(event) = self.rx.try_recv() {
+                engine_events += 1;
                 self.handle_engine_event(event);
             }
+            let engine_drain = engine_drain_started.elapsed();
 
             // Advance spinner.
             if self.state.is_loading {
@@ -1242,6 +1325,17 @@ impl App {
                     update_rx = None;
                 }
             }
+
+            FrameTiming {
+                total: frame_started.elapsed(),
+                draw,
+                input_wait,
+                input_drain,
+                engine_drain,
+                input_events,
+                engine_events,
+            }
+            .log();
         }
 
         Ok(())
@@ -3234,6 +3328,130 @@ mod tests {
                 UnifiedRow::Command { name, .. } => name.as_str(),
             })
             .collect()
+    }
+
+    fn frame_timing(total_ms: u64, input_wait_ms: u64) -> FrameTiming {
+        FrameTiming {
+            total: std::time::Duration::from_millis(total_ms),
+            draw: std::time::Duration::ZERO,
+            input_wait: std::time::Duration::from_millis(input_wait_ms),
+            input_drain: std::time::Duration::ZERO,
+            engine_drain: std::time::Duration::ZERO,
+            input_events: 0,
+            engine_events: 0,
+        }
+    }
+
+    #[test]
+    fn frame_timing_is_slow_at_sixteen_milliseconds() {
+        assert!(frame_timing(16, 0).is_slow());
+    }
+
+    #[test]
+    fn frame_timing_is_not_slow_below_sixteen_milliseconds() {
+        assert!(!frame_timing(15, 0).is_slow());
+    }
+
+    #[test]
+    fn frame_timing_excludes_blocking_input_wait() {
+        let timing = frame_timing(17, 16);
+
+        assert_eq!(timing.active(), std::time::Duration::from_millis(1));
+    }
+
+    #[test]
+    fn frame_timing_saturates_when_input_wait_exceeds_total() {
+        let timing = frame_timing(5, 10);
+
+        assert_eq!(timing.active(), std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn emitted_timing_first_paint_has_exact_info_contract() {
+        let event = crate::test_tracing::capture_event(|| {
+            log_first_paint(
+                std::time::Duration::from_millis(123),
+                std::time::Duration::from_millis(4),
+                7,
+            );
+        });
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::INFO,
+                [
+                    ("message", "first paint"),
+                    ("startup_ms", "123"),
+                    ("draw_ms", "4"),
+                    ("plugin_count", "7"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn emitted_timing_slow_frame_has_exact_warn_contract() {
+        let timing = FrameTiming {
+            total: std::time::Duration::from_millis(20),
+            draw: std::time::Duration::from_millis(2),
+            input_wait: std::time::Duration::from_millis(3),
+            input_drain: std::time::Duration::from_millis(4),
+            engine_drain: std::time::Duration::from_millis(5),
+            input_events: 6,
+            engine_events: 7,
+        };
+
+        let event = crate::test_tracing::capture_event(|| timing.log());
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::WARN,
+                [
+                    ("message", "slow tui frame"),
+                    ("frame_ms", "17"),
+                    ("draw_ms", "2"),
+                    ("input_wait_ms", "3"),
+                    ("input_drain_ms", "4"),
+                    ("engine_drain_ms", "5"),
+                    ("input_events", "6"),
+                    ("engine_events", "7"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn emitted_timing_normal_frame_has_exact_trace_contract() {
+        let timing = FrameTiming {
+            total: std::time::Duration::from_millis(20),
+            draw: std::time::Duration::from_millis(1),
+            input_wait: std::time::Duration::from_millis(5),
+            input_drain: std::time::Duration::from_millis(2),
+            engine_drain: std::time::Duration::from_millis(3),
+            input_events: 4,
+            engine_events: 5,
+        };
+
+        let event = crate::test_tracing::capture_event(|| timing.log());
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::TRACE,
+                [
+                    ("message", "tui frame"),
+                    ("frame_ms", "15"),
+                    ("draw_ms", "1"),
+                    ("input_wait_ms", "5"),
+                    ("input_drain_ms", "2"),
+                    ("engine_drain_ms", "3"),
+                    ("input_events", "4"),
+                    ("engine_events", "5"),
+                ],
+            )
+        );
     }
 
     #[test]

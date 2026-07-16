@@ -4,7 +4,7 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Next hardening: Week 1 instrumentation/amplification (`mkv.1`–`.5`, `.7`) via `bd ready`.
+- Next hardening: Week 1 amplification/crash sites (`mkv.2`–`mkv.5`, `mkv.7`) via `bd ready`.
 - Launch gate remaining: `.12/.13` async dispatch; `.9` execution identity + `.10` cache owner landed.
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
 

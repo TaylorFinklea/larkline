@@ -115,20 +115,125 @@ const PREFETCH_CONCURRENCY: usize = 8;
 /// `logging.level` config.
 const SLOW_PLUGIN_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
 
-fn log_execution_time(name: &str, elapsed: std::time::Duration) {
-    if elapsed >= SLOW_PLUGIN_THRESHOLD {
+#[derive(Debug, Clone, Copy)]
+enum Invocation {
+    Normal,
+    Streaming,
+    FormSubmission,
+    ActionCallback,
+}
+
+impl Invocation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Streaming => "streaming",
+            Self::FormSubmission => "form_submission",
+            Self::ActionCallback => "action_callback",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PluginTiming<'a> {
+    plugin: &'a str,
+    invocation: &'static str,
+    source: &'static str,
+    execution_id: u64,
+    elapsed_ms: u128,
+}
+
+impl<'a> PluginTiming<'a> {
+    fn new(
+        plugin: &'a str,
+        invocation: Invocation,
+        source: ExecutionSource,
+        stamp: ExecutionStamp,
+        elapsed: std::time::Duration,
+    ) -> Self {
+        let source = match source {
+            ExecutionSource::UserSelected => "user_selected",
+            ExecutionSource::Prefetch => "prefetch",
+        };
+        Self {
+            plugin,
+            invocation: invocation.as_str(),
+            source,
+            execution_id: stamp.execution_id,
+            elapsed_ms: elapsed.as_millis(),
+        }
+    }
+
+    fn is_slow(&self) -> bool {
+        self.elapsed_ms >= SLOW_PLUGIN_THRESHOLD.as_millis()
+    }
+}
+
+fn log_execution_time(
+    name: &str,
+    invocation: Invocation,
+    source: ExecutionSource,
+    stamp: ExecutionStamp,
+    elapsed: std::time::Duration,
+) {
+    let timing = PluginTiming::new(name, invocation, source, stamp, elapsed);
+    if timing.is_slow() {
         tracing::info!(
-            plugin = %name,
-            elapsed_ms = elapsed.as_millis(),
+            plugin = %timing.plugin,
+            invocation = timing.invocation,
+            source = timing.source,
+            execution_id = timing.execution_id,
+            elapsed_ms = timing.elapsed_ms,
             "slow plugin execution"
         );
     } else {
         tracing::debug!(
-            plugin = %name,
-            elapsed_ms = elapsed.as_millis(),
+            plugin = %timing.plugin,
+            invocation = timing.invocation,
+            source = timing.source,
+            execution_id = timing.execution_id,
+            elapsed_ms = timing.elapsed_ms,
             "plugin executed"
         );
     }
+}
+
+fn log_normal_execution_time(
+    name: &str,
+    source: ExecutionSource,
+    stamp: ExecutionStamp,
+    elapsed: std::time::Duration,
+) {
+    log_execution_time(name, Invocation::Normal, source, stamp, elapsed);
+}
+
+fn log_streaming_execution_time(
+    name: &str,
+    source: ExecutionSource,
+    stamp: ExecutionStamp,
+    elapsed: std::time::Duration,
+) {
+    log_execution_time(name, Invocation::Streaming, source, stamp, elapsed);
+}
+
+fn log_form_execution_time(name: &str, stamp: ExecutionStamp, elapsed: std::time::Duration) {
+    log_execution_time(
+        name,
+        Invocation::FormSubmission,
+        ExecutionSource::UserSelected,
+        stamp,
+        elapsed,
+    );
+}
+
+fn log_action_execution_time(name: &str, stamp: ExecutionStamp, elapsed: std::time::Duration) {
+    log_execution_time(
+        name,
+        Invocation::ActionCallback,
+        ExecutionSource::UserSelected,
+        stamp,
+        elapsed,
+    );
 }
 
 /// Manages a set of plugins and dispatches them as async Tokio tasks.
@@ -242,10 +347,12 @@ impl PluginEngine {
     ) -> ExecutionStamp {
         let stamp = self.next_execution_stamp();
         let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let plugin_name = plugin.metadata().name.clone();
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
+            let started = std::time::Instant::now();
             let handle = tokio::spawn(PLUGIN_PANIC_ISOLATED.scope(
                 (),
                 SECRETS.scope(
@@ -264,6 +371,7 @@ impl PluginEngine {
                     "action task failed: {join_err}"
                 ))),
             };
+            log_action_execution_time(&plugin_name, stamp, started.elapsed());
             let _ = tx
                 .send(EngineEvent::ActionResult {
                     plugin_index,
@@ -285,6 +393,7 @@ impl PluginEngine {
     ) -> ExecutionStamp {
         let stamp = self.next_execution_stamp();
         let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let plugin_name = plugin.metadata().name.clone();
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
         let tx = self.tx.clone();
@@ -296,6 +405,7 @@ impl PluginEngine {
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
+            let started = std::time::Instant::now();
             let handle = tokio::spawn(PLUGIN_PANIC_ISOLATED.scope(
                 (),
                 SECRETS.scope(
@@ -314,6 +424,7 @@ impl PluginEngine {
                     "plugin task failed: {join_err}"
                 ))),
             };
+            log_form_execution_time(&plugin_name, stamp, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
@@ -368,7 +479,7 @@ impl PluginEngine {
                     "plugin task failed: {join_err}"
                 ))),
             };
-            log_execution_time(&plugin_name, started.elapsed());
+            log_normal_execution_time(&plugin_name, source, stamp, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
@@ -511,7 +622,7 @@ impl PluginEngine {
                 Ok(r) => r,
                 Err(_) => Err(PluginError::Timeout(timeout)),
             };
-            log_execution_time(&meta.name, started.elapsed());
+            log_streaming_execution_time(&meta.name, source, stamp, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
@@ -532,6 +643,176 @@ impl PluginEngine {
 mod tests {
     use super::*;
     use crate::plugin::traits::{PluginMetadata, PluginOutput};
+
+    #[test]
+    fn plugin_timing_is_slow_at_five_hundred_milliseconds() {
+        let timing = PluginTiming::new(
+            "test",
+            Invocation::Normal,
+            ExecutionSource::UserSelected,
+            ExecutionStamp {
+                registry_generation: 3,
+                execution_id: 42,
+            },
+            std::time::Duration::from_millis(500),
+        );
+
+        assert!(timing.is_slow());
+    }
+
+    #[test]
+    fn plugin_timing_is_normal_below_five_hundred_milliseconds() {
+        let timing = PluginTiming::new(
+            "test",
+            Invocation::Normal,
+            ExecutionSource::UserSelected,
+            ExecutionStamp {
+                registry_generation: 3,
+                execution_id: 42,
+            },
+            std::time::Duration::from_millis(499),
+        );
+
+        assert!(!timing.is_slow());
+    }
+
+    #[test]
+    fn plugin_timing_prepares_required_metadata() {
+        let timing = PluginTiming::new(
+            "test",
+            Invocation::FormSubmission,
+            ExecutionSource::UserSelected,
+            ExecutionStamp {
+                registry_generation: 3,
+                execution_id: 42,
+            },
+            std::time::Duration::from_millis(17),
+        );
+
+        assert_eq!(
+            timing,
+            PluginTiming {
+                plugin: "test",
+                invocation: "form_submission",
+                source: "user_selected",
+                execution_id: 42,
+                elapsed_ms: 17,
+            }
+        );
+    }
+
+    fn stamp(execution_id: u64) -> ExecutionStamp {
+        ExecutionStamp {
+            registry_generation: 3,
+            execution_id,
+        }
+    }
+
+    #[test]
+    fn emitted_timing_normal_dispatch_has_exact_debug_contract() {
+        let event = crate::test_tracing::capture_event(|| {
+            log_normal_execution_time(
+                "normal-plugin",
+                ExecutionSource::Prefetch,
+                stamp(41),
+                std::time::Duration::from_millis(499),
+            );
+        });
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::DEBUG,
+                [
+                    ("message", "plugin executed"),
+                    ("plugin", "normal-plugin"),
+                    ("invocation", "normal"),
+                    ("source", "prefetch"),
+                    ("execution_id", "41"),
+                    ("elapsed_ms", "499"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn emitted_timing_streaming_dispatch_has_exact_info_contract() {
+        let event = crate::test_tracing::capture_event(|| {
+            log_streaming_execution_time(
+                "streaming-plugin",
+                ExecutionSource::UserSelected,
+                stamp(42),
+                std::time::Duration::from_millis(500),
+            );
+        });
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::INFO,
+                [
+                    ("message", "slow plugin execution"),
+                    ("plugin", "streaming-plugin"),
+                    ("invocation", "streaming"),
+                    ("source", "user_selected"),
+                    ("execution_id", "42"),
+                    ("elapsed_ms", "500"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn emitted_timing_form_dispatch_has_exact_debug_contract() {
+        let event = crate::test_tracing::capture_event(|| {
+            log_form_execution_time(
+                "form-plugin",
+                stamp(43),
+                std::time::Duration::from_millis(17),
+            );
+        });
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::DEBUG,
+                [
+                    ("message", "plugin executed"),
+                    ("plugin", "form-plugin"),
+                    ("invocation", "form_submission"),
+                    ("source", "user_selected"),
+                    ("execution_id", "43"),
+                    ("elapsed_ms", "17"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn emitted_timing_action_dispatch_has_exact_info_contract() {
+        let event = crate::test_tracing::capture_event(|| {
+            log_action_execution_time(
+                "action-plugin",
+                stamp(44),
+                std::time::Duration::from_millis(700),
+            );
+        });
+
+        assert_eq!(
+            event,
+            crate::test_tracing::CapturedEvent::new(
+                tracing::Level::INFO,
+                [
+                    ("message", "slow plugin execution"),
+                    ("plugin", "action-plugin"),
+                    ("invocation", "action_callback"),
+                    ("source", "user_selected"),
+                    ("execution_id", "44"),
+                    ("elapsed_ms", "700"),
+                ],
+            )
+        );
+    }
 
     fn test_metadata() -> PluginMetadata {
         PluginMetadata {
