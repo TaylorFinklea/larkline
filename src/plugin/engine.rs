@@ -2,6 +2,7 @@
 //! to the app run loop via an `mpsc` channel.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::mpsc;
 
@@ -30,13 +31,24 @@ tokio::task_local! {
 }
 
 /// Indicates whether a plugin execution was triggered by the user or by prefetch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionSource {
     /// The user explicitly selected this plugin.
     UserSelected,
     /// The plugin was executed in the background on startup (prefetch).
     Prefetch,
 }
+
+/// Identity shared by every event emitted for one engine dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionStamp {
+    /// Registry snapshot against which the plugin index was resolved.
+    pub registry_generation: u64,
+    /// Process-wide monotonic dispatch identifier.
+    pub execution_id: u64,
+}
+
+static NEXT_EXECUTION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Events sent from the engine to the app run loop.
 #[derive(Debug)]
@@ -45,6 +57,8 @@ pub enum EngineEvent {
     PluginStarted {
         /// Index into the engine's plugin list.
         plugin_index: usize,
+        /// Identity of this dispatch.
+        stamp: ExecutionStamp,
         /// Whether this is a user-triggered or prefetch execution.
         source: ExecutionSource,
     },
@@ -52,6 +66,8 @@ pub enum EngineEvent {
     PluginFinished {
         /// Index into the engine's plugin list.
         plugin_index: usize,
+        /// Identity of this dispatch.
+        stamp: ExecutionStamp,
         /// The execution result.
         result: Result<PluginOutput, PluginError>,
         /// Whether this is a user-triggered or prefetch execution.
@@ -61,6 +77,8 @@ pub enum EngineEvent {
     PartialOutput {
         /// Index into the engine's plugin list.
         plugin_index: usize,
+        /// Identity of this dispatch.
+        stamp: ExecutionStamp,
         /// Title (set only on the first partial).
         title: Option<String>,
         /// Items to append to the output.
@@ -72,6 +90,8 @@ pub enum EngineEvent {
     ActionResult {
         /// Index into the engine's plugin list.
         plugin_index: usize,
+        /// Identity of this dispatch.
+        stamp: ExecutionStamp,
         /// The updated output from the action callback.
         result: Result<PluginOutput, PluginError>,
     },
@@ -113,6 +133,7 @@ pub struct PluginEngine {
     plugins: Vec<Arc<dyn Plugin>>,
     tx: mpsc::Sender<EngineEvent>,
     secrets: Arc<std::collections::HashMap<String, String>>,
+    registry_generation: u64,
     /// Limits concurrent prefetch executions; user-selected runs bypass it.
     prefetch_sem: Arc<tokio::sync::Semaphore>,
 }
@@ -124,12 +145,21 @@ impl PluginEngine {
         plugins: Vec<Arc<dyn Plugin>>,
         tx: mpsc::Sender<EngineEvent>,
         secrets: std::collections::HashMap<String, String>,
+        registry_generation: u64,
     ) -> Self {
         Self {
             plugins,
             tx,
             secrets: Arc::new(secrets),
+            registry_generation,
             prefetch_sem: Arc::new(tokio::sync::Semaphore::new(PREFETCH_CONCURRENCY)),
+        }
+    }
+
+    fn next_execution_stamp(&self) -> ExecutionStamp {
+        ExecutionStamp {
+            registry_generation: self.registry_generation,
+            execution_id: NEXT_EXECUTION_ID.fetch_add(1, Ordering::Relaxed),
         }
     }
 
@@ -150,49 +180,64 @@ impl PluginEngine {
     /// Spawn plugin execution on a Tokio task (user-selected). Returns immediately.
     ///
     /// Dispatches to streaming or normal mode based on plugin metadata.
-    pub fn execute(&self, plugin_index: usize) {
-        self.execute_with_source(plugin_index, ExecutionSource::UserSelected);
+    #[must_use]
+    pub fn execute(&self, plugin_index: usize) -> ExecutionStamp {
+        self.execute_with_source(plugin_index, ExecutionSource::UserSelected)
     }
 
     /// Re-run a plugin in the BACKGROUND (prefetch source): the result updates
     /// the result cache only and must NOT take over the foreground view. Used
     /// by the widget/glance-strip auto-refresh ticks — `execute()` would emit
     /// `UserSelected` events that yank the main pane to the refreshed plugin.
-    pub fn refresh(&self, plugin_index: usize) {
-        self.execute_with_source(plugin_index, ExecutionSource::Prefetch);
+    #[must_use]
+    pub fn refresh(&self, plugin_index: usize) -> ExecutionStamp {
+        self.execute_with_source(plugin_index, ExecutionSource::Prefetch)
     }
 
     /// Execute all prefetch-eligible plugins in the background.
     ///
     /// Called on startup and after refresh. Only runs plugins with `prefetch == true`.
     /// No-ops if called outside of a Tokio runtime context (e.g., from sync tests).
-    pub fn execute_all(&self) {
+    #[must_use]
+    pub fn execute_all(&self) -> Vec<(usize, ExecutionStamp)> {
         if tokio::runtime::Handle::try_current().is_err() {
-            return;
+            return Vec::new();
         }
+        let mut executions = Vec::new();
         for i in 0..self.plugins.len() {
             let meta = self.plugins[i].metadata();
             if meta.prefetch || meta.widget || meta.status {
-                self.execute_with_source(i, ExecutionSource::Prefetch);
+                let stamp = self.execute_with_source(i, ExecutionSource::Prefetch);
+                executions.push((i, stamp));
             }
         }
+        executions
     }
 
     /// Internal dispatch — routes to streaming or normal execution with the given source.
-    fn execute_with_source(&self, plugin_index: usize, source: ExecutionSource) {
+    fn execute_with_source(&self, plugin_index: usize, source: ExecutionSource) -> ExecutionStamp {
+        let stamp = self.next_execution_stamp();
         let meta = self.plugins[plugin_index].metadata();
         if meta.streaming && meta.entry_path.is_some() {
-            self.execute_streaming(plugin_index, source);
+            self.execute_streaming(plugin_index, source, stamp);
         } else {
-            self.execute_normal(plugin_index, source);
+            self.execute_normal(plugin_index, source, stamp);
         }
+        stamp
     }
 
     /// Execute a plugin's `on_action` callback for action chaining.
     ///
     /// Spawns a Tokio task that calls `Plugin::execute_action()` and sends
     /// an `EngineEvent::ActionResult` when complete.
-    pub fn execute_action(&self, plugin_index: usize, callback_id: String, context: String) {
+    #[must_use]
+    pub fn execute_action(
+        &self,
+        plugin_index: usize,
+        callback_id: String,
+        context: String,
+    ) -> ExecutionStamp {
+        let stamp = self.next_execution_stamp();
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
@@ -216,19 +261,23 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::ActionResult {
                     plugin_index,
+                    stamp,
                     result,
                 })
                 .await;
         });
+        stamp
     }
 
     /// Execute a plugin with form values. The plugin's `execute_with_form()` receives
     /// the collected values, which Lua/Script backends use to inject form context.
+    #[must_use]
     pub fn execute_with_form(
         &self,
         plugin_index: usize,
         form_values: std::collections::HashMap<String, String>,
-    ) {
+    ) -> ExecutionStamp {
+        let stamp = self.next_execution_stamp();
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
@@ -237,6 +286,7 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginStarted {
                     plugin_index,
+                    stamp,
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
@@ -259,11 +309,13 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
+                    stamp,
                     result,
                     source: ExecutionSource::UserSelected,
                 })
                 .await;
         });
+        stamp
     }
 
     /// Normal (non-streaming) execution — waits for plugin to complete, then sends result.
@@ -271,7 +323,7 @@ impl PluginEngine {
     /// Uses an outer/inner task pattern so panics in the plugin are caught by the
     /// `JoinHandle` and converted to a `PluginError`, ensuring `PluginFinished` is
     /// always sent even when the plugin task panics.
-    fn execute_normal(&self, plugin_index: usize, source: ExecutionSource) {
+    fn execute_normal(&self, plugin_index: usize, source: ExecutionSource, stamp: ExecutionStamp) {
         let plugin = Arc::clone(&self.plugins[plugin_index]);
         let all_plugins = Arc::new(self.plugins.clone());
         let secrets = self.secrets.clone();
@@ -287,7 +339,8 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginStarted {
                     plugin_index,
-                    source: source.clone(),
+                    stamp,
+                    source,
                 })
                 .await;
             let started = std::time::Instant::now();
@@ -308,6 +361,7 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
+                    stamp,
                     result,
                     source,
                 })
@@ -322,7 +376,12 @@ impl PluginEngine {
     /// Subsequent lines are parsed as individual `OutputItem`.
     /// Invalid lines are skipped with a warning.
     #[allow(clippy::too_many_lines)]
-    fn execute_streaming(&self, plugin_index: usize, source: ExecutionSource) {
+    fn execute_streaming(
+        &self,
+        plugin_index: usize,
+        source: ExecutionSource,
+        stamp: ExecutionStamp,
+    ) {
         let meta = self.plugins[plugin_index].metadata().clone();
         let entry_path = meta
             .entry_path
@@ -347,7 +406,8 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginStarted {
                     plugin_index,
-                    source: source.clone(),
+                    stamp,
+                    source,
                 })
                 .await;
             let started = std::time::Instant::now();
@@ -390,9 +450,10 @@ impl PluginEngine {
                                 let _ = tx
                                     .send(EngineEvent::PartialOutput {
                                         plugin_index,
+                                        stamp,
                                         title: Some(output.title),
                                         items: output.items,
-                                        source: source.clone(),
+                                        source,
                                     })
                                     .await;
                             }
@@ -411,9 +472,10 @@ impl PluginEngine {
                                 let _ = tx
                                     .send(EngineEvent::PartialOutput {
                                         plugin_index,
+                                        stamp,
                                         title: None,
                                         items: vec![item],
-                                        source: source.clone(),
+                                        source,
                                     })
                                     .await;
                             }
@@ -442,6 +504,7 @@ impl PluginEngine {
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
+                    stamp,
                     result: finished_result,
                     source,
                 })
@@ -522,16 +585,19 @@ mod tests {
             vec![Arc::new(MockPlugin(test_metadata()))],
             tx,
             std::collections::HashMap::new(),
+            0,
         );
-        engine.execute(0);
+        let stamp = engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
         assert!(matches!(
             event1,
             EngineEvent::PluginStarted {
                 plugin_index: 0,
-                source: ExecutionSource::UserSelected
-            }
+                stamp: event_stamp,
+                source: ExecutionSource::UserSelected,
+                ..
+            } if event_stamp == stamp
         ));
 
         let event2 = rx.recv().await.unwrap();
@@ -539,10 +605,43 @@ mod tests {
             event2,
             EngineEvent::PluginFinished {
                 plugin_index: 0,
+                stamp: event_stamp,
                 result: Ok(_),
-                source: ExecutionSource::UserSelected
-            }
+                source: ExecutionSource::UserSelected,
+                ..
+            } if event_stamp == stamp
         ));
+    }
+
+    #[tokio::test]
+    async fn dispatches_get_monotonic_execution_ids() {
+        let (tx, _rx) = mpsc::channel(4);
+        let engine = PluginEngine::new(
+            vec![Arc::new(MockPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+            7,
+        );
+
+        let first = engine.execute(0);
+        let second = engine.execute(0);
+
+        assert!(second.execution_id > first.execution_id);
+    }
+
+    #[tokio::test]
+    async fn dispatch_stamp_carries_registry_generation() {
+        let (tx, _rx) = mpsc::channel(2);
+        let engine = PluginEngine::new(
+            vec![Arc::new(MockPlugin(test_metadata()))],
+            tx,
+            std::collections::HashMap::new(),
+            7,
+        );
+
+        let stamp = engine.execute(0);
+
+        assert_eq!(stamp.registry_generation, 7);
     }
 
     #[tokio::test]
@@ -552,8 +651,9 @@ mod tests {
             vec![Arc::new(FailPlugin(test_metadata()))],
             tx,
             std::collections::HashMap::new(),
+            0,
         );
-        engine.execute(0);
+        let _stamp = engine.execute(0);
 
         let _ = rx.recv().await; // PluginStarted
         let event = rx.recv().await.unwrap();
@@ -582,15 +682,17 @@ mod tests {
             vec![Arc::new(PanicPlugin(test_metadata()))],
             tx,
             std::collections::HashMap::new(),
+            0,
         );
-        engine.execute(0);
+        let _stamp = engine.execute(0);
 
         let event1 = rx.recv().await.unwrap();
         assert!(matches!(
             event1,
             EngineEvent::PluginStarted {
                 plugin_index: 0,
-                source: ExecutionSource::UserSelected
+                source: ExecutionSource::UserSelected,
+                ..
             }
         ));
 
@@ -612,15 +714,17 @@ mod tests {
             vec![Arc::new(MockPlugin(test_metadata()))],
             tx,
             std::collections::HashMap::new(),
+            0,
         );
-        engine.execute_all();
+        let _executions = engine.execute_all();
 
         let event1 = rx.recv().await.unwrap();
         assert!(matches!(
             event1,
             EngineEvent::PluginStarted {
                 plugin_index: 0,
-                source: ExecutionSource::Prefetch
+                source: ExecutionSource::Prefetch,
+                ..
             }
         ));
 
@@ -630,7 +734,8 @@ mod tests {
             EngineEvent::PluginFinished {
                 plugin_index: 0,
                 result: Ok(_),
-                source: ExecutionSource::Prefetch
+                source: ExecutionSource::Prefetch,
+                ..
             }
         ));
     }

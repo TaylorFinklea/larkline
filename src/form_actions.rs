@@ -176,7 +176,7 @@ pub fn submit(app: &mut App) {
         app.state.is_loading = true;
         app.state.loading_started = Some(std::time::Instant::now());
         app.state.scroll_offset = 0;
-        app.engine.execute(plugin_index);
+        app.dispatch_plugin(plugin_index);
     } else {
         let mut values = std::collections::HashMap::new();
         for field in &form.fields {
@@ -186,7 +186,7 @@ pub fn submit(app: &mut App) {
         app.state.is_loading = true;
         app.state.plugin_output = None;
         app.state.loading_started = Some(std::time::Instant::now());
-        app.engine.execute_with_form(plugin_index, values);
+        app.dispatch_plugin_with_form(plugin_index, values);
     }
 }
 

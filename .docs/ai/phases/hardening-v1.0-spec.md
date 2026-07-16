@@ -18,7 +18,7 @@ Make larkline feel **solid and performant** before v1.0 launch. Felt symptoms: i
 Make the lag measurable and stop the aborts. `mkv.1` instrumentation (lands first — every later perf fix is a measured before/after), `mkv.2` ANSI parse cache, `mkv.3` scoped markdown invalidation, `mkv.4` preserve Ready on refresh (no Loading flash), `mkv.5` single-flight refresh + seed startup timestamps (kills the double-dispatch), `mkv.6` remove `panic="abort"` + terminal-restoring panic hook (P0), `mkv.7` fix the four confirmed panic sites.
 
 ### Week 2 — Stable identity + execution model (the structural gate)
-`mkv.8` stable plugin_id/command_id, migrate store/disabled-keys/history/agent-tool identity off display names (P0, **precedes .9**). `mkv.9` registry generation + execution IDs, reject stale completions (P0, fixes the foreground-hijack class). `mkv.10` single cache-state owner + uniform SWR (P0, fixes streaming-default-wipe). `mkv.11` in-flight dedup + route streaming through the Plugin trait.
+`mkv.9` registry generation + execution IDs on the existing index, reject stale completions (P0, fixes the foreground-hijack class). `mkv.10` single cache-state owner + uniform SWR (P0, fixes streaming-default-wipe). `mkv.11` in-flight dedup + route streaming through the Plugin trait. Full stable plugin_id/command_id migration (`mkv.8`) is deferred to v1.1 and is not a launch dependency.
 
 ### Week 3 — UI-task isolation (never block render/input)
 `mkv.12` async background-command path for shell/nvim/editor (gated on `.9`). `mkv.13` async RefreshPlugins + plugin-manager scans/keychain (gated on `.11`). `mkv.14` in-memory history + secret-availability cache. `mkv.15` defer/parallelize startup keychain behind first paint.
@@ -33,8 +33,8 @@ Make the lag measurable and stop the aborts. `mkv.1` instrumentation (lands firs
 `mkv.26` disabled-plugin parity across headless surfaces. `mkv.27` pin plugin sync to a compatible release + atomic sync (supply-chain). `mkv.28` version the lark.nvim wire contract + hermetic cli tests. `mkv.29` onboarding correctness. `mkv.30` packaging/release gates. `mkv.31` plugin fix-it batch (HA/Bitwarden/Docker/k8s/Atlassian/clipboard + confirm:true). `mkv.32` full v1.0 launch rehearsal + Taylor-gated QA (go/no-go).
 
 ## Sequencing gates (do not reorder)
-- `mkv.8` (stable IDs) **before** `mkv.9` (execution IDs) — usize-keyed execution IDs don't fix reload races without stable identity.
 - `mkv.9` **before** `mkv.12`/`.13` (async dispatch) — moving work async before execution identity exists creates a new late-completion focus-steal class.
+- `mkv.8` remains the long-term identity migration, but the Sol launch cut explicitly removed it as a dependency of the generation-stamped `mkv.9` slice; do not restore that gate for v1.0.
 - secret audit **before** enforcement within `mkv.25`.
 
 ## Confirmed discrete bugs (fold-ins, all verified)

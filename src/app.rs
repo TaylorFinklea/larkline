@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::action::Action;
 use crate::config::{Config, KeybindingsConfig, ResolvedKeybindings, Theme};
 use crate::input;
-use crate::plugin::engine::{EngineEvent, ExecutionSource, PluginEngine};
+use crate::plugin::engine::{EngineEvent, ExecutionSource, ExecutionStamp, PluginEngine};
 use crate::plugin::registry;
 use crate::plugin::traits::{
     ActionKind, ItemAction, MiniAppLayout, PaneContent, PaneId, PluginOutput,
@@ -579,6 +579,9 @@ pub struct App {
     pub(crate) keybindings: ResolvedKeybindings,
     pub(crate) engine: PluginEngine,
     pub(crate) rx: mpsc::Receiver<EngineEvent>,
+    registry_generation: u64,
+    latest_plugin_executions: std::collections::HashMap<(usize, ExecutionSource), ExecutionStamp>,
+    latest_action_executions: std::collections::HashMap<usize, ExecutionStamp>,
     /// Plugin directories for re-scanning on refresh.
     pub(crate) plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
@@ -604,7 +607,8 @@ impl App {
         let plugin_count = plugins.len();
         let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
-        let engine = PluginEngine::new(plugins, tx, secrets.clone());
+        let registry_generation = 0;
+        let engine = PluginEngine::new(plugins, tx, secrets.clone(), registry_generation);
         // Resolve theme; fall back to defaults on invalid colors.
         let theme = config.theme.resolve().unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid theme color, falling back to defaults");
@@ -632,6 +636,9 @@ impl App {
             keybindings,
             engine,
             rx,
+            registry_generation,
+            latest_plugin_executions: std::collections::HashMap::new(),
+            latest_action_executions: std::collections::HashMap::new(),
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
@@ -668,6 +675,100 @@ impl App {
         }
 
         app
+    }
+
+    fn track_plugin_execution(
+        &mut self,
+        plugin_index: usize,
+        source: ExecutionSource,
+        stamp: ExecutionStamp,
+    ) {
+        self.latest_plugin_executions
+            .insert((plugin_index, source), stamp);
+    }
+
+    pub(crate) fn dispatch_plugin(&mut self, plugin_index: usize) {
+        let stamp = self.engine.execute(plugin_index);
+        self.track_plugin_execution(plugin_index, ExecutionSource::UserSelected, stamp);
+    }
+
+    fn dispatch_prefetch(&mut self, plugin_index: usize) {
+        let stamp = self.engine.refresh(plugin_index);
+        self.track_plugin_execution(plugin_index, ExecutionSource::Prefetch, stamp);
+    }
+
+    fn dispatch_all_prefetch(&mut self) {
+        for (plugin_index, stamp) in self.engine.execute_all() {
+            self.track_plugin_execution(plugin_index, ExecutionSource::Prefetch, stamp);
+        }
+    }
+
+    pub(crate) fn dispatch_plugin_with_form(
+        &mut self,
+        plugin_index: usize,
+        form_values: std::collections::HashMap<String, String>,
+    ) {
+        let stamp = self.engine.execute_with_form(plugin_index, form_values);
+        self.track_plugin_execution(plugin_index, ExecutionSource::UserSelected, stamp);
+    }
+
+    fn dispatch_plugin_action(
+        &mut self,
+        plugin_index: usize,
+        callback_id: String,
+        context: String,
+    ) {
+        let stamp = self
+            .engine
+            .execute_action(plugin_index, callback_id, context);
+        self.latest_action_executions.insert(plugin_index, stamp);
+    }
+
+    fn invalidate_viewing_execution(&mut self) {
+        if let Some(plugin_index) = self.state.viewing_plugin_index {
+            self.latest_plugin_executions
+                .remove(&(plugin_index, ExecutionSource::UserSelected));
+            self.latest_action_executions.remove(&plugin_index);
+        }
+        self.state.is_loading = false;
+        self.state.loading_started = None;
+    }
+
+    fn is_current_engine_event(&self, event: &EngineEvent) -> bool {
+        let stamp = match event {
+            EngineEvent::PluginStarted { stamp, .. }
+            | EngineEvent::PluginFinished { stamp, .. }
+            | EngineEvent::PartialOutput { stamp, .. }
+            | EngineEvent::ActionResult { stamp, .. } => stamp,
+        };
+        if stamp.registry_generation != self.registry_generation {
+            return false;
+        }
+
+        match event {
+            EngineEvent::PluginStarted {
+                plugin_index,
+                stamp,
+                source,
+            }
+            | EngineEvent::PluginFinished {
+                plugin_index,
+                stamp,
+                source,
+                ..
+            }
+            | EngineEvent::PartialOutput {
+                plugin_index,
+                stamp,
+                source,
+                ..
+            } => self.latest_plugin_executions.get(&(*plugin_index, *source)) == Some(stamp),
+            EngineEvent::ActionResult {
+                plugin_index,
+                stamp,
+                ..
+            } => self.latest_action_executions.get(plugin_index) == Some(stamp),
+        }
     }
 
     /// Set an initial search query (from `--query` CLI flag).
@@ -723,7 +824,7 @@ impl App {
     #[allow(clippy::unused_async, clippy::too_many_lines)]
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         // Kick off background prefetch for all eligible plugins.
-        self.engine.execute_all();
+        self.dispatch_all_prefetch();
 
         // Detect install method and check for updates in the background.
         self.state.install_method = crate::update::detect_install_method();
@@ -848,7 +949,7 @@ impl App {
                         // Background refresh: updates the card's cache without
                         // hijacking the foreground view (execute() = UserSelected
                         // would force the main pane to the refreshed widget).
-                        self.engine.refresh(*pidx);
+                        self.dispatch_prefetch(*pidx);
                     }
                     self.rebuild_unified_list();
                 }
@@ -888,7 +989,7 @@ impl App {
                 for pidx in &due {
                     self.state.status_last_refresh.insert(*pidx, now);
                     // Background refresh — must not steal the foreground view.
-                    self.engine.refresh(*pidx);
+                    self.dispatch_prefetch(*pidx);
                 }
             }
 
@@ -911,12 +1012,16 @@ impl App {
     /// Extracted from the run loop so it can be called from tests.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn handle_engine_event(&mut self, event: EngineEvent) {
+        if !self.is_current_engine_event(&event) {
+            return;
+        }
         // Any engine event may deliver new output — invalidate markdown cache.
         self.state.markdown_cache = None;
         match event {
             EngineEvent::PluginStarted {
                 plugin_index,
                 source,
+                ..
             } => match source {
                 ExecutionSource::Prefetch => {
                     self.state.result_cache.insert(
@@ -943,6 +1048,7 @@ impl App {
                 title,
                 items,
                 source,
+                ..
             } => match source {
                 ExecutionSource::Prefetch => {
                     // Accumulate partials into cache (for commands with prefetch = true).
@@ -990,6 +1096,7 @@ impl App {
                 plugin_index,
                 result,
                 source,
+                ..
             } => match source {
                 ExecutionSource::Prefetch => {
                     match result {
@@ -1134,6 +1241,7 @@ impl App {
             EngineEvent::ActionResult {
                 plugin_index,
                 result,
+                ..
             } => {
                 self.state.is_loading = false;
                 match result {
@@ -1533,6 +1641,7 @@ impl App {
                     return;
                 }
                 crate::app_output::reset_output_search(&mut self.state);
+                self.invalidate_viewing_execution();
 
                 if let Some(entry) = self.state.navigation_history.pop() {
                     // Restore previous ViewOutput state from history.
@@ -2103,7 +2212,7 @@ impl App {
                     self.state.is_loading = true;
                     self.state.loading_started = Some(std::time::Instant::now());
                     self.state.scroll_offset = 0;
-                    self.engine.execute(plugin_index);
+                    self.dispatch_plugin(plugin_index);
                 }
             }
 
@@ -2242,7 +2351,10 @@ impl App {
             // ----- Mini app actions -----
             Action::MiniAppFocusNext => crate::mini_app::focus_next(&mut self.state),
             Action::MiniAppFocusPrev => crate::mini_app::focus_prev(&mut self.state),
-            Action::MiniAppClose => crate::mini_app::close(&mut self.state),
+            Action::MiniAppClose => {
+                self.invalidate_viewing_execution();
+                crate::mini_app::close(&mut self.state);
+            }
             Action::MiniAppExpand => crate::mini_app::expand(&mut self.state),
             Action::MiniAppSplitH => crate::mini_app::split_h(&mut self.state),
             Action::MiniAppSplitV => crate::mini_app::split_v(&mut self.state),
@@ -2294,7 +2406,15 @@ impl App {
                         .collect();
                     declared_keys.extend(crate::config::AI_SECRET_KEYS);
                     crate::config::resolve_keychain_secrets(&mut self.secrets, &declared_keys);
-                    self.engine = PluginEngine::new(plugins, tx, self.secrets.clone());
+                    self.registry_generation = self.registry_generation.wrapping_add(1);
+                    self.latest_plugin_executions.clear();
+                    self.latest_action_executions.clear();
+                    self.engine = PluginEngine::new(
+                        plugins,
+                        tx,
+                        self.secrets.clone(),
+                        self.registry_generation,
+                    );
                     self.rx = rx;
                     self.keybindings = self.keybindings_config.resolve(&metadata);
                     self.state.plugins = metadata;
@@ -2312,7 +2432,7 @@ impl App {
                     // rebuild them or a stale index panics the render/refresh.
                     self.state.widget_last_refresh.clear();
                     self.state.status_last_refresh.clear();
-                    self.engine.execute_all();
+                    self.dispatch_all_prefetch();
                     self.rebuild_unified_list();
                     crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
                     crate::widgets::rebuild_status_indices(&mut self.state, &self.pm_config);
@@ -2388,8 +2508,7 @@ impl App {
                     .join(" ");
                 if let Some(plugin_index) = self.state.viewing_plugin_index {
                     self.state.is_loading = true;
-                    self.engine
-                        .execute_action(plugin_index, callback_id, context);
+                    self.dispatch_plugin_action(plugin_index, callback_id, context);
                 }
             }
             ActionKind::UpdatePane => {
@@ -2406,8 +2525,7 @@ impl App {
                     .join(" ");
                 if let Some(plugin_index) = self.state.viewing_plugin_index {
                     self.state.is_loading = true;
-                    self.engine
-                        .execute_action(plugin_index, callback_id, context);
+                    self.dispatch_plugin_action(plugin_index, callback_id, context);
                 }
             }
             ActionKind::NvimEdit => {
@@ -2461,6 +2579,9 @@ impl App {
 
     fn open_plugin_in_view_output(&mut self, plugin_index: usize) {
         self.state.markdown_cache = None;
+        if self.state.viewing_plugin_index != Some(plugin_index) {
+            self.invalidate_viewing_execution();
+        }
         // Push current ViewOutput state onto history if already viewing a plugin.
         if self.state.mode == Mode::ViewOutput {
             if let Some(current_idx) = self.state.viewing_plugin_index {
@@ -2495,7 +2616,7 @@ impl App {
                 self.state
                     .result_cache
                     .insert(plugin_index, CachedResult::Revalidating(output));
-                self.engine.execute(plugin_index);
+                self.dispatch_plugin(plugin_index);
             }
             Some(CachedResult::Revalidating(output)) => {
                 // Already revalidating — show stale data, don't trigger another execution.
@@ -2525,7 +2646,7 @@ impl App {
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
                 self.state.mode = Mode::ViewOutput;
-                self.engine.execute(plugin_index);
+                self.dispatch_plugin(plugin_index);
             }
         }
         crate::app_output::rebuild_output_filter(&mut self.state);
@@ -3079,9 +3200,15 @@ mod tests {
         use crate::plugin::engine::EngineEvent;
         let mut app = App::with_stubs();
         assert!(app.state.loading_started.is_none());
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 1,
+        };
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, stamp);
 
         app.handle_engine_event(EngineEvent::PluginStarted {
             plugin_index: 0,
+            stamp,
             source: crate::plugin::engine::ExecutionSource::UserSelected,
         });
         assert!(app.state.loading_started.is_some());
@@ -3089,11 +3216,107 @@ mod tests {
 
         app.handle_engine_event(EngineEvent::PluginFinished {
             plugin_index: 0,
+            stamp,
             result: Ok(PluginOutput::default()),
             source: crate::plugin::engine::ExecutionSource::UserSelected,
         });
         assert!(app.state.loading_started.is_none());
         assert!(!app.state.is_loading);
+    }
+
+    #[test]
+    fn plugin_finished_after_back_does_not_reopen_output() {
+        use crate::plugin::engine::EngineEvent;
+
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.viewing_plugin_index = Some(0);
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 2,
+        };
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, stamp);
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp,
+            source: crate::plugin::engine::ExecutionSource::UserSelected,
+        });
+
+        app.handle_action(Action::Back);
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp,
+            result: Ok(PluginOutput {
+                title: "stale".to_string(),
+                ..Default::default()
+            }),
+            source: crate::plugin::engine::ExecutionSource::UserSelected,
+        });
+
+        assert_eq!(app.state.mode, Mode::Unified);
+    }
+
+    #[test]
+    fn older_user_dispatch_cannot_overwrite_newer_dispatch() {
+        let mut app = App::with_stubs();
+        app.state.mode = Mode::ViewOutput;
+        app.state.viewing_plugin_index = Some(0);
+        let older = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 10,
+        };
+        let newer = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 11,
+        };
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, older);
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, newer);
+
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp: older,
+            result: Ok(PluginOutput {
+                title: "older".to_string(),
+                ..Default::default()
+            }),
+            source: ExecutionSource::UserSelected,
+        });
+
+        assert!(app.state.plugin_output.is_none());
+    }
+
+    #[test]
+    fn plugin_finished_from_previous_registry_generation_is_dropped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = Config::default();
+        config.general.plugin_dirs = vec![dir.path().to_path_buf()];
+        let mut app = App::new(
+            stub_plugins(),
+            &config,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        );
+        app.state.mode = Mode::ViewOutput;
+        app.state.viewing_plugin_index = Some(0);
+        let old_stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 12,
+        };
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, old_stamp);
+
+        app.handle_action(Action::RefreshPlugins);
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, old_stamp);
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp: old_stamp,
+            result: Ok(PluginOutput {
+                title: "old registry".to_string(),
+                ..Default::default()
+            }),
+            source: ExecutionSource::UserSelected,
+        });
+
+        assert_eq!(app.state.mode, Mode::Unified);
     }
 
     #[test]
