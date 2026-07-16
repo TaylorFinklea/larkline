@@ -4,8 +4,8 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Next hardening: Week 1 amplification/crash sites (`mkv.3`, `mkv.5`, `mkv.7`) via `bd ready`;
-  `mkv.2` ANSI parse cache landed (`tui::ansi_cache`, synced pre-draw);
+- Next hardening: Week 1 remainder `mkv.5` (single-flight refresh), `mkv.7` (panic sites) via `bd ready`;
+  `mkv.2` ANSI parse cache + `mkv.3` scoped markdown invalidation landed;
   `mkv.4` closed already-done (mkv.10's Started arm + Revalidating render parity cover it).
 - Launch gate remaining: `.12/.13` async dispatch; `.9` execution identity + `.10` cache owner landed.
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.

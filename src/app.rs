@@ -1353,8 +1353,20 @@ impl App {
         if !self.is_current_engine_event(&event) {
             return;
         }
-        // Any engine event may deliver new output — invalidate markdown cache.
-        self.state.markdown_cache = None;
+        // Only the viewed plugin's events can change the viewed document —
+        // scope the markdown-cache invalidation so an unrelated background
+        // widget/status refresh doesn't force a full re-parse next frame.
+        // (Arms that replace `plugin_output` for other reasons carry their
+        // own targeted `markdown_cache = None`.)
+        let event_plugin_index = match &event {
+            EngineEvent::PluginStarted { plugin_index, .. }
+            | EngineEvent::PluginFinished { plugin_index, .. }
+            | EngineEvent::PartialOutput { plugin_index, .. }
+            | EngineEvent::ActionResult { plugin_index, .. } => *plugin_index,
+        };
+        if self.state.viewing_plugin_index == Some(event_plugin_index) {
+            self.state.markdown_cache = None;
+        }
         match event {
             EngineEvent::PluginStarted {
                 plugin_index,
@@ -3685,6 +3697,52 @@ mod tests {
             app.state.result_cache.get(&0),
             Some(CachedResult::Revalidating(output)) if output.title == "stale"
         ));
+    }
+
+    #[test]
+    fn unrelated_plugin_event_keeps_foreground_markdown_cache() {
+        let mut app = App::with_stubs();
+        app.state.viewing_plugin_index = Some(0);
+        app.state.markdown_cache = Some(ratatui::text::Text::raw("rendered doc"));
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 30,
+        };
+        app.track_plugin_execution(1, ExecutionSource::Prefetch, stamp);
+
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 1,
+            stamp,
+            source: ExecutionSource::Prefetch,
+        });
+
+        assert!(
+            app.state.markdown_cache.is_some(),
+            "background refresh of another plugin must not invalidate the viewed markdown cache"
+        );
+    }
+
+    #[test]
+    fn viewed_plugin_event_invalidates_markdown_cache() {
+        let mut app = App::with_stubs();
+        app.state.viewing_plugin_index = Some(0);
+        app.state.markdown_cache = Some(ratatui::text::Text::raw("rendered doc"));
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 31,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, stamp);
+
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp,
+            source: ExecutionSource::Prefetch,
+        });
+
+        assert!(
+            app.state.markdown_cache.is_none(),
+            "an event for the viewed plugin must invalidate its markdown cache"
+        );
     }
 
     #[test]
