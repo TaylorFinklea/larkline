@@ -4,10 +4,10 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Week 1 hardening COMPLETE: `mkv.1`–`mkv.7`, `mkv.9`, `mkv.10` all closed
-  (`mkv.4` already-done via mkv.10; `mkv.8` deferred v1.1). Next via `bd ready`:
-  launch-gate `.12/.13` async dispatch, or `mkv.11` (subsumes the
-  `prefetch_in_flight` guard into the command_id in-flight registry).
+- Week 1 hardening COMPLETE (`mkv.1`–`mkv.7`, `.9`, `.10`; `.4` already-done; `.8` → v1.1).
+  `mkv.12` async shell/nvim dispatch landed (BgCommandEvent channel + navigate-away guard).
+  Next via `bd ready`: `mkv.11` (streaming through Plugin trait; LAUNCH slice per Sol
+  split — in-flight-registry half deferred v1.1), then `.13` (blocked on `.11`).
 - Launch gate remaining: `.12/.13` async dispatch; `.9` execution identity + `.10` cache owner landed.
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
 

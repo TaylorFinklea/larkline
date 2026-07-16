@@ -697,6 +697,29 @@ pub struct NavigationEntry {
 // ---------------------------------------------------------------------------
 
 /// The main application runner.
+/// Completion of a command that ran on the background channel.
+#[derive(Debug)]
+pub(crate) enum BgCommandEvent {
+    /// A shell action finished (or failed to spawn).
+    ShellDone {
+        /// The command that ran (for the title / flash message).
+        command: String,
+        /// `viewing_plugin_index` at dispatch time — a completion arriving
+        /// after the user navigated away degrades to a flash message instead
+        /// of stealing the current view.
+        dispatched_view: Option<usize>,
+        /// The child's captured output, or the spawn error.
+        result: std::io::Result<std::process::Output>,
+    },
+    /// An nvim remote-send finished.
+    NvimDone {
+        /// The file path that was opened.
+        path: String,
+        /// Outcome — `NotUnderNvim` falls back to the system handler.
+        result: Result<(), NvimOpenError>,
+    },
+}
+
 pub struct App {
     pub(crate) state: AppState,
     pub(crate) theme: Theme,
@@ -714,6 +737,11 @@ pub struct App {
     /// of piling up executions. (mkv.11 subsumes this into the canonical
     /// in-flight registry keyed by `command_id`.)
     prefetch_in_flight: std::collections::HashMap<usize, ExecutionStamp>,
+    /// Background-command channel: shell actions and nvim remote-sends run
+    /// off the event-loop task and report back as [`BgCommandEvent`]s, so a
+    /// slow or interactive child never freezes the UI.
+    bg_tx: mpsc::Sender<BgCommandEvent>,
+    bg_rx: mpsc::Receiver<BgCommandEvent>,
     /// Plugin directories for re-scanning on refresh.
     pub(crate) plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
@@ -738,6 +766,7 @@ impl App {
     ) -> Self {
         let plugin_count = plugins.len();
         let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
+        let (bg_tx, bg_rx) = mpsc::channel(16);
         let metadata: Vec<PluginMetadata> = plugins.iter().map(|p| p.metadata().clone()).collect();
         let registry_generation = 0;
         let engine = PluginEngine::new(plugins, tx, secrets.clone(), registry_generation);
@@ -774,6 +803,8 @@ impl App {
             cache_executions: std::collections::HashMap::new(),
             latest_action_executions: std::collections::HashMap::new(),
             prefetch_in_flight: std::collections::HashMap::new(),
+            bg_tx,
+            bg_rx,
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
@@ -1304,6 +1335,11 @@ impl App {
                 self.handle_engine_event(event);
             }
             let engine_drain = engine_drain_started.elapsed();
+
+            // Drain background-command completions (non-blocking).
+            while let Ok(event) = self.bg_rx.try_recv() {
+                self.handle_bg_command_event(event);
+            }
 
             // Advance spinner.
             if self.state.is_loading {
@@ -2223,7 +2259,7 @@ impl App {
 
             Action::Confirm => {
                 if let Some(pending) = self.state.pending_confirmation.take() {
-                    run_shell_action(&mut self.state, &pending.command, &pending.args);
+                    self.dispatch_shell_action(pending.command, pending.args);
                 }
             }
 
@@ -2855,7 +2891,7 @@ impl App {
                     });
                 } else {
                     // Execute immediately without confirmation.
-                    run_shell_action(&mut self.state, &cmd, &args);
+                    self.dispatch_shell_action(cmd, args);
                 }
             }
             ActionKind::Chain => {
@@ -2897,26 +2933,7 @@ impl App {
                     return;
                 };
                 let split = action.args.get(1).map_or("edit", String::as_str);
-                match nvim_open_file(path, split) {
-                    Ok(()) => {
-                        self.state.status_message =
-                            Some((format!("Opened in nvim: {path}"), std::time::Instant::now()));
-                    }
-                    Err(NvimOpenError::NotUnderNvim) => {
-                        // No $NVIM — fall back to open_url so plugins stay useful
-                        // outside Neovim sessions.
-                        open_url(path);
-                        self.state.status_message = Some((
-                            "Not running under Neovim; opened via system handler".to_string(),
-                            std::time::Instant::now(),
-                        ));
-                    }
-                    Err(NvimOpenError::CommandFailed(e)) => {
-                        tracing::warn!(error = %e, path = %path, "nvim remote-send failed");
-                        self.state.status_message =
-                            Some((format!("nvim open failed: {e}"), std::time::Instant::now()));
-                    }
-                }
+                self.dispatch_nvim_open(path.clone(), split.to_string());
             }
         }
     }
@@ -3259,40 +3276,135 @@ impl App {
 // can reuse them without depending on TUI types.
 use crate::actions::side_effects::{NvimOpenError, copy_to_clipboard, nvim_open_file, open_url};
 
-/// Execute a shell command and display its output as raw text in the output pane.
-///
-/// Uses explicit args (no shell interpolation) for safety.
-fn run_shell_action(state: &mut AppState, cmd: &str, args: &[String]) {
-    tracing::info!(command = cmd, args = ?args, "executing shell action");
-    match std::process::Command::new(cmd).args(args).output() {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let combined = if stderr.is_empty() {
-                stdout.into_owned()
-            } else {
-                format!("{stdout}{stderr}")
-            };
-            let trimmed = combined.trim();
-            // If the output is empty or just a JSON empty array/object (typical API response),
-            // show a flash message instead of replacing the output pane.
-            if trimmed.is_empty() || trimmed == "[]" || trimmed == "{}" || trimmed.starts_with('[')
-            {
-                state.status_message = Some((
-                    format!("{cmd} done (exit {})", output.status),
-                    std::time::Instant::now(),
-                ));
-            } else {
-                state.plugin_output = Some(PluginOutput {
-                    title: format!("{cmd} (exit {})", output.status),
-                    raw_text: Some(combined),
-                    ..Default::default()
-                });
-                state.output_mode = OutputMode::RawText;
+impl App {
+    /// Run a shell action off the event-loop task; the result arrives as a
+    /// [`BgCommandEvent::ShellDone`]. Uses explicit args (no shell
+    /// interpolation) for safety. Outside a Tokio runtime (sync tests / CLI
+    /// paths) the command runs inline like the old synchronous path.
+    fn dispatch_shell_action(&mut self, cmd: String, args: Vec<String>) {
+        tracing::info!(command = %cmd, args = ?args, "executing shell action");
+        let dispatched_view = self.state.viewing_plugin_index;
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            let result = std::process::Command::new(&cmd).args(&args).output();
+            self.apply_shell_result(&cmd, dispatched_view, result);
+            return;
+        };
+        // Immediate feedback while the child runs.
+        self.state.status_message = Some((format!("Running {cmd}…"), std::time::Instant::now()));
+        let tx = self.bg_tx.clone();
+        handle.spawn_blocking(move || {
+            let result = std::process::Command::new(&cmd).args(&args).output();
+            let _ = tx.blocking_send(BgCommandEvent::ShellDone {
+                command: cmd,
+                dispatched_view,
+                result,
+            });
+        });
+    }
+
+    /// Apply a finished shell action to app state: raw-text pane when the
+    /// user is still where they dispatched it, flash message otherwise.
+    fn apply_shell_result(
+        &mut self,
+        command: &str,
+        dispatched_view: Option<usize>,
+        result: std::io::Result<std::process::Output>,
+    ) {
+        let navigated_away = self.state.viewing_plugin_index != dispatched_view;
+        match result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let combined = if stderr.is_empty() {
+                    stdout.into_owned()
+                } else {
+                    format!("{stdout}{stderr}")
+                };
+                let trimmed = combined.trim();
+                // Flash instead of replacing the output pane when there's
+                // nothing meaningful to show (empty / empty JSON, typical
+                // API responses) — or when the user has navigated away and
+                // a pane replace would steal their current view.
+                if trimmed.is_empty()
+                    || trimmed == "[]"
+                    || trimmed == "{}"
+                    || trimmed.starts_with('[')
+                    || navigated_away
+                {
+                    self.state.status_message = Some((
+                        format!("{command} done (exit {})", output.status),
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    self.state.plugin_output = Some(PluginOutput {
+                        title: format!("{command} (exit {})", output.status),
+                        raw_text: Some(combined),
+                        ..Default::default()
+                    });
+                    self.state.output_mode = OutputMode::RawText;
+                }
+            }
+            Err(e) => {
+                if navigated_away {
+                    self.state.status_message = Some((
+                        format!("shell command failed: {e}"),
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    self.state.plugin_error = Some(format!("shell command failed: {e}"));
+                }
             }
         }
-        Err(e) => {
-            state.plugin_error = Some(format!("shell command failed: {e}"));
+    }
+
+    /// Open a file in the parent nvim off the event-loop task; the result
+    /// arrives as a [`BgCommandEvent::NvimDone`].
+    fn dispatch_nvim_open(&mut self, path: String, split: String) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            let result = nvim_open_file(&path, &split);
+            self.apply_nvim_result(&path, result);
+            return;
+        };
+        let tx = self.bg_tx.clone();
+        handle.spawn_blocking(move || {
+            let result = nvim_open_file(&path, &split);
+            let _ = tx.blocking_send(BgCommandEvent::NvimDone { path, result });
+        });
+    }
+
+    /// Apply a finished nvim remote-send to app state.
+    fn apply_nvim_result(&mut self, path: &str, result: Result<(), NvimOpenError>) {
+        match result {
+            Ok(()) => {
+                self.state.status_message =
+                    Some((format!("Opened in nvim: {path}"), std::time::Instant::now()));
+            }
+            Err(NvimOpenError::NotUnderNvim) => {
+                // No $NVIM — fall back to open_url so plugins stay useful
+                // outside Neovim sessions. (spawn(), never blocks.)
+                open_url(path);
+                self.state.status_message = Some((
+                    "Not running under Neovim; opened via system handler".to_string(),
+                    std::time::Instant::now(),
+                ));
+            }
+            Err(NvimOpenError::CommandFailed(e)) => {
+                tracing::warn!(error = %e, path = %path, "nvim remote-send failed");
+                self.state.status_message =
+                    Some((format!("nvim open failed: {e}"), std::time::Instant::now()));
+            }
+        }
+    }
+
+    /// Route one background-command completion to its applier.
+    fn handle_bg_command_event(&mut self, event: BgCommandEvent) {
+        match event {
+            BgCommandEvent::ShellDone {
+                command,
+                dispatched_view,
+                result,
+            } => self.apply_shell_result(&command, dispatched_view, result),
+            BgCommandEvent::NvimDone { path, result } => self.apply_nvim_result(&path, result),
         }
     }
 }
@@ -3770,6 +3882,81 @@ mod tests {
             app.state.result_cache.get(&0),
             Some(CachedResult::Revalidating(output)) if output.title == "stale"
         ));
+    }
+
+    #[tokio::test]
+    async fn confirmed_shell_action_does_not_block_the_ui_task() {
+        let mut app = App::with_stubs();
+        app.state.pending_confirmation = Some(PendingConfirmation {
+            description: "slow child".to_string(),
+            command: "/bin/sleep".to_string(),
+            args: vec!["2".to_string()],
+        });
+
+        let started = std::time::Instant::now();
+        app.handle_action(Action::Confirm);
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "dispatch must return immediately, not wait for the child \
+             (took {:?})",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_completion_event_updates_output_pane() {
+        let mut app = App::with_stubs();
+        app.dispatch_shell_action("/bin/echo".to_string(), vec!["hello".to_string()]);
+
+        let event = app.bg_rx.recv().await.expect("completion event");
+        app.handle_bg_command_event(event);
+
+        let output = app.state.plugin_output.as_ref().expect("output pane set");
+        assert!(
+            output.raw_text.as_deref().unwrap_or("").contains("hello"),
+            "the child's stdout must land in the output pane"
+        );
+        assert_eq!(app.state.output_mode, OutputMode::RawText);
+    }
+
+    #[tokio::test]
+    async fn late_shell_completion_after_navigation_does_not_steal_view() {
+        let mut app = App::with_stubs();
+        app.state.viewing_plugin_index = Some(0);
+        app.dispatch_shell_action("/bin/echo".to_string(), vec!["hello".to_string()]);
+        // The user navigates elsewhere before the child finishes.
+        app.state.viewing_plugin_index = Some(1);
+        app.state.plugin_output = Some(PluginOutput {
+            title: "current view".to_string(),
+            ..Default::default()
+        });
+
+        let event = app.bg_rx.recv().await.expect("completion event");
+        app.handle_bg_command_event(event);
+
+        assert_eq!(
+            app.state.plugin_output.as_ref().map(|o| o.title.as_str()),
+            Some("current view"),
+            "a late completion must not replace the navigated-to view"
+        );
+        assert!(
+            app.state.status_message.is_some(),
+            "the completion degrades to a flash message"
+        );
+    }
+
+    #[test]
+    fn nvim_failure_result_flashes_error() {
+        let mut app = App::with_stubs();
+
+        app.apply_nvim_result(
+            "/tmp/f.txt",
+            Err(NvimOpenError::CommandFailed("boom".to_string())),
+        );
+
+        let (message, _) = app.state.status_message.as_ref().expect("flash message");
+        assert!(message.contains("boom"), "failure must surface: {message}");
     }
 
     #[test]
