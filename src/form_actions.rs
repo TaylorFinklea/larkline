@@ -170,7 +170,7 @@ pub fn submit(app: &mut App) {
                 tracing::warn!(error = %e, "failed to save plugin settings");
             }
         }
-        app.state.result_cache.remove(&plugin_index);
+        app.invalidate_plugin_cache(plugin_index);
         app.state.plugin_output = None;
         app.state.plugin_error = None;
         app.state.is_loading = true;

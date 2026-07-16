@@ -16,7 +16,8 @@ use crate::input;
 use crate::plugin::engine::{EngineEvent, ExecutionSource, ExecutionStamp, PluginEngine};
 use crate::plugin::registry;
 use crate::plugin::traits::{
-    ActionKind, ItemAction, MiniAppLayout, PaneContent, PaneId, PluginOutput,
+    ActionKind, ItemAction, MiniAppLayout, OutputItem, PaneContent, PaneId, PluginError,
+    PluginOutput,
 };
 use crate::plugin::{Plugin, PluginMetadata};
 use crate::tui::ui;
@@ -97,6 +98,67 @@ pub enum CachedResult {
     Error(String),
     /// Stale output shown while a background re-execution is in progress.
     Revalidating(PluginOutput),
+}
+
+#[derive(Debug)]
+struct CacheExecution {
+    stamp: ExecutionStamp,
+    was_revalidating: bool,
+    streamed_output: Option<PluginOutput>,
+}
+
+enum CacheEvent {
+    Open {
+        plugin_index: usize,
+        cache_enabled: bool,
+    },
+    Started {
+        plugin_index: usize,
+        stamp: ExecutionStamp,
+        source: ExecutionSource,
+    },
+    Partial {
+        plugin_index: usize,
+        stamp: ExecutionStamp,
+        source: ExecutionSource,
+        title: Option<String>,
+        items: Vec<OutputItem>,
+    },
+    Finished {
+        plugin_index: usize,
+        stamp: ExecutionStamp,
+        source: ExecutionSource,
+        result: Box<Result<PluginOutput, PluginError>>,
+        cache_enabled: bool,
+    },
+    Invalidate {
+        plugin_index: usize,
+    },
+    Clear,
+}
+
+enum CacheOpen {
+    ShowAndRevalidate(PluginOutput),
+    ShowRevalidating(PluginOutput),
+    Loading,
+    Error(String),
+    Miss,
+}
+
+enum CacheTransition {
+    None,
+    Open(CacheOpen),
+    Started {
+        was_revalidating: bool,
+    },
+    Partial {
+        output: PluginOutput,
+        replace: bool,
+    },
+    Finished {
+        was_revalidating: bool,
+        result: Result<PluginOutput, String>,
+    },
 }
 
 /// Sort order for the unified launcher list.
@@ -581,6 +643,8 @@ pub struct App {
     pub(crate) rx: mpsc::Receiver<EngineEvent>,
     registry_generation: u64,
     latest_plugin_executions: std::collections::HashMap<(usize, ExecutionSource), ExecutionStamp>,
+    latest_cache_executions: std::collections::HashMap<usize, ExecutionStamp>,
+    cache_executions: std::collections::HashMap<(usize, ExecutionSource), CacheExecution>,
     latest_action_executions: std::collections::HashMap<usize, ExecutionStamp>,
     /// Plugin directories for re-scanning on refresh.
     pub(crate) plugin_dirs: Vec<PathBuf>,
@@ -638,6 +702,8 @@ impl App {
             rx,
             registry_generation,
             latest_plugin_executions: std::collections::HashMap::new(),
+            latest_cache_executions: std::collections::HashMap::new(),
+            cache_executions: std::collections::HashMap::new(),
             latest_action_executions: std::collections::HashMap::new(),
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
@@ -685,6 +751,180 @@ impl App {
     ) {
         self.latest_plugin_executions
             .insert((plugin_index, source), stamp);
+        self.latest_cache_executions.insert(plugin_index, stamp);
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn apply_cache_event(&mut self, event: CacheEvent) -> CacheTransition {
+        match event {
+            CacheEvent::Open {
+                plugin_index,
+                cache_enabled,
+            } => {
+                let current = self.state.result_cache.get(&plugin_index).cloned();
+                let open = match current {
+                    Some(CachedResult::Ready(output)) if cache_enabled => {
+                        self.state
+                            .result_cache
+                            .insert(plugin_index, CachedResult::Revalidating(output.clone()));
+                        CacheOpen::ShowAndRevalidate(output)
+                    }
+                    Some(CachedResult::Ready(_)) => {
+                        self.state.result_cache.remove(&plugin_index);
+                        CacheOpen::Miss
+                    }
+                    Some(CachedResult::Revalidating(output)) => CacheOpen::ShowRevalidating(output),
+                    Some(CachedResult::Loading(_)) => CacheOpen::Loading,
+                    Some(CachedResult::Error(error)) => CacheOpen::Error(error),
+                    None => CacheOpen::Miss,
+                };
+                CacheTransition::Open(open)
+            }
+            CacheEvent::Started {
+                plugin_index,
+                stamp,
+                source,
+            } => {
+                let was_revalidating = matches!(
+                    self.state.result_cache.get(&plugin_index),
+                    Some(CachedResult::Ready(_) | CachedResult::Revalidating(_))
+                );
+                let owns_cache = self.latest_cache_executions.get(&plugin_index) == Some(&stamp);
+                if owns_cache {
+                    let next = match self.state.result_cache.remove(&plugin_index) {
+                        Some(CachedResult::Ready(output) | CachedResult::Revalidating(output)) => {
+                            CachedResult::Revalidating(output)
+                        }
+                        _ => CachedResult::Loading(std::time::Instant::now()),
+                    };
+                    self.state.result_cache.insert(plugin_index, next);
+                }
+                self.cache_executions.insert(
+                    (plugin_index, source),
+                    CacheExecution {
+                        stamp,
+                        was_revalidating,
+                        streamed_output: None,
+                    },
+                );
+                CacheTransition::Started { was_revalidating }
+            }
+            CacheEvent::Partial {
+                plugin_index,
+                stamp,
+                source,
+                title,
+                items,
+            } => {
+                let key = (plugin_index, source);
+                let execution =
+                    self.cache_executions
+                        .entry(key)
+                        .or_insert_with(|| CacheExecution {
+                            stamp,
+                            was_revalidating: matches!(
+                                self.state.result_cache.get(&plugin_index),
+                                Some(CachedResult::Revalidating(_))
+                            ),
+                            streamed_output: None,
+                        });
+                if execution.stamp != stamp {
+                    return CacheTransition::None;
+                }
+
+                let replace = title.is_some() || execution.streamed_output.is_none();
+                if let Some(title) = title {
+                    execution.streamed_output = Some(PluginOutput {
+                        title,
+                        items,
+                        ..Default::default()
+                    });
+                } else {
+                    execution
+                        .streamed_output
+                        .get_or_insert_with(PluginOutput::default)
+                        .items
+                        .extend(items);
+                }
+                let output = execution.streamed_output.clone().unwrap_or_default();
+                if self.latest_cache_executions.get(&plugin_index) == Some(&stamp) {
+                    self.state
+                        .result_cache
+                        .insert(plugin_index, CachedResult::Ready(output.clone()));
+                }
+                CacheTransition::Partial { output, replace }
+            }
+            CacheEvent::Finished {
+                plugin_index,
+                stamp,
+                source,
+                result,
+                cache_enabled,
+            } => {
+                let key = (plugin_index, source);
+                let execution = self
+                    .cache_executions
+                    .get(&key)
+                    .is_some_and(|execution| execution.stamp == stamp)
+                    .then(|| self.cache_executions.remove(&key))
+                    .flatten();
+                let was_revalidating = execution.as_ref().is_some_and(|e| e.was_revalidating)
+                    || matches!(
+                        self.state.result_cache.get(&plugin_index),
+                        Some(CachedResult::Revalidating(_))
+                    );
+                let result = match *result {
+                    Ok(output) => Ok(execution
+                        .and_then(|execution| execution.streamed_output)
+                        .unwrap_or(output)),
+                    Err(error) => Err(error.to_string()),
+                };
+
+                if self.latest_cache_executions.get(&plugin_index) == Some(&stamp) {
+                    match &result {
+                        Ok(output) if cache_enabled => {
+                            self.state
+                                .result_cache
+                                .insert(plugin_index, CachedResult::Ready(output.clone()));
+                        }
+                        Ok(_) => {
+                            self.state.result_cache.remove(&plugin_index);
+                        }
+                        Err(error) => {
+                            self.state
+                                .result_cache
+                                .insert(plugin_index, CachedResult::Error(error.clone()));
+                        }
+                    }
+                }
+
+                CacheTransition::Finished {
+                    was_revalidating,
+                    result,
+                }
+            }
+            CacheEvent::Invalidate { plugin_index } => {
+                self.state.result_cache.remove(&plugin_index);
+                self.latest_cache_executions.remove(&plugin_index);
+                self.cache_executions
+                    .retain(|(index, _), _| *index != plugin_index);
+                CacheTransition::None
+            }
+            CacheEvent::Clear => {
+                self.state.result_cache.clear();
+                self.latest_cache_executions.clear();
+                self.cache_executions.clear();
+                CacheTransition::None
+            }
+        }
+    }
+
+    pub(crate) fn invalidate_plugin_cache(&mut self, plugin_index: usize) {
+        self.apply_cache_event(CacheEvent::Invalidate { plugin_index });
+    }
+
+    fn clear_plugin_cache(&mut self) {
+        self.apply_cache_event(CacheEvent::Clear);
     }
 
     pub(crate) fn dispatch_plugin(&mut self, plugin_index: usize) {
@@ -1020,223 +1260,184 @@ impl App {
         match event {
             EngineEvent::PluginStarted {
                 plugin_index,
+                stamp,
                 source,
                 ..
-            } => match source {
-                ExecutionSource::Prefetch => {
-                    self.state.result_cache.insert(
+            } => {
+                let CacheTransition::Started { was_revalidating } =
+                    self.apply_cache_event(CacheEvent::Started {
                         plugin_index,
-                        CachedResult::Loading(std::time::Instant::now()),
-                    );
+                        stamp,
+                        source,
+                    })
+                else {
+                    return;
+                };
+                if source == ExecutionSource::UserSelected && !was_revalidating {
+                    self.state.is_loading = true;
+                    self.state.loading_started = Some(std::time::Instant::now());
+                    self.state.plugin_output = None;
+                    self.state.plugin_error = None;
                 }
-                ExecutionSource::UserSelected => {
-                    // Don't clear stale output during a stale-while-revalidate refresh.
-                    let is_revalidating = matches!(
-                        self.state.result_cache.get(&plugin_index),
-                        Some(CachedResult::Revalidating(_))
-                    );
-                    if !is_revalidating {
-                        self.state.is_loading = true;
-                        self.state.loading_started = Some(std::time::Instant::now());
-                        self.state.plugin_output = None;
-                        self.state.plugin_error = None;
-                    }
-                }
-            },
+            }
             EngineEvent::PartialOutput {
                 plugin_index,
+                stamp,
                 title,
                 items,
                 source,
                 ..
-            } => match source {
-                ExecutionSource::Prefetch => {
-                    // Accumulate partials into cache (for commands with prefetch = true).
-                    let entry = self
-                        .state
-                        .result_cache
-                        .entry(plugin_index)
-                        .or_insert_with(|| {
-                            CachedResult::Ready(PluginOutput {
-                                title: String::new(),
-                                ..Default::default()
-                            })
-                        });
-                    if let CachedResult::Ready(output) = entry {
-                        if let Some(t) = title {
-                            output.title = t;
-                        }
-                        output.items.extend(items);
-                    } else {
-                        let mut new_output = PluginOutput {
-                            title: title.unwrap_or_default(),
-                            ..Default::default()
-                        };
-                        new_output.items.extend(items);
-                        *entry = CachedResult::Ready(new_output);
-                    }
-                }
-                ExecutionSource::UserSelected => {
-                    // Existing streaming behavior.
-                    if let Some(ref t) = title {
-                        self.state.plugin_output = Some(PluginOutput {
-                            title: t.clone(),
-                            items,
-                            ..Default::default()
-                        });
+            } => {
+                let CacheTransition::Partial { output, replace } =
+                    self.apply_cache_event(CacheEvent::Partial {
+                        plugin_index,
+                        stamp,
+                        source,
+                        title,
+                        items,
+                    })
+                else {
+                    return;
+                };
+                if source == ExecutionSource::UserSelected
+                    && self.state.viewing_plugin_index == Some(plugin_index)
+                {
+                    self.state.plugin_output = Some(output.clone());
+                    self.state.plugin_error = None;
+                    if replace {
                         self.state.mode = Mode::ViewOutput;
                         self.state.output_selected = 0;
-                        self.state.output_mode = OutputMode::List;
-                    } else if let Some(ref mut output) = self.state.plugin_output {
-                        output.items.extend(items);
+                        self.state.output_mode = crate::app_output::output_mode_for(&output);
                     }
+                    crate::app_output::rebuild_output_filter(&mut self.state);
                 }
-            },
+            }
             EngineEvent::PluginFinished {
                 plugin_index,
+                stamp,
                 result,
                 source,
                 ..
-            } => match source {
-                ExecutionSource::Prefetch => {
-                    match result {
-                        Ok(output) => {
-                            // Always store the fresh result. (Previously only
-                            // Loading→Ready was promoted, so a re-run never
-                            // updated an existing Ready entry — the widget card /
-                            // glance chip stayed frozen at its first value.)
-                            self.state
-                                .result_cache
-                                .insert(plugin_index, CachedResult::Ready(output));
-                        }
-                        Err(e) => {
-                            self.state
-                                .result_cache
-                                .insert(plugin_index, CachedResult::Error(e.to_string()));
-                        }
-                    }
-                    // Refresh widget summaries when prefetch results arrive.
-                    if self
-                        .state
-                        .plugins
-                        .get(plugin_index)
-                        .is_some_and(|m| m.widget)
-                    {
-                        self.rebuild_unified_list();
-                    }
-                    // A result that just changed health (degraded ↔ healthy)
-                    // moves a widget between its card and a strip warning chip.
-                    crate::widgets::rebuild_glance_indices(&mut self.state);
-                }
-                ExecutionSource::UserSelected => {
-                    let was_revalidating = matches!(
-                        self.state.result_cache.get(&plugin_index),
-                        Some(CachedResult::Revalidating(_))
-                    );
-                    let cache_enabled =
-                        self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
+            } => {
+                let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
+                let CacheTransition::Finished {
+                    was_revalidating,
+                    result,
+                } = self.apply_cache_event(CacheEvent::Finished {
+                    plugin_index,
+                    stamp,
+                    source,
+                    result: Box::new(result),
+                    cache_enabled,
+                })
+                else {
+                    return;
+                };
 
-                    self.state.is_loading = false;
-                    self.state.loading_started = None;
-
-                    match result {
-                        Ok(output) => {
-                            // Record to command history on successful execution.
-                            if let Some(meta) = self.state.plugins.get(plugin_index) {
-                                let plugin_name =
-                                    meta.plugin_group.as_deref().unwrap_or(&meta.name);
-                                crate::history::record(plugin_name, &meta.name);
-                            }
-
-                            if cache_enabled {
-                                self.state
-                                    .result_cache
-                                    .insert(plugin_index, CachedResult::Ready(output.clone()));
-                            } else {
-                                self.state.result_cache.remove(&plugin_index);
-                            }
-
-                            if was_revalidating {
-                                // Seamlessly update the pane if the user is still viewing it.
-                                if self.state.viewing_plugin_index == Some(plugin_index) {
-                                    self.state.output_mode =
-                                        crate::app_output::output_mode_for(&output);
-                                    self.state.plugin_output = Some(output);
-                                    crate::app_output::rebuild_output_filter(&mut self.state);
-                                    crate::app_output::check_form_init(
-                                        &mut self.state,
-                                        plugin_index,
-                                    );
-                                }
-                            } else {
-                                // Fresh load: don't overwrite streaming output.
-                                if self.state.plugin_output.is_none() {
-                                    self.state.plugin_output = Some(output);
-                                    crate::app_output::rebuild_output_filter(&mut self.state);
-                                    crate::app_output::check_form_init(
-                                        &mut self.state,
-                                        plugin_index,
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if was_revalidating {
-                                // Keep showing stale data; silently update cache to Error.
-                                self.state
-                                    .result_cache
-                                    .insert(plugin_index, CachedResult::Error(e.to_string()));
-                            } else {
-                                self.state
-                                    .result_cache
-                                    .insert(plugin_index, CachedResult::Error(e.to_string()));
-                                self.state.plugin_error = Some(e.to_string());
-                            }
-                        }
-                    }
-
-                    if !was_revalidating {
-                        // Check if this plugin declares mini_app and returned a layout.
-                        let has_layout = self
-                            .state
-                            .plugin_output
-                            .as_ref()
-                            .is_some_and(|o| o.layout.is_some());
-                        let is_mini_app = self
+                match source {
+                    ExecutionSource::Prefetch => {
+                        // Refresh widget summaries when prefetch results arrive.
+                        if self
                             .state
                             .plugins
                             .get(plugin_index)
-                            .is_some_and(|p| p.mini_app);
+                            .is_some_and(|m| m.widget)
+                        {
+                            self.rebuild_unified_list();
+                        }
+                        // A result that just changed health (degraded ↔ healthy)
+                        // moves a widget between its card and a strip warning chip.
+                        crate::widgets::rebuild_glance_indices(&mut self.state);
+                    }
+                    ExecutionSource::UserSelected => {
+                        self.state.is_loading = false;
+                        self.state.loading_started = None;
 
-                        if is_mini_app && has_layout {
-                            let layout = self
-                                .state
-                                .plugin_output
-                                .as_ref()
-                                .and_then(|o| o.layout.clone())
-                                .expect("checked above");
-                            self.state.mini_app =
-                                Some(crate::mini_app::build_mini_app_state(plugin_index, layout));
-                            self.state.mode = Mode::MiniApp;
-                        } else {
-                            if self.state.mode != Mode::ViewOutput {
-                                self.state.mode = Mode::ViewOutput;
+                        match result {
+                            Ok(output) => {
+                                // Record to command history on successful execution.
+                                if let Some(meta) = self.state.plugins.get(plugin_index) {
+                                    let plugin_name =
+                                        meta.plugin_group.as_deref().unwrap_or(&meta.name);
+                                    crate::history::record(plugin_name, &meta.name);
+                                }
+
+                                if was_revalidating {
+                                    // Seamlessly update the pane if the user is still viewing it.
+                                    if self.state.viewing_plugin_index == Some(plugin_index) {
+                                        self.state.output_mode =
+                                            crate::app_output::output_mode_for(&output);
+                                        self.state.plugin_output = Some(output);
+                                        crate::app_output::rebuild_output_filter(&mut self.state);
+                                        crate::app_output::check_form_init(
+                                            &mut self.state,
+                                            plugin_index,
+                                        );
+                                    }
+                                } else {
+                                    // Fresh load: don't overwrite streaming output.
+                                    if self.state.plugin_output.is_none() {
+                                        self.state.plugin_output = Some(output);
+                                        crate::app_output::rebuild_output_filter(&mut self.state);
+                                        crate::app_output::check_form_init(
+                                            &mut self.state,
+                                            plugin_index,
+                                        );
+                                    }
+                                }
                             }
-                            self.state.output_selected = 0;
-                            // Detect Markdown/Table/RawText/List from the
-                            // output shape (single source of truth) so a
-                            // markdown response renders instead of showing
-                            // literal `**bold**` in RawText/List mode.
-                            self.state.output_mode = self
+                            Err(e) => {
+                                if !was_revalidating {
+                                    self.state.plugin_error = Some(e);
+                                }
+                            }
+                        }
+
+                        if !was_revalidating {
+                            // Check if this plugin declares mini_app and returned a layout.
+                            let has_layout = self
                                 .state
                                 .plugin_output
                                 .as_ref()
-                                .map_or(OutputMode::List, crate::app_output::output_mode_for);
-                            self.state.markdown_cache = None;
+                                .is_some_and(|o| o.layout.is_some());
+                            let is_mini_app = self
+                                .state
+                                .plugins
+                                .get(plugin_index)
+                                .is_some_and(|p| p.mini_app);
+
+                            if is_mini_app && has_layout {
+                                let layout = self
+                                    .state
+                                    .plugin_output
+                                    .as_ref()
+                                    .and_then(|o| o.layout.clone())
+                                    .expect("checked above");
+                                self.state.mini_app = Some(crate::mini_app::build_mini_app_state(
+                                    plugin_index,
+                                    layout,
+                                ));
+                                self.state.mode = Mode::MiniApp;
+                            } else {
+                                if self.state.mode != Mode::ViewOutput {
+                                    self.state.mode = Mode::ViewOutput;
+                                }
+                                self.state.output_selected = 0;
+                                // Detect Markdown/Table/RawText/List from the
+                                // output shape (single source of truth) so a
+                                // markdown response renders instead of showing
+                                // literal `**bold**` in RawText/List mode.
+                                self.state.output_mode = self
+                                    .state
+                                    .plugin_output
+                                    .as_ref()
+                                    .map_or(OutputMode::List, crate::app_output::output_mode_for);
+                                self.state.markdown_cache = None;
+                            }
                         }
                     }
                 }
-            },
+            }
 
             EngineEvent::ActionResult {
                 plugin_index,
@@ -2206,7 +2407,7 @@ impl App {
                     self.execute_item_action(&retry);
                 } else if let Some(plugin_index) = self.state.viewing_plugin_index {
                     // Clear cache so execution always runs fresh.
-                    self.state.result_cache.remove(&plugin_index);
+                    self.invalidate_plugin_cache(plugin_index);
                     self.state.plugin_output = None;
                     self.state.plugin_error = None;
                     self.state.is_loading = true;
@@ -2424,7 +2625,7 @@ impl App {
                     self.state.plugin_error = None;
                     self.state.is_loading = false;
                     self.state.loading_started = None;
-                    self.state.result_cache.clear();
+                    self.clear_plugin_cache();
                     self.state.viewing_plugin_index = None;
                     self.state.navigation_history.clear();
                     // The plugin list was replaced, so widget/status indices (and
@@ -2603,22 +2804,25 @@ impl App {
         crate::app_output::reset_output_search(&mut self.state);
         self.state.viewing_plugin_index = Some(plugin_index);
         let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
-        match self.state.result_cache.get(&plugin_index).cloned() {
-            Some(CachedResult::Ready(output)) if cache_enabled => {
+        let CacheTransition::Open(open) = self.apply_cache_event(CacheEvent::Open {
+            plugin_index,
+            cache_enabled,
+        }) else {
+            return;
+        };
+        match open {
+            CacheOpen::ShowAndRevalidate(output) => {
                 // Stale-while-revalidate: show cached output immediately, refresh in background.
                 self.state.output_mode = crate::app_output::output_mode_for(&output);
-                self.state.plugin_output = Some(output.clone());
+                self.state.plugin_output = Some(output);
                 self.state.plugin_error = None;
                 self.state.is_loading = false;
                 self.state.output_selected = 0;
                 self.state.scroll_offset = 0;
                 self.state.mode = Mode::ViewOutput;
-                self.state
-                    .result_cache
-                    .insert(plugin_index, CachedResult::Revalidating(output));
                 self.dispatch_plugin(plugin_index);
             }
-            Some(CachedResult::Revalidating(output)) => {
+            CacheOpen::ShowRevalidating(output) => {
                 // Already revalidating — show stale data, don't trigger another execution.
                 self.state.output_mode = crate::app_output::output_mode_for(&output);
                 self.state.plugin_output = Some(output);
@@ -2628,20 +2832,19 @@ impl App {
                 self.state.scroll_offset = 0;
                 self.state.mode = Mode::ViewOutput;
             }
-            Some(CachedResult::Loading(_)) => {
+            CacheOpen::Loading => {
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
                 self.state.is_loading = true;
                 self.state.mode = Mode::ViewOutput;
             }
-            Some(CachedResult::Error(e)) => {
+            CacheOpen::Error(e) => {
                 self.state.plugin_output = None;
                 self.state.plugin_error = Some(e);
                 self.state.is_loading = false;
                 self.state.mode = Mode::ViewOutput;
             }
-            // No cache, or Ready with cache disabled → execute fresh.
-            _ => {
+            CacheOpen::Miss => {
                 self.state.is_loading = true;
                 self.state.plugin_output = None;
                 self.state.plugin_error = None;
@@ -3222,6 +3425,176 @@ mod tests {
         });
         assert!(app.state.loading_started.is_none());
         assert!(!app.state.is_loading);
+    }
+
+    #[test]
+    fn prefetch_start_preserves_ready_output_while_revalidating() {
+        let mut app = App::with_stubs();
+        app.state.result_cache.insert(
+            0,
+            CachedResult::Ready(PluginOutput {
+                title: "stale".to_string(),
+                ..Default::default()
+            }),
+        );
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 20,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, stamp);
+
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp,
+            source: ExecutionSource::Prefetch,
+        });
+
+        assert!(matches!(
+            app.state.result_cache.get(&0),
+            Some(CachedResult::Revalidating(output)) if output.title == "stale"
+        ));
+    }
+
+    #[test]
+    fn streaming_prefetch_finish_preserves_accumulated_output() {
+        let mut app = App::with_stubs();
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 21,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, stamp);
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp,
+            source: ExecutionSource::Prefetch,
+        });
+        app.handle_engine_event(EngineEvent::PartialOutput {
+            plugin_index: 0,
+            stamp,
+            title: Some("stream".to_string()),
+            items: vec![crate::plugin::traits::OutputItem {
+                label: "first".to_string(),
+                ..Default::default()
+            }],
+            source: ExecutionSource::Prefetch,
+        });
+
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp,
+            result: Ok(PluginOutput::default()),
+            source: ExecutionSource::Prefetch,
+        });
+
+        let cached = match app.state.result_cache.get(&0) {
+            Some(CachedResult::Ready(output)) => output,
+            other => panic!("expected ready streaming output, got {other:?}"),
+        };
+        assert_eq!(
+            (
+                &cached.title,
+                cached.items.first().map(|item| item.label.as_str())
+            ),
+            (&"stream".to_string(), Some("first"))
+        );
+    }
+
+    #[test]
+    fn streaming_revalidation_rebuilds_active_output_filter() {
+        let mut app = App::with_stubs();
+        let stale = PluginOutput {
+            title: "stale".to_string(),
+            items: vec![crate::plugin::traits::OutputItem {
+                label: "keep old".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        app.state
+            .result_cache
+            .insert(0, CachedResult::Revalidating(stale.clone()));
+        app.state.plugin_output = Some(stale);
+        app.state.viewing_plugin_index = Some(0);
+        app.state.output_query = "keep".to_string();
+        crate::app_output::rebuild_output_filter(&mut app.state);
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 22,
+        };
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, stamp);
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp,
+            source: ExecutionSource::UserSelected,
+        });
+
+        app.handle_engine_event(EngineEvent::PartialOutput {
+            plugin_index: 0,
+            stamp,
+            title: Some("fresh".to_string()),
+            items: vec![
+                crate::plugin::traits::OutputItem {
+                    label: "drop new".to_string(),
+                    ..Default::default()
+                },
+                crate::plugin::traits::OutputItem {
+                    label: "keep new".to_string(),
+                    ..Default::default()
+                },
+            ],
+            source: ExecutionSource::UserSelected,
+        });
+
+        assert_eq!(app.state.output_filtered_indices, vec![1]);
+    }
+
+    #[test]
+    fn older_prefetch_finish_cannot_overwrite_newer_user_cache() {
+        let mut app = App::with_stubs();
+        let older = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 23,
+        };
+        let newer = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 24,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, older);
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp: older,
+            source: ExecutionSource::Prefetch,
+        });
+        app.track_plugin_execution(0, ExecutionSource::UserSelected, newer);
+        app.handle_engine_event(EngineEvent::PluginStarted {
+            plugin_index: 0,
+            stamp: newer,
+            source: ExecutionSource::UserSelected,
+        });
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp: newer,
+            result: Ok(PluginOutput {
+                title: "fresh".to_string(),
+                ..Default::default()
+            }),
+            source: ExecutionSource::UserSelected,
+        });
+
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp: older,
+            result: Ok(PluginOutput {
+                title: "old".to_string(),
+                ..Default::default()
+            }),
+            source: ExecutionSource::Prefetch,
+        });
+
+        assert!(matches!(
+            app.state.result_cache.get(&0),
+            Some(CachedResult::Ready(output)) if output.title == "fresh"
+        ));
     }
 
     #[test]

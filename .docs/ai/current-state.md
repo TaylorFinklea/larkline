@@ -4,8 +4,8 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Next P0s after `mkv.9`: `mkv.10` cache-state owner; `mkv.6` crash containment.
-- Launch gate: `.9` execution identity → `.12/.13` async dispatch.
+- Next P0: `mkv.6` crash containment.
+- Launch gate: `.9` execution identity + `.10` cache owner → `.12/.13` async dispatch.
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
 
 ## Blockers
