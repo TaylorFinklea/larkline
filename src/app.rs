@@ -708,6 +708,12 @@ pub struct App {
     latest_cache_executions: std::collections::HashMap<usize, ExecutionStamp>,
     cache_executions: std::collections::HashMap<(usize, ExecutionSource), CacheExecution>,
     latest_action_executions: std::collections::HashMap<usize, ExecutionStamp>,
+    /// Single-flight guard: the latest still-running prefetch per plugin.
+    /// Inserted at dispatch, cleared when its `PluginFinished` arrives, so
+    /// the due-scan skips plugins slower than their refresh interval instead
+    /// of piling up executions. (mkv.11 subsumes this into the canonical
+    /// in-flight registry keyed by `command_id`.)
+    prefetch_in_flight: std::collections::HashMap<usize, ExecutionStamp>,
     /// Plugin directories for re-scanning on refresh.
     pub(crate) plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
@@ -767,6 +773,7 @@ impl App {
             latest_cache_executions: std::collections::HashMap::new(),
             cache_executions: std::collections::HashMap::new(),
             latest_action_executions: std::collections::HashMap::new(),
+            prefetch_in_flight: std::collections::HashMap::new(),
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
@@ -811,6 +818,9 @@ impl App {
         source: ExecutionSource,
         stamp: ExecutionStamp,
     ) {
+        if source == ExecutionSource::Prefetch {
+            self.prefetch_in_flight.insert(plugin_index, stamp);
+        }
         self.latest_plugin_executions
             .insert((plugin_index, source), stamp);
         self.latest_cache_executions.insert(plugin_index, stamp);
@@ -999,9 +1009,79 @@ impl App {
         self.track_plugin_execution(plugin_index, ExecutionSource::Prefetch, stamp);
     }
 
+    /// Widget indices due for auto-refresh at `now`: refresh interval elapsed
+    /// (or never refreshed) and no prefetch already in flight.
+    fn due_widget_refreshes(&self, now: std::time::Instant) -> Vec<usize> {
+        self.state
+            .widget_indices
+            .iter()
+            .copied()
+            .filter(|pidx| {
+                let Some(meta) = self.state.plugins.get(*pidx) else {
+                    return false;
+                };
+                // Same absent-key fix as the status strip: unwrap_or(now)
+                // made widgets never auto-refresh on their interval (only
+                // at startup / manual R). is_none_or(true) treats a
+                // never-refreshed index as due.
+                meta.widget_refresh_secs > 0
+                    && !self.prefetch_in_flight.contains_key(pidx)
+                    && self
+                        .state
+                        .widget_last_refresh
+                        .get(pidx)
+                        .copied()
+                        .is_none_or(|t| now.duration_since(t).as_secs() >= meta.widget_refresh_secs)
+            })
+            .collect()
+    }
+
+    /// Glance-strip status indices due for auto-refresh at `now`.
+    fn due_status_refreshes(&self, now: std::time::Instant) -> Vec<usize> {
+        self.state
+            .status_indices
+            .iter()
+            .copied()
+            .filter(|pidx| {
+                // Bounds-safe: status_indices may briefly lag state.plugins
+                // (e.g. between a plugin-list rebuild and index rebuild).
+                let Some(meta) = self.state.plugins.get(*pidx) else {
+                    return false;
+                };
+                let interval = if meta.status_refresh_secs > 0 {
+                    meta.status_refresh_secs
+                } else {
+                    30
+                };
+                // An absent last-refresh key means "never refreshed" → due
+                // now. (unwrap_or(now) would make duration 0 < interval, so
+                // the chip would never auto-refresh — froze the countdown.)
+                !self.prefetch_in_flight.contains_key(pidx)
+                    && self
+                        .state
+                        .status_last_refresh
+                        .get(pidx)
+                        .copied()
+                        .is_none_or(|t| now.duration_since(t).as_secs() >= interval)
+            })
+            .collect()
+    }
+
     fn dispatch_all_prefetch(&mut self) {
+        let now = std::time::Instant::now();
         for (plugin_index, stamp) in self.engine.execute_all() {
             self.track_plugin_execution(plugin_index, ExecutionSource::Prefetch, stamp);
+            // Seed refresh timestamps for what was actually dispatched, so
+            // the first due-scan doesn't immediately re-dispatch everything
+            // startup just ran (startup double-dispatch).
+            if let Some(meta) = self.state.plugins.get(plugin_index) {
+                if meta.widget {
+                    self.state.widget_last_refresh.insert(plugin_index, now);
+                }
+                if meta.status {
+                    self.state.status_last_refresh.insert(plugin_index, now);
+                }
+            }
         }
     }
 
@@ -1246,30 +1326,7 @@ impl App {
                 && !self.state.widget_indices.is_empty()
             {
                 let now = std::time::Instant::now();
-                let due: Vec<usize> = self
-                    .state
-                    .widget_indices
-                    .iter()
-                    .copied()
-                    .filter(|pidx| {
-                        let Some(meta) = self.state.plugins.get(*pidx) else {
-                            return false;
-                        };
-                        // Same absent-key fix as the status strip: unwrap_or(now)
-                        // made widgets never auto-refresh on their interval (only
-                        // at startup / manual R). map_or(true) treats a
-                        // never-refreshed index as due.
-                        meta.widget_refresh_secs > 0
-                            && self
-                                .state
-                                .widget_last_refresh
-                                .get(pidx)
-                                .copied()
-                                .is_none_or(|t| {
-                                    now.duration_since(t).as_secs() >= meta.widget_refresh_secs
-                                })
-                    })
-                    .collect();
+                let due = self.due_widget_refreshes(now);
                 if !due.is_empty() {
                     for pidx in &due {
                         self.state.widget_last_refresh.insert(*pidx, now);
@@ -1287,32 +1344,7 @@ impl App {
             // strip is shown (e.g. a caffeinate countdown while browsing).
             if self.state.status_visible && !self.state.status_indices.is_empty() {
                 let now = std::time::Instant::now();
-                let due: Vec<usize> = self
-                    .state
-                    .status_indices
-                    .iter()
-                    .copied()
-                    .filter(|pidx| {
-                        // Bounds-safe: status_indices may briefly lag state.plugins
-                        // (e.g. between a plugin-list rebuild and index rebuild).
-                        let Some(meta) = self.state.plugins.get(*pidx) else {
-                            return false;
-                        };
-                        let interval = if meta.status_refresh_secs > 0 {
-                            meta.status_refresh_secs
-                        } else {
-                            30
-                        };
-                        // An absent last-refresh key means "never refreshed" → due
-                        // now. (unwrap_or(now) would make duration 0 < interval, so
-                        // the chip would never auto-refresh — froze the countdown.)
-                        self.state
-                            .status_last_refresh
-                            .get(pidx)
-                            .copied()
-                            .is_none_or(|t| now.duration_since(t).as_secs() >= interval)
-                    })
-                    .collect();
+                let due = self.due_status_refreshes(now);
                 for pidx in &due {
                     self.state.status_last_refresh.insert(*pidx, now);
                     // Background refresh — must not steal the foreground view.
@@ -1429,6 +1461,14 @@ impl App {
                 source,
                 ..
             } => {
+                // Free the single-flight guard only for the execution that
+                // owns it — a stale finish must not mark a newer in-flight
+                // prefetch as done.
+                if source == ExecutionSource::Prefetch
+                    && self.prefetch_in_flight.get(&plugin_index) == Some(&stamp)
+                {
+                    self.prefetch_in_flight.remove(&plugin_index);
+                }
                 let cache_enabled = self.state.plugins.get(plugin_index).is_none_or(|p| p.cache);
                 let CacheTransition::Finished {
                     was_revalidating,
@@ -2720,6 +2760,9 @@ impl App {
                     self.registry_generation = self.registry_generation.wrapping_add(1);
                     self.latest_plugin_executions.clear();
                     self.latest_action_executions.clear();
+                    // Old-generation finishes are rejected by the generation
+                    // check and would never free their guards — drop them.
+                    self.prefetch_in_flight.clear();
                     self.engine = PluginEngine::new(
                         plugins,
                         tx,
@@ -3697,6 +3740,119 @@ mod tests {
             app.state.result_cache.get(&0),
             Some(CachedResult::Revalidating(output)) if output.title == "stale"
         ));
+    }
+
+    #[test]
+    fn due_widget_refresh_skips_in_flight_prefetch() {
+        let mut app = App::with_stubs();
+        app.state.plugins[0].widget = true;
+        app.state.plugins[0].widget_refresh_secs = 1;
+        app.state.widget_indices = vec![0];
+        // Never refreshed → due.
+        assert_eq!(app.due_widget_refreshes(std::time::Instant::now()), vec![0]);
+
+        // Dispatch a prefetch (simulated) — while it runs, the plugin is not due.
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 40,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, stamp);
+        assert!(
+            app.due_widget_refreshes(std::time::Instant::now())
+                .is_empty(),
+            "a widget with a prefetch in flight must not be re-dispatched"
+        );
+
+        // Finish arrives → eligible again (still no timestamp → due).
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp,
+            result: Ok(PluginOutput::default()),
+            source: ExecutionSource::Prefetch,
+        });
+        assert_eq!(app.due_widget_refreshes(std::time::Instant::now()), vec![0]);
+    }
+
+    #[test]
+    fn due_status_refresh_skips_in_flight_prefetch() {
+        let mut app = App::with_stubs();
+        app.state.plugins[0].status = true;
+        app.state.plugins[0].status_refresh_secs = 1;
+        app.state.status_indices = vec![0];
+        assert_eq!(app.due_status_refreshes(std::time::Instant::now()), vec![0]);
+
+        let stamp = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 41,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, stamp);
+        assert!(
+            app.due_status_refreshes(std::time::Instant::now())
+                .is_empty(),
+            "a status chip with a prefetch in flight must not be re-dispatched"
+        );
+    }
+
+    #[test]
+    fn stale_prefetch_finish_does_not_clear_newer_in_flight_guard() {
+        let mut app = App::with_stubs();
+        app.state.plugins[0].widget = true;
+        app.state.plugins[0].widget_refresh_secs = 1;
+        app.state.widget_indices = vec![0];
+        let older = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 42,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, older);
+        let newer = ExecutionStamp {
+            registry_generation: app.registry_generation,
+            execution_id: 43,
+        };
+        app.track_plugin_execution(0, ExecutionSource::Prefetch, newer);
+
+        // The superseded execution's finish must not free the guard while
+        // the newer execution is still running.
+        app.handle_engine_event(EngineEvent::PluginFinished {
+            plugin_index: 0,
+            stamp: older,
+            result: Ok(PluginOutput::default()),
+            source: ExecutionSource::Prefetch,
+        });
+        assert!(
+            app.due_widget_refreshes(std::time::Instant::now())
+                .is_empty(),
+            "stale finish must not mark the newer in-flight prefetch as done"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_prefetch_seeds_widget_and_status_refresh_timestamps() {
+        let mut app = App::with_stubs();
+        app.state.plugins[0].widget = true;
+        app.state.plugins[0].widget_refresh_secs = 300;
+        app.state.plugins[1].status = true;
+        app.state.plugins[1].status_refresh_secs = 300;
+        app.state.widget_indices = vec![0];
+        app.state.status_indices = vec![1];
+
+        app.dispatch_all_prefetch();
+
+        assert!(
+            app.state.widget_last_refresh.contains_key(&0),
+            "startup dispatch must seed the widget refresh timestamp"
+        );
+        assert!(
+            app.state.status_last_refresh.contains_key(&1),
+            "startup dispatch must seed the status refresh timestamp"
+        );
+        // Non-widget/status plugins get no timestamps.
+        assert!(!app.state.widget_last_refresh.contains_key(&2));
+        assert!(!app.state.status_last_refresh.contains_key(&2));
+        // The acceptance criterion: the first refresh scan right after
+        // startup no longer re-dispatches what startup just dispatched.
+        let now = std::time::Instant::now();
+        assert!(app.due_widget_refreshes(now).is_empty());
+        assert!(app.due_status_refreshes(now).is_empty());
     }
 
     #[test]
