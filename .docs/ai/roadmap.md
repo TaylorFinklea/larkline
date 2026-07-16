@@ -8,27 +8,19 @@ Terminal-native Raycast: a keyboard-driven command palette for personal producti
 
 Active items. Trim as completed.
 
-### Now — v1.0 Agent Palette (planned 2026-05-09; ~5-month horizon)
+### Now — v1.0 Hardening (2026-07-15; ~6-week horizon) — beads epic `larkline-mkv`
 
-**v1.0** is the public-launch milestone. Theme: **a command palette where the AI uses your plugins as tools** — agentic AI calls Larkline plugins via a tool registry built from manifests. Full plan + phase table + risks live in [`v1.0-plan.md`](./v1.0-plan.md).
+**All v1.0 Agent Palette feature phases are code-complete on `v1.0-prep`** (helper, calendar v2, mail, provider trait + 4 backends, AI single-shot + tool-use agent, tool registry, web-search, onboarding first-pass, from_exit). Before launch, the current milestone is a **hardening-first program** — the app didn't feel solid/performant after two bug sweeps because the sweeps fixed instances, not the ~8 structural generators. Decision record: [`decisions.md`](./decisions.md) ADR-012. Spec: [`phases/hardening-v1.0-spec.md`](./phases/hardening-v1.0-spec.md). Backlog lives in **beads** (`bd ready`), epic `larkline-mkv`, 31 items across 6 weekly milestones.
 
-v1.0 scope (12 phases, ~22 weeks):
-- **Tag backlog**: v0.13/v0.14/v0.15 ship under existing -prep branches; smoke gate in [`phases/v0.14-v0.15-smoke-runbook.md`](./phases/v0.14-v0.15-smoke-runbook.md).
-- **macOS Swift helper** (`larkline-macos-helper`) — single binary, EventKit + MailKit, JSON-line protocol.
-- **Calendar v2** — structured items, Teams/Zoom/Meet URL extraction, primary `[Enter] Join` action + 4 secondary actions.
-- **Mail plugin** — read/search, triage (archive/flag/delete), compose via `$EDITOR` handoff, multi-account/mailbox switch.
-- **AI Provider trait** — Anthropic Claude, OpenAI Responses, Codex CLI subprocess (free fallback), OpenRouter.
-- **AI single-shot** + **AI tool-use agent** (the headline feature) with three-layer safety: per-plugin manifest opt-in, per-action `destructive` flag, dry-run plan preview.
-- **Web search shortcuts**, **onboarding wizard**, **theme polish**, **beta + Medium launch prep**.
+Sourced from: an 8-subsystem architecture map, a 94-agent bug bash (59 confirmed findings, 22/22 architecture claims confirmed, per-finding adversarial verification), and two GPT-5.6-Sol (max) adversarial passes. Fix order: (W1) instrument + amplification fixes + crash containment; (W2) stable plugin IDs + execution identity; (W3) UI-task isolation; (W4) persistence + state invariants; (W5) agent minimum hardening; (W6) launch-surface coherence + rehearsal. Sequencing gate: stable IDs → execution IDs → async dispatch.
 
-Phases 1–8 code-complete on `v1.0-prep`. Agent palette end-to-end: `lark ai-ask` (single-shot) + `lark agent-ask` (multi-turn agent) + TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). **Bug sweep (2026-05-28):** 48 defects found + all fixed (`c5d5757`..`0f1260e`), ~25 tests; harness-deck `20260528-bug-sweep-fixes`. **Glance strip + caffeinate rewrite (2026-05-29 → 06-05):** compact status-chip strip w/ degraded-widget demotion; caffeinate now owns keep-awake via built-in `caffeinate`; AI Projects/Nebular/Tesela example plugins removed; harness-deck reports go central (ADR-011). Build green throughout (62 lib + 247 bin, clippy `--all-targets -D warnings`, fmt).
+After the epic closes: Phases 11–12 (beta, Medium post, tag v1.0 — gated on `larkline-mkv.32` QA go/no-go).
 
-**Remaining v1.0 work is itemized in the [`## Backlog`](#backlog) below** — agent-doable features (web search, `from_exit`, theme polish, onboarding) + Taylor-gated real-provider/TUI smoke (Phases 5/6/8 + Mail + caffeinate). Then Phases 11–12 (beta, Medium post, tag).
+_History (v1.0 features):_ Phases 1–8 shipped on `v1.0-prep`; `lark ai-ask` + `lark agent-ask` + TUI plugin (`examples/plugins/ai/{ask,agent}.lua`). Bug sweeps 2026-05-28 (48 fixed) and 2026-06-05 (22 fixed); glance strip; caffeinate rewrite; example-plugin cleanup; harness-deck reports central (ADR-011).
 
 ### Next (after v1.0 ships)
 
 - **v1.1** — promote AI single-shot to chat mini-app; explore mail compose mini-app editor.
-- **Stderr-aware `lark.exec`** — activates the dormant v0.15.0 `from_exit` translator across shell plugins (Docker, k8s, Bitwarden, HA).
 - **lark.nvim retry/help keymaps** — wire `<C-r>` / `<C-?>` in Telescope results picker.
 - **lark.nvim loading UX flicker** — when invoking a slow plugin from the catalog picker, the inner results picker opens empty, then re-renders when `lark invoke` returns. Should show a loading spinner / placeholder row while invoking. Surfaced during v0.14.0 smoke (Taylor 2026-05-10). Fix lives in `lua/lark/results.lua`'s `invoke_and_show` — wrap in async (`vim.system` or `plenary.job`), show a transient placeholder picker until the JSON arrives.
 - Lazy preview fetching (Approach B); treesitter beyond markdown; attachments/streaming previews.

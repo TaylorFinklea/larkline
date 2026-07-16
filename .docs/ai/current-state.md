@@ -1,28 +1,28 @@
 # Current State
 
 > Loop-state only — ≤20 lines, fragments. History → `git log` + `decisions.md`;
-> pending work → `roadmap.md` Now/Backlog; multi-session detail → `phases/`.
+> pending work → beads (`bd ready`, epic `larkline-mkv`); multi-session detail → `phases/`.
 
-**Branch:** `v1.0-prep` — several commits ahead of origin (2026-06-05 session:
-web-search plugin, from_exit activation, theme polish, bug bash). Build green:
-251 bin tests, `clippy --bin lark -D warnings`, `fmt`. Binary reinstalled.
+**Branch:** `v1.0-prep` (all v1.0 feature phases code-complete). Working now:
+**v1.0 hardening program** — ADR-012, spec `phases/hardening-v1.0-spec.md`,
+beads epic `larkline-mkv` (31 items, 6 weekly milestones).
 
 ## Plan
 
-<!-- The ONE active roadmap Now item, expanded into phase checkboxes. Empty = pull the top Now item. -->
-
-(none active — next iteration pulls the top `roadmap.md` Now item; onboarding
-wizard is next but BLOCKED on a UX decision — see Backlog)
+<!-- The hardening backlog lives in beads, not here. Pull with `bd ready`. -->
+Next iteration: `bd ready` → top P0 is `larkline-mkv.1` (frame/startup
+instrumentation — lands FIRST so perf fixes are measured). Sequencing gate:
+`.8` stable IDs → `.9` exec IDs → `.12/.13` async dispatch (deps wired in bd).
 
 ## Blockers
 
-- Onboarding wizard (9b) needs a UX call: `Mode::Onboarding` vs auto-launched plugin.
-- Taylor-gated QA (API keys / live TUI): real-provider AI smoke (5/6/8), Mail
-  mutating actions, agent-cancel, Caffeinate + web-search submit, **Docker/
-  Bitwarden error-state + empty-state checks** (post bug-bash), **k8s re-link**
-  (stale copy). All in `roadmap.md` → Backlog → Taylor-gated QA.
+- Full test suite NOT hermetic on `v1.0-prep`: `tests/cli_action_test.rs`
+  depends on the user's installed plugins (2 failures reproduced) — fixed in
+  `larkline-mkv.28`. `cargo test --bin lark` + clippy `--all-targets` clean.
+- Taylor-gated QA (real-provider AI, agent cancel, Mail mutations, k8s relink)
+  rolled into `larkline-mkv.32` (v1.0 go/no-go).
 
 ## Open questions
 
-- (resolved 2026-06-05) Exec mode = ultracode workflows; see
-  [[feedback_ultracode_for_hard_tasks]].
+- (resolved 2026-07-15) Backlog home = beads `backlog-larkline` Dolt remote
+  (bootstrapped this session); hardening-first per Taylor.

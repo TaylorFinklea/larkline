@@ -117,3 +117,24 @@ The trait-change route remains available if v1.x wants explicit per-call cancell
 **Context:** The harness-deck integration asked where larkline's `report.json` artifacts should live — in-repo `.harness/` (travels with code) or the central `~/.harness/reports/larkline/` (clean git). Taylor answered via the dashboard ask `report-location`.
 
 **Decision:** **Central** — `~/.harness/reports/larkline/<run>/report.json`. Agents must NOT create or commit an in-repo `.harness/` for larkline; report artifacts stay out of the repo working tree. The original setup run (`setup-20260527-214533`) was migrated from `.harness/` to the central path and the in-repo dir slated for removal to enact "clean git."
+
+## ADR-012: v1.0 hardening program — fix the generators, not the instances (2026-07-15)
+
+**Context:** After two dedicated bug sweeps (48 fixes 2026-05-28, 22 more 2026-06-05) the app still didn't feel "solid and performant"; felt symptoms are input/render lag and plugin/widget slowness. A third pass ran differently: an 8-subsystem architecture map + a 94-agent bug bash (59 confirmed findings, 22/22 architecture claims confirmed, per-finding adversarial verification) + two GPT-5.6-Sol (max) adversarial reviews. Full artifacts: `phases/hardening-v1.0-spec.md`. Backlog: beads epic `larkline-mkv` (31 items).
+
+**Decision:** Adopt a **hardening-first 6-week program** structured around fixing ~8 structural *generators*, not more instances, because prior sweeps fixed instances (a stale index, a missing guard) while the generators kept minting new ones. The generators, in fix order:
+
+1. **Unreviewed eager startup work** — single-entry plugins default `prefetch=true` (`registry.rs:238`); `execute_all()` runs before first paint with 8 concurrent slots; serial keychain subprocesses precede `tui::init`; a startup→first-scan double-dispatch. This, not render micro-costs, is the most credible first-paint/early-input contention (`lark list` at ~30ms does not exercise it).
+2. **Per-frame reparse** — ANSI `into_text()` and mini-app markdown re-parsed every 16ms frame; global markdown-cache invalidation on *any* engine event.
+3. **No frame observability** — zero draw/drain/first-paint timing; instrument FIRST so every later fix is measurable.
+4. **No execution identity** — bare `usize` index is the only identity; late completions hijack the foreground; streaming completion wipes accumulated output.
+5. **No stable plugin/command identity** — display names drive store paths, disabled-keys, history, and agent tool IDs; a rename silently repartitions all of them. **Must precede execution-identity work.**
+6. **Blocking work on the UI task** — shell actions, RefreshPlugins, plugin-manager scans/keychain, history I/O, nvim all synchronous on the event-loop task. Gated behind (4)+(5) so async dispatch doesn't create a new late-completion class.
+7. **Fictitious crash containment** — `panic="abort"` defeats the engine's `JoinHandle` panic isolation (contradicting the "plugin crashes never crash the app" invariant), and no panic hook restores the terminal.
+8. **Non-atomic persistence + split store discipline; unscoped plugin secrets; agent edge gaps (timeouts/retry/zero-arg tools); launch-surface incoherence (disabled-plugins active headless, unpinned plugin sync, packaging drift).**
+
+**Sequencing gates (load-bearing):** stable IDs → execution IDs → async UI-task isolation; manifest secret audit → secret-scope enforcement. Agent hardening rides at week 5, **not** week 1 — per Sol, it is ranked too high for the reported *lag*; the launch feature must not hang or brick, but it is not the felt-performance lever.
+
+**Adversarially corrected overstatements (recorded so they aren't re-litigated):** the render loop is a fixed 16ms-tick redraw, *not* a CPU busy-loop; there is *no* quadratic-streaming-markdown blowup (`PartialOutput` carries only title+items, never `raw_text`); agent session-bricking is *not* currently reachable (no resume surface — corroborated by ADR-010 §4); "script plugins write the store directly" is false (they only receive `LARK_STORE_PATH`); `opt-level="z"` slowdown and syntect preload are unmeasured — benchmark before acting.
+
+**Consequences:** v1.0 launch phases (beta, tag) sit behind the hardening foundation. The 3 refuted bug-bash findings and the demoted items above are explicitly *not* worked. Instrumentation (bead `larkline-mkv.1`) is the first commit so the "feels laggy" claim becomes a measured before/after.
