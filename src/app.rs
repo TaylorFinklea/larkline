@@ -718,6 +718,75 @@ pub(crate) enum BgCommandEvent {
         /// Outcome — `NotUnderNvim` falls back to the system handler.
         result: Result<(), NvimOpenError>,
     },
+    /// A background plugin-registry rescan finished (`RefreshPlugins`).
+    RefreshScanDone {
+        /// The scan inputs for the engine rebuild, or the scan error.
+        result: Result<Box<RefreshScan>, String>,
+    },
+    /// The plugin-manager snapshot (scan + keychain presence) is ready.
+    PmSnapshotReady {
+        /// Gathered inputs for pure row rebuilding on later keypresses.
+        snapshot: Box<crate::plugin_manager_state::PmSnapshot>,
+    },
+}
+
+/// Everything a `RefreshPlugins` engine rebuild needs, gathered off the UI
+/// task: the registry scan, the plugin-manager config it was filtered
+/// against, and secrets with keychain fallbacks resolved (each keychain
+/// lookup shells out to `security`).
+#[derive(Debug)]
+pub(crate) struct RefreshScan {
+    discovered: Vec<crate::plugin::registry::DiscoveredPlugin>,
+    pm_config: crate::config::PluginManagerConfig,
+    secrets: std::collections::HashMap<String, String>,
+}
+
+/// Gather refresh inputs (registry scan + config + secret resolution).
+/// Blocking — run via `spawn_blocking` on the async path.
+fn scan_for_refresh(
+    plugin_dirs: &[PathBuf],
+    icon_set: &crate::config::IconSet,
+) -> Result<RefreshScan, String> {
+    let mut discovered = registry::scan(plugin_dirs).map_err(|e| e.to_string())?;
+    // Resolve icons based on configured icon set.
+    if *icon_set == crate::config::IconSet::Nerd {
+        for d in &mut discovered {
+            if let Some(ref nerd) = d.metadata.icon_nerd {
+                if !nerd.is_empty() {
+                    d.metadata.icon = nerd.clone();
+                }
+            }
+        }
+    }
+    // Filter out disabled plugins/commands.
+    let pm_config = crate::config::load_plugin_manager_config();
+    let discovered: Vec<_> = discovered
+        .into_iter()
+        .filter(|d| {
+            let gk = d
+                .metadata
+                .plugin_group
+                .as_deref()
+                .unwrap_or(&d.metadata.name);
+            if pm_config.is_plugin_disabled(gk) {
+                return false;
+            }
+            !pm_config.is_command_disabled(gk, &d.metadata.name)
+        })
+        .collect();
+    // Reload secrets (with keychain fallback — `security` subprocess per key).
+    let mut secrets = crate::config::load_secrets();
+    let mut declared_keys: Vec<&str> = discovered
+        .iter()
+        .flat_map(|d| d.metadata.secrets.iter().map(String::as_str))
+        .collect();
+    declared_keys.extend(crate::config::AI_SECRET_KEYS);
+    crate::config::resolve_keychain_secrets(&mut secrets, &declared_keys);
+    Ok(RefreshScan {
+        discovered,
+        pm_config,
+        secrets,
+    })
 }
 
 pub struct App {
@@ -742,6 +811,13 @@ pub struct App {
     /// slow or interactive child never freezes the UI.
     bg_tx: mpsc::Sender<BgCommandEvent>,
     bg_rx: mpsc::Receiver<BgCommandEvent>,
+    /// A `RefreshPlugins` scan is running in the background — a second `R`
+    /// while it runs is dropped instead of piling up engine rebuilds.
+    refresh_in_flight: bool,
+    /// Cached plugin-manager inputs (scan + keychain presence), gathered in
+    /// the background at manager open so expand/toggle keypresses rebuild
+    /// rows without a registry scan or `security` subprocess.
+    pub(crate) pm_snapshot: Option<crate::plugin_manager_state::PmSnapshot>,
     /// Plugin directories for re-scanning on refresh.
     pub(crate) plugin_dirs: Vec<PathBuf>,
     /// Raw keybindings config for re-resolving after refresh.
@@ -805,6 +881,8 @@ impl App {
             prefetch_in_flight: std::collections::HashMap::new(),
             bg_tx,
             bg_rx,
+            refresh_in_flight: false,
+            pm_snapshot: None,
             plugin_dirs: config.general.plugin_dirs.clone(),
             keybindings_config: config.keybindings.clone(),
             icon_set: config.ui.icon_set.clone(),
@@ -2758,89 +2836,7 @@ impl App {
             Action::MiniAppResizeGrow => crate::mini_app::resize_grow(&mut self.state),
             Action::MiniAppResizeShrink => crate::mini_app::resize_shrink(&mut self.state),
 
-            Action::RefreshPlugins => match registry::scan(&self.plugin_dirs) {
-                Ok(mut discovered) => {
-                    // Resolve icons based on configured icon set.
-                    if self.icon_set == crate::config::IconSet::Nerd {
-                        for d in &mut discovered {
-                            if let Some(ref nerd) = d.metadata.icon_nerd {
-                                if !nerd.is_empty() {
-                                    d.metadata.icon = nerd.clone();
-                                }
-                            }
-                        }
-                    }
-                    // Filter out disabled plugins/commands.
-                    self.pm_config = crate::config::load_plugin_manager_config();
-                    let discovered: Vec<_> = discovered
-                        .into_iter()
-                        .filter(|d| {
-                            let gk = d
-                                .metadata
-                                .plugin_group
-                                .as_deref()
-                                .unwrap_or(&d.metadata.name);
-                            if self.pm_config.is_plugin_disabled(gk) {
-                                return false;
-                            }
-                            !self.pm_config.is_command_disabled(gk, &d.metadata.name)
-                        })
-                        .collect();
-                    let plugins: Vec<Arc<dyn Plugin>> = discovered
-                        .into_iter()
-                        .map(crate::plugin::build_plugin)
-                        .collect();
-                    let metadata: Vec<PluginMetadata> =
-                        plugins.iter().map(|p| p.metadata().clone()).collect();
-                    let plugin_count = plugins.len();
-                    let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
-                    // Reload secrets on refresh (with keychain fallback).
-                    self.secrets = crate::config::load_secrets();
-                    let mut declared_keys: Vec<&str> = plugins
-                        .iter()
-                        .flat_map(|p| p.metadata().secrets.iter().map(String::as_str))
-                        .collect();
-                    declared_keys.extend(crate::config::AI_SECRET_KEYS);
-                    crate::config::resolve_keychain_secrets(&mut self.secrets, &declared_keys);
-                    self.registry_generation = self.registry_generation.wrapping_add(1);
-                    self.latest_plugin_executions.clear();
-                    self.latest_action_executions.clear();
-                    // Old-generation finishes are rejected by the generation
-                    // check and would never free their guards — drop them.
-                    self.prefetch_in_flight.clear();
-                    self.engine = PluginEngine::new(
-                        plugins,
-                        tx,
-                        self.secrets.clone(),
-                        self.registry_generation,
-                    );
-                    self.rx = rx;
-                    self.keybindings = self.keybindings_config.resolve(&metadata);
-                    self.state.plugins = metadata;
-                    self.state.mode = Mode::Unified;
-                    self.state.output_mode = OutputMode::List;
-                    self.state.plugin_output = None;
-                    self.state.plugin_error = None;
-                    self.state.is_loading = false;
-                    self.state.loading_started = None;
-                    self.clear_plugin_cache();
-                    self.state.viewing_plugin_index = None;
-                    self.state.navigation_history.clear();
-                    // The plugin list was replaced, so widget/status indices (and
-                    // their per-index refresh timestamps) point into the OLD list —
-                    // rebuild them or a stale index panics the render/refresh.
-                    self.state.widget_last_refresh.clear();
-                    self.state.status_last_refresh.clear();
-                    self.dispatch_all_prefetch();
-                    self.rebuild_unified_list();
-                    crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
-                    crate::widgets::rebuild_status_indices(&mut self.state, &self.pm_config);
-                    crate::widgets::rebuild_glance_indices(&mut self.state);
-                }
-                Err(e) => {
-                    self.state.warnings = vec![format!("Refresh failed: {e}")];
-                }
-            },
+            Action::RefreshPlugins => self.dispatch_plugin_refresh(),
 
             Action::RunFocusedItemAt(idx) => {
                 // Power menu fires this when the user picks a "This item"
@@ -3357,6 +3353,89 @@ impl App {
         }
     }
 
+    /// Rescan plugin dirs and rebuild the engine, gathering the blocking
+    /// inputs (fs scan, config, keychain `security` subprocesses) off the
+    /// event-loop task; the rebuild applies when [`BgCommandEvent::RefreshScanDone`]
+    /// arrives. Outside a Tokio runtime (sync tests) the whole refresh runs
+    /// inline like the old synchronous path.
+    fn dispatch_plugin_refresh(&mut self) {
+        if self.refresh_in_flight {
+            self.state.status_message = Some((
+                "Plugin refresh already running…".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            let result = scan_for_refresh(&self.plugin_dirs, &self.icon_set);
+            self.apply_plugin_refresh(result);
+            return;
+        };
+        self.refresh_in_flight = true;
+        self.state.status_message =
+            Some(("Refreshing plugins…".to_string(), std::time::Instant::now()));
+        let dirs = self.plugin_dirs.clone();
+        let icon_set = self.icon_set.clone();
+        let tx = self.bg_tx.clone();
+        handle.spawn_blocking(move || {
+            let result = scan_for_refresh(&dirs, &icon_set).map(Box::new);
+            let _ = tx.blocking_send(BgCommandEvent::RefreshScanDone { result });
+        });
+    }
+
+    /// Rebuild the engine + app state from gathered refresh inputs.
+    fn apply_plugin_refresh(&mut self, result: Result<RefreshScan, String>) {
+        self.refresh_in_flight = false;
+        match result {
+            Ok(scan) => {
+                self.pm_config = scan.pm_config;
+                self.secrets = scan.secrets;
+                let plugins: Vec<Arc<dyn Plugin>> = scan
+                    .discovered
+                    .into_iter()
+                    .map(crate::plugin::build_plugin)
+                    .collect();
+                let metadata: Vec<PluginMetadata> =
+                    plugins.iter().map(|p| p.metadata().clone()).collect();
+                let plugin_count = plugins.len();
+                let (tx, rx) = mpsc::channel(plugin_count.max(1) * 3);
+                self.registry_generation = self.registry_generation.wrapping_add(1);
+                self.latest_plugin_executions.clear();
+                self.latest_action_executions.clear();
+                // Old-generation finishes are rejected by the generation
+                // check and would never free their guards — drop them.
+                self.prefetch_in_flight.clear();
+                self.engine =
+                    PluginEngine::new(plugins, tx, self.secrets.clone(), self.registry_generation);
+                self.rx = rx;
+                self.keybindings = self.keybindings_config.resolve(&metadata);
+                self.state.plugins = metadata;
+                self.state.mode = Mode::Unified;
+                self.state.output_mode = OutputMode::List;
+                self.state.plugin_output = None;
+                self.state.plugin_error = None;
+                self.state.is_loading = false;
+                self.state.loading_started = None;
+                self.clear_plugin_cache();
+                self.state.viewing_plugin_index = None;
+                self.state.navigation_history.clear();
+                // The plugin list was replaced, so widget/status indices (and
+                // their per-index refresh timestamps) point into the OLD list —
+                // rebuild them or a stale index panics the render/refresh.
+                self.state.widget_last_refresh.clear();
+                self.state.status_last_refresh.clear();
+                self.dispatch_all_prefetch();
+                self.rebuild_unified_list();
+                crate::widgets::rebuild_widget_indices(&mut self.state, &self.pm_config);
+                crate::widgets::rebuild_status_indices(&mut self.state, &self.pm_config);
+                crate::widgets::rebuild_glance_indices(&mut self.state);
+            }
+            Err(e) => {
+                self.state.warnings = vec![format!("Refresh failed: {e}")];
+            }
+        }
+    }
+
     /// Open a file in the parent nvim off the event-loop task; the result
     /// arrives as a [`BgCommandEvent::NvimDone`].
     fn dispatch_nvim_open(&mut self, path: String, split: String) {
@@ -3405,7 +3484,40 @@ impl App {
                 result,
             } => self.apply_shell_result(&command, dispatched_view, result),
             BgCommandEvent::NvimDone { path, result } => self.apply_nvim_result(&path, result),
+            BgCommandEvent::RefreshScanDone { result } => {
+                self.apply_plugin_refresh(result.map(|scan| *scan));
+            }
+            BgCommandEvent::PmSnapshotReady { snapshot } => {
+                self.pm_snapshot = Some(*snapshot);
+                // Rebuild the open manager's rows with real keychain data,
+                // preserving cursor + expansion.
+                if self.state.mode == Mode::PluginManager {
+                    crate::plugin_manager_actions::rebuild_rows(self);
+                }
+            }
         }
+    }
+
+    /// Gather the plugin-manager snapshot off the event-loop task; rows
+    /// rebuild when [`BgCommandEvent::PmSnapshotReady`] arrives. Outside a
+    /// Tokio runtime the snapshot is gathered inline.
+    pub(crate) fn dispatch_pm_snapshot(&mut self) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.pm_snapshot = Some(crate::plugin_manager_state::scan_snapshot(
+                &self.plugin_dirs,
+                &self.state.plugins,
+            ));
+            return;
+        };
+        let dirs = self.plugin_dirs.clone();
+        let active = self.state.plugins.clone();
+        let tx = self.bg_tx.clone();
+        handle.spawn_blocking(move || {
+            let snapshot = crate::plugin_manager_state::scan_snapshot(&dirs, &active);
+            let _ = tx.blocking_send(BgCommandEvent::PmSnapshotReady {
+                snapshot: Box::new(snapshot),
+            });
+        });
     }
 }
 
@@ -3882,6 +3994,139 @@ mod tests {
             app.state.result_cache.get(&0),
             Some(CachedResult::Revalidating(output)) if output.title == "stale"
         ));
+    }
+
+    #[tokio::test]
+    async fn refresh_plugins_scans_in_background_and_applies_on_event() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = dir.path().join("new-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            r#"
+[plugin]
+name = "New Plugin"
+description = "found by background scan"
+version = "0.1.0"
+author = "test"
+icon = "N"
+entry = "run.sh"
+"#,
+        )
+        .unwrap();
+        let mut config = Config::default();
+        config.general.plugin_dirs = vec![dir.path().to_path_buf()];
+        let mut app = App::new(
+            stub_plugins(),
+            &config,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        );
+
+        app.handle_action(Action::RefreshPlugins);
+        assert_ne!(
+            app.state.plugins.len(),
+            1,
+            "the scan must run in the background, not apply on the key path"
+        );
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(10), app.bg_rx.recv())
+            .await
+            .expect("scan completion within timeout")
+            .expect("scan completion event");
+        app.handle_bg_command_event(event);
+
+        assert_eq!(app.state.plugins.len(), 1);
+        assert_eq!(app.state.plugins[0].name, "New Plugin");
+        assert_eq!(app.state.mode, Mode::Unified);
+    }
+
+    #[tokio::test]
+    async fn second_refresh_while_scanning_is_deduped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = Config::default();
+        config.general.plugin_dirs = vec![dir.path().to_path_buf()];
+        let mut app = App::new(
+            stub_plugins(),
+            &config,
+            Vec::new(),
+            std::collections::HashMap::new(),
+        );
+
+        app.handle_action(Action::RefreshPlugins);
+        app.handle_action(Action::RefreshPlugins);
+
+        // Exactly one scan completion must arrive.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(10), app.bg_rx.recv())
+            .await
+            .expect("first scan completion within timeout")
+            .expect("scan completion event");
+        app.handle_bg_command_event(event);
+        assert!(
+            app.bg_rx.try_recv().is_err(),
+            "a refresh already in flight must not dispatch a second scan"
+        );
+    }
+
+    #[test]
+    fn pm_expand_reads_secret_source_from_snapshot_not_keychain() {
+        let mut app = App::with_stubs();
+        // Plugin 0 declares a secret that does NOT exist in any real
+        // keychain — only the seeded snapshot claims it does. Seeing
+        // SecretSource::Keychain therefore proves the expand keypress read
+        // the snapshot instead of shelling out to `security`.
+        app.state.plugins[0].secrets = vec!["LARK_TEST_FAKE_SECRET".to_string()];
+        app.state.mode = Mode::PluginManager;
+        let snapshot = crate::plugin_manager_state::PmSnapshot {
+            all_meta: app.state.plugins.clone(),
+            env_secrets: std::collections::HashMap::new(),
+            keychain: std::iter::once(("LARK_TEST_FAKE_SECRET".to_string(), true)).collect(),
+        };
+        app.state.plugin_manager = Some(crate::plugin_manager_state::build(
+            &snapshot,
+            &app.pm_config,
+        ));
+        app.pm_snapshot = Some(snapshot);
+
+        // Cursor starts on the first plugin header; expand it.
+        app.handle_action(Action::PluginManagerExpand);
+
+        let pm = app.state.plugin_manager.as_ref().expect("manager open");
+        let secret_row = pm
+            .rows
+            .iter()
+            .find_map(|row| match row {
+                PluginManagerRow::Secret { key, source } if key == "LARK_TEST_FAKE_SECRET" => {
+                    Some(source.clone())
+                }
+                _ => None,
+            })
+            .expect("expanded group must show its secret row");
+        assert_eq!(
+            secret_row,
+            SecretSource::Keychain,
+            "secret presence must come from the snapshot, not a live keychain lookup"
+        );
+    }
+
+    #[tokio::test]
+    async fn pm_snapshot_event_rebuilds_open_manager_rows() {
+        let mut app = App::with_stubs();
+        app.handle_action(Action::PluginManagerOpen);
+        assert!(
+            app.state.plugin_manager.is_some(),
+            "manager opens instantly"
+        );
+
+        // The background gather completes and rebuilds the rows.
+        let event = tokio::time::timeout(std::time::Duration::from_secs(10), app.bg_rx.recv())
+            .await
+            .expect("snapshot within timeout")
+            .expect("snapshot event");
+        app.handle_bg_command_event(event);
+
+        assert!(app.pm_snapshot.is_some(), "snapshot cached for keypresses");
+        assert!(app.state.plugin_manager.is_some(), "manager still open");
     }
 
     #[tokio::test]
