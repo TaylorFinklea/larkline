@@ -1328,6 +1328,18 @@ impl PluginManagerConfig {
         self.disabled_commands.iter().any(|k| k == &key)
     }
 
+    /// Whether a command is enabled, honoring both plugin-level and
+    /// command-level disables. Single-command plugins pass `None` for
+    /// `plugin_group` — their own name is the group key. This is the ONE
+    /// disabled-filter predicate: every surface (TUI startup, refresh,
+    /// `lark list`/`invoke`/`action`/`agent-ask`) must route through it so
+    /// a disabled command can't execute anywhere.
+    #[must_use]
+    pub fn is_command_enabled(&self, plugin_group: Option<&str>, command_name: &str) -> bool {
+        let gk = plugin_group.unwrap_or(command_name);
+        !self.is_plugin_disabled(gk) && !self.is_command_disabled(gk, command_name)
+    }
+
     /// Toggle a plugin's enabled state. Returns the new enabled state.
     pub fn toggle_plugin(&mut self, group_key: &str) -> bool {
         if let Some(pos) = self.disabled_plugins.iter().position(|k| k == group_key) {
@@ -1568,6 +1580,23 @@ mod tests {
             contents, "# custom",
             "existing file must not be overwritten"
         );
+    }
+
+    #[test]
+    fn is_command_enabled_honors_plugin_and_command_disables() {
+        let cfg = PluginManagerConfig {
+            disabled_plugins: vec!["Docker".to_string()],
+            disabled_commands: vec!["GitHub:Delete Repo".to_string()],
+            ..Default::default()
+        };
+        // Fully disabled group: every command in it is disabled.
+        assert!(!cfg.is_command_enabled(Some("Docker"), "PS"));
+        // Command-level disable inside an enabled group.
+        assert!(!cfg.is_command_enabled(Some("GitHub"), "Delete Repo"));
+        assert!(cfg.is_command_enabled(Some("GitHub"), "PRs"));
+        // Single-command plugin: its own name is the group key.
+        assert!(cfg.is_command_enabled(None, "Weather"));
+        assert!(!cfg.is_command_enabled(None, "Docker"));
     }
 
     #[test]

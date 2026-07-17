@@ -763,15 +763,7 @@ fn scan_for_refresh(
     let discovered: Vec<_> = discovered
         .into_iter()
         .filter(|d| {
-            let gk = d
-                .metadata
-                .plugin_group
-                .as_deref()
-                .unwrap_or(&d.metadata.name);
-            if pm_config.is_plugin_disabled(gk) {
-                return false;
-            }
-            !pm_config.is_command_disabled(gk, &d.metadata.name)
+            pm_config.is_command_enabled(d.metadata.plugin_group.as_deref(), &d.metadata.name)
         })
         .collect();
     // Reload secrets (with keychain fallback — `security` subprocess per key).

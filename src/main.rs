@@ -641,8 +641,14 @@ fn handle_list_command(_args: &[String]) -> Result<()> {
 
     let discovered = plugin::registry::scan(&cfg.general.plugin_dirs)?;
 
+    // Same disabled filter as the TUI: a command disabled in the Plugin
+    // Manager must not surface to lark.nvim or any other automation.
+    let pm_config = config::load_plugin_manager_config();
     let entries: Vec<ListEntry> = discovered
         .into_iter()
+        .filter(|d| {
+            pm_config.is_command_enabled(d.metadata.plugin_group.as_deref(), &d.metadata.name)
+        })
         .map(|d| ListEntry {
             name: d.metadata.name,
             description: d.metadata.description,
@@ -696,6 +702,13 @@ fn build_plugin_context() -> Result<PluginContext> {
             }
         }
     }
+    // Same disabled filter as the TUI — this context feeds `lark invoke`,
+    // `lark action`, and the agent's tool registry, so a disabled command
+    // must not be resolvable (safety boundary, not display preference).
+    let pm_config = config::load_plugin_manager_config();
+    discovered.retain(|d| {
+        pm_config.is_command_enabled(d.metadata.plugin_group.as_deref(), &d.metadata.name)
+    });
 
     // Mirror the TUI's secrets pipeline so plugins invoked headlessly see the
     // same `lark.env(KEY)` results as inside the TUI.
@@ -1401,15 +1414,7 @@ async fn main() -> Result<()> {
     let discovered: Vec<_> = discovered
         .into_iter()
         .filter(|d| {
-            let gk = d
-                .metadata
-                .plugin_group
-                .as_deref()
-                .unwrap_or(&d.metadata.name);
-            if pm_config.is_plugin_disabled(gk) {
-                return false;
-            }
-            !pm_config.is_command_disabled(gk, &d.metadata.name)
+            pm_config.is_command_enabled(d.metadata.plugin_group.as_deref(), &d.metadata.name)
         })
         .collect();
 
