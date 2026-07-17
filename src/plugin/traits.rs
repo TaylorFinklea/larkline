@@ -399,6 +399,15 @@ pub enum PluginError {
 // Plugin trait
 // ---------------------------------------------------------------------------
 
+/// One incremental chunk of output from a streaming execution.
+#[derive(Debug)]
+pub struct StreamChunk {
+    /// Title + initial items header. Set only on the first chunk.
+    pub title: Option<String>,
+    /// Items to append to the output.
+    pub items: Vec<OutputItem>,
+}
+
 /// The core plugin abstraction. All plugin backends implement this trait.
 ///
 /// Object-safe via `async_trait` so the engine can hold `dyn Plugin`.
@@ -409,6 +418,22 @@ pub trait Plugin: Send + Sync {
 
     /// Execute the plugin's main action and return structured output.
     async fn execute(&self) -> Result<PluginOutput, PluginError>;
+
+    /// Execute with incremental output: send chunks through `partial` as
+    /// they become available and return the final result. The engine runs
+    /// this inside the same task-local scaffolding as [`execute()`](Plugin::execute)
+    /// (secrets, plugin list, invoke depth, cancellation, panic isolation).
+    ///
+    /// The default implementation ignores the channel and defers to
+    /// `execute()` — backends without native streaming (Lua, native Rust)
+    /// run normally even when their manifest says `streaming = true`.
+    async fn execute_streaming(
+        &self,
+        partial: tokio::sync::mpsc::Sender<StreamChunk>,
+    ) -> Result<PluginOutput, PluginError> {
+        drop(partial);
+        self.execute().await
+    }
 
     /// Execute the plugin with form values from a previously submitted form.
     ///

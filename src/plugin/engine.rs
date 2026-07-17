@@ -326,7 +326,10 @@ impl PluginEngine {
     fn execute_with_source(&self, plugin_index: usize, source: ExecutionSource) -> ExecutionStamp {
         let stamp = self.next_execution_stamp();
         let meta = self.plugins[plugin_index].metadata();
-        if meta.streaming && meta.entry_path.is_some() {
+        // Streaming routes through Plugin::execute_streaming — backends
+        // without native streaming (Lua, native Rust) fall back to their
+        // normal execute() via the trait default, in the VM/in-process.
+        if meta.streaming {
             self.execute_streaming(plugin_index, source, stamp);
         } else {
             self.execute_normal(plugin_index, source, stamp);
@@ -492,33 +495,24 @@ impl PluginEngine {
         });
     }
 
-    /// Streaming execution — reads stdout line-by-line and sends partial output events.
-    ///
-    /// First line is parsed as `PluginOutput` (header + initial items).
-    /// Subsequent lines are parsed as individual `OutputItem`.
-    /// Invalid lines are skipped with a warning.
-    #[allow(clippy::too_many_lines)]
+    /// Streaming execution — runs [`Plugin::execute_streaming`] inside the
+    /// same task-local scaffolding as [`execute_normal`](Self::execute_normal)
+    /// (secrets, plugin list, invoke depth, panic isolation) and forwards
+    /// its chunks as [`EngineEvent::PartialOutput`]s. `PluginFinished` is
+    /// sent only after every chunk has been forwarded, so the app's
+    /// accumulated streamed output is complete when the finish lands.
     fn execute_streaming(
         &self,
         plugin_index: usize,
         source: ExecutionSource,
         stamp: ExecutionStamp,
     ) {
-        let meta = self.plugins[plugin_index].metadata().clone();
-        let entry_path = meta
-            .entry_path
-            .clone()
-            .expect("checked in execute_with_source()");
-        let plugin_dir = entry_path.parent().map_or_else(
-            || std::path::PathBuf::from("."),
-            std::path::Path::to_path_buf,
-        );
-        let timeout = meta.timeout;
-        let store_path =
-            crate::plugin::store::store_path_for(&meta.name, meta.plugin_group.as_deref());
+        let plugin = Arc::clone(&self.plugins[plugin_index]);
+        let all_plugins = Arc::new(self.plugins.clone());
+        let secrets = self.secrets.clone();
         let tx = self.tx.clone();
         let prefetch_sem = Arc::clone(&self.prefetch_sem);
-
+        let plugin_name = plugin.metadata().name.clone();
         tokio::spawn(async move {
             // Rate-limit background prefetch. User-selected runs bypass the cap.
             let _permit = match source {
@@ -534,100 +528,52 @@ impl PluginEngine {
                 .await;
             let started = std::time::Instant::now();
 
-            let result = tokio::time::timeout(timeout, async {
-                use tokio::io::{AsyncBufReadExt, BufReader};
-                use tokio::process::Command;
-
-                let mut child = match Command::new(&entry_path)
-                    .current_dir(&plugin_dir)
-                    .env("LARK_STORE_PATH", &store_path)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    // Reap the child if this timeout future is dropped mid-stream.
-                    .kill_on_drop(true)
-                    .spawn()
-                {
-                    Ok(c) => c,
-                    Err(e) => {
-                        return Err(PluginError::ExecutionFailed(format!(
-                            "failed to spawn streaming plugin: {e}"
-                        )));
+            let (chunk_tx, mut chunk_rx) = mpsc::channel::<crate::plugin::traits::StreamChunk>(32);
+            let forwarder = {
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    while let Some(chunk) = chunk_rx.recv().await {
+                        let _ = tx
+                            .send(EngineEvent::PartialOutput {
+                                plugin_index,
+                                stamp,
+                                title: chunk.title,
+                                items: chunk.items,
+                                source,
+                            })
+                            .await;
                     }
-                };
-
-                let stdout = child.stdout.take().expect("stdout was piped");
-                let mut lines = BufReader::new(stdout).lines();
-                let mut is_first = true;
-
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-
-                    if is_first {
-                        is_first = false;
-                        // First line: parse as PluginOutput header.
-                        match serde_json::from_str::<PluginOutput>(&line) {
-                            Ok(output) => {
-                                let _ = tx
-                                    .send(EngineEvent::PartialOutput {
-                                        plugin_index,
-                                        stamp,
-                                        title: Some(output.title),
-                                        items: output.items,
-                                        source,
-                                    })
-                                    .await;
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    line = %line,
-                                    error = %e,
-                                    "streaming: invalid header line, skipping"
-                                );
-                            }
-                        }
-                    } else {
-                        // Subsequent lines: parse as OutputItem.
-                        match serde_json::from_str::<OutputItem>(&line) {
-                            Ok(item) => {
-                                let _ = tx
-                                    .send(EngineEvent::PartialOutput {
-                                        plugin_index,
-                                        stamp,
-                                        title: None,
-                                        items: vec![item],
-                                        source,
-                                    })
-                                    .await;
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    line = %line,
-                                    error = %e,
-                                    "streaming: invalid item line, skipping"
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Wait for the child to exit.
-                let _ = child.wait().await;
-                Ok(PluginOutput::default())
-            })
-            .await;
-
-            let finished_result = match result {
-                Ok(r) => r,
-                Err(_) => Err(PluginError::Timeout(timeout)),
+                })
             };
-            log_streaming_execution_time(&meta.name, source, stamp, started.elapsed());
+
+            let handle = tokio::spawn(
+                PLUGIN_PANIC_ISOLATED.scope(
+                    (),
+                    SECRETS.scope(
+                        secrets,
+                        PLUGIN_LIST.scope(
+                            all_plugins,
+                            INVOKE_DEPTH
+                                .scope(0, async move { plugin.execute_streaming(chunk_tx).await }),
+                        ),
+                    ),
+                ),
+            );
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(join_err) => Err(PluginError::ExecutionFailed(format!(
+                    "plugin task failed: {join_err}"
+                ))),
+            };
+            // The plugin future owns the only chunk sender; it is dropped by
+            // now (returned or panicked), so the forwarder drains and ends.
+            let _ = forwarder.await;
+            log_streaming_execution_time(&plugin_name, source, stamp, started.elapsed());
             let _ = tx
                 .send(EngineEvent::PluginFinished {
                     plugin_index,
                     stamp,
-                    result: finished_result,
+                    result,
                     source,
                 })
                 .await;
@@ -858,6 +804,46 @@ mod tests {
         }
     }
 
+    /// A plugin with native streaming: emits a header chunk and one item
+    /// chunk through the channel, then finishes.
+    struct StreamingMockPlugin(PluginMetadata);
+
+    #[async_trait::async_trait]
+    impl Plugin for StreamingMockPlugin {
+        fn metadata(&self) -> &PluginMetadata {
+            &self.0
+        }
+        async fn execute(&self) -> Result<PluginOutput, PluginError> {
+            Err(PluginError::ExecutionFailed(
+                "streaming plugin must run via execute_streaming".into(),
+            ))
+        }
+        async fn execute_streaming(
+            &self,
+            partial: mpsc::Sender<crate::plugin::traits::StreamChunk>,
+        ) -> Result<PluginOutput, PluginError> {
+            let _ = partial
+                .send(crate::plugin::traits::StreamChunk {
+                    title: Some("stream".into()),
+                    items: vec![OutputItem {
+                        label: "first".into(),
+                        ..Default::default()
+                    }],
+                })
+                .await;
+            let _ = partial
+                .send(crate::plugin::traits::StreamChunk {
+                    title: None,
+                    items: vec![OutputItem {
+                        label: "second".into(),
+                        ..Default::default()
+                    }],
+                })
+                .await;
+            Ok(PluginOutput::default())
+        }
+    }
+
     struct FailPlugin(PluginMetadata);
 
     #[async_trait::async_trait]
@@ -868,6 +854,133 @@ mod tests {
         async fn execute(&self) -> Result<PluginOutput, PluginError> {
             Err(PluginError::ExecutionFailed("boom".into()))
         }
+    }
+
+    /// Build a real `ScriptPlugin` with `streaming = true` from a tempdir
+    /// fixture. The tempdir is leaked to keep the script alive (test only).
+    fn streaming_script_plugin(name: &str, script: &str) -> crate::plugin::script::ScriptPlugin {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = dir.path().join(name);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let entry = plugin_dir.join("run.sh");
+        std::fs::write(&entry, script).unwrap();
+        std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.toml"),
+            format!(
+                r#"
+[plugin]
+name = "{name}"
+description = "test"
+version = "0.1.0"
+author = "test"
+icon = "T"
+entry = "run.sh"
+timeout_seconds = 5
+streaming = true
+"#
+            ),
+        )
+        .unwrap();
+        let discovered = crate::plugin::registry::parse_manifest(&plugin_dir)
+            .unwrap()
+            .remove(0);
+        std::mem::forget(dir);
+        crate::plugin::script::ScriptPlugin::from_discovered(discovered)
+    }
+
+    /// Drain events until `PluginFinished` arrives, returning its result and
+    /// any `PartialOutput` payloads seen on the way.
+    async fn collect_run(
+        rx: &mut mpsc::Receiver<EngineEvent>,
+    ) -> (
+        Vec<(Option<String>, Vec<OutputItem>)>,
+        Result<PluginOutput, PluginError>,
+    ) {
+        let mut partials = Vec::new();
+        loop {
+            match rx.recv().await.expect("engine event") {
+                EngineEvent::PluginFinished { result, .. } => return (partials, result),
+                EngineEvent::PartialOutput { title, items, .. } => partials.push((title, items)),
+                EngineEvent::PluginStarted { .. } | EngineEvent::ActionResult { .. } => {}
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn streaming_flag_without_native_streaming_runs_through_the_trait() {
+        // A streaming-marked plugin whose backend has no native streaming
+        // (e.g. a Lua plugin) must run via the Plugin trait — NOT be exec'd
+        // as an OS process from its entry_path.
+        let mut meta = test_metadata();
+        meta.streaming = true;
+        meta.entry_path = Some(std::path::PathBuf::from("/nonexistent/init.lua"));
+        let (tx, mut rx) = mpsc::channel(8);
+        let engine = PluginEngine::new(
+            vec![Arc::new(MockPlugin(meta))],
+            tx,
+            std::collections::HashMap::new(),
+            0,
+        );
+        let _stamp = engine.execute(0);
+
+        let (_, result) = collect_run(&mut rx).await;
+        assert_eq!(
+            result
+                .expect("must run the trait's execute, not exec init.lua")
+                .title,
+            "mock"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_streaming_chunks_forward_as_partial_output() {
+        let mut meta = test_metadata();
+        meta.streaming = true;
+        let (tx, mut rx) = mpsc::channel(8);
+        let engine = PluginEngine::new(
+            vec![Arc::new(StreamingMockPlugin(meta))],
+            tx,
+            std::collections::HashMap::new(),
+            0,
+        );
+        let _stamp = engine.execute(0);
+
+        let (partials, result) = collect_run(&mut rx).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            partials.len(),
+            2,
+            "both chunks must arrive as PartialOutput"
+        );
+        assert_eq!(partials[0].0.as_deref(), Some("stream"));
+        assert_eq!(partials[0].1[0].label, "first");
+        assert_eq!(partials[1].1[0].label, "second");
+    }
+
+    #[tokio::test]
+    async fn failing_streaming_script_surfaces_error_not_empty_success() {
+        let plugin = streaming_script_plugin(
+            "stream-fail",
+            "#!/bin/sh\necho '{\"title\":\"s\",\"items\":[]}'\necho 'boom' >&2\nexit 3\n",
+        );
+        let (tx, mut rx) = mpsc::channel(8);
+        let engine = PluginEngine::new(
+            vec![Arc::new(plugin)],
+            tx,
+            std::collections::HashMap::new(),
+            0,
+        );
+        let _stamp = engine.execute(0);
+
+        let (_, result) = collect_run(&mut rx).await;
+        let error = result.expect_err("non-zero exit must fail, not report empty success");
+        let message = error.to_string();
+        assert!(
+            message.contains("exit code") && message.contains("boom"),
+            "exit status and stderr must be surfaced, got: {message}"
+        );
     }
 
     #[tokio::test]
