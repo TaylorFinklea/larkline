@@ -4,10 +4,11 @@
 
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
-- Week 1 + launch-gate async chain COMPLETE (`.9`–`.13`; `.11` registry half → `mkv.35`).
-  `.26` parity + `.27` pinned atomic sync (`v{version}` tag, `--unpinned` opt-out,
-  `host_api` manifest gate) landed. Remaining P1s via `bd ready`: `.31` plugin
-  fix-it batch, then `.32` Taylor-gated launch rehearsal (go/no-go).
+- ALL pre-gate P1s COMPLETE: `.9`–`.13`, `.26`, `.27`, `.31` (6-commit fix-it batch:
+  confirm:true all kinds; secrets env for shell actions + exec_io opts.env; Bitwarden/HA
+  secrets out of argv+screen; HA favorite/hide disabled; docker/k8s hangers removed;
+  Jira /search/jql; clipboard os crash). Next: `mkv.32` Taylor-gated launch rehearsal
+  (go/no-go — needs Taylor at the keyboard for provider/Mail/k8s QA).
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
 - NOTE for release: tag releases `v{version}` — `lark plugin sync` now pins to that tag.
 
