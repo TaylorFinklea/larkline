@@ -23,7 +23,7 @@ local function not_signed_in_error(title)
                 help_url = "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
                 actions = {
                     { label = "Run `lark atlassian login`", kind = "shell",
-                      args = { "lark atlassian login" } },
+                      args = { "lark", "atlassian", "login" } },
                     { label = "Open Atlassian API tokens page", kind = "open",
                       args = { "https://id.atlassian.com/manage-profile/security/api-tokens" } },
                 },
@@ -247,7 +247,7 @@ lark.register({
         local fields = "summary,status,issuetype,priority,updated"
         if preview_enabled() then fields = fields .. ",description" end
         local data, rerr = atlassian_get(auth, auth.jira_base,
-            "/rest/api/3/search",
+            "/rest/api/3/search/jql",
             {
                 jql = jql,
                 fields = fields,

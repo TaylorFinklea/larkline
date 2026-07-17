@@ -23,7 +23,7 @@ local function not_signed_in_error(title)
                 icon = "🔒",
                 help_url = "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
                 actions = {
-                    { label = "Run `lark atlassian login`", kind = "shell", args = { "lark atlassian login" } },
+                    { label = "Run `lark atlassian login`", kind = "shell", args = { "lark", "atlassian", "login" } },
                 },
             },
         },
@@ -184,7 +184,7 @@ lark.register({
             proj:gsub('"', '\\"'))
         local fields = "summary,status,issuetype,priority,reporter,created"
         if preview_enabled() then fields = fields .. ",description" end
-        local data, rerr = atlassian_get(auth, auth.jira_base, "/rest/api/3/search",
+        local data, rerr = atlassian_get(auth, auth.jira_base, "/rest/api/3/search/jql",
             { jql = jql, fields = fields, maxResults = "100" },
             "Triage Queue")
         if rerr then return rerr end

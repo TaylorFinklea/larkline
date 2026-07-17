@@ -24,7 +24,7 @@ local function not_signed_in_error(title)
                 help_url = "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
                 actions = {
                     { label = "Run `lark atlassian login`", kind = "shell",
-                      args = { "lark atlassian login" } },
+                      args = { "lark", "atlassian", "login" } },
                 },
             },
         },

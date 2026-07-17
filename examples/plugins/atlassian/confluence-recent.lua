@@ -18,7 +18,7 @@ local function not_signed_in_error(title)
           detail = "Run `lark atlassian login` for OAuth, or set ATLASSIAN_EMAIL + ATLASSIAN_API_TOKEN + atlassian_host for API-token auth",
           icon = "🔒",
           help_url = "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
-          actions = { { label = "Run `lark atlassian login`", kind = "shell", args = { "lark atlassian login" } } },
+          actions = { { label = "Run `lark atlassian login`", kind = "shell", args = { "lark", "atlassian", "login" } } },
         },
     } }
 end
