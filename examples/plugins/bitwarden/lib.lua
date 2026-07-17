@@ -163,9 +163,11 @@ end
 -- Invoke `bw` with a session key via lark's sandboxed process API (no shell).
 -- Returns (data, error_payload_or_nil).
 local function run_bw(session, args, title)
-    local full = { "--session", session, "--response" }
+    -- Session via env, not argv: argv is visible in `ps` for the child's
+    -- lifetime; BW_SESSION in the environment is not.
+    local full = { "--response" }
     for _, a in ipairs(args) do full[#full + 1] = a end
-    local res = lark.exec_io("bw", full)
+    local res = lark.exec_io("bw", full, { env = { BW_SESSION = session } })
     if res.exit_code ~= 0 or res.stdout == "" then
         local translated = from_exit(res.stderr, {
             cli = "bw",

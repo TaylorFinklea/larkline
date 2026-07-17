@@ -132,9 +132,11 @@ local function unwrap_bw(d)
 end
 
 local function run_bw(session, args, title)
-    local full = { "--session", session, "--response" }
+    -- Session via env, not argv: argv is visible in `ps` for the child's
+    -- lifetime; BW_SESSION in the environment is not.
+    local full = { "--response" }
     for _, a in ipairs(args) do full[#full + 1] = a end
-    local res = lark.exec_io("bw", full)
+    local res = lark.exec_io("bw", full, { env = { BW_SESSION = session } })
     if res.exit_code ~= 0 or res.stdout == "" then
         local translated = from_exit(res.stderr, {
             cli = "bw",
@@ -363,7 +365,9 @@ local function item_to_row(item)
         label = item.name or "Untitled",
         detail = table.concat(detail_parts, "  ·  "),
         icon = icon_for_type(item.type),
-        copy_text = (item.type == 1 and item.login and item.login.password) or item.name,
+        -- Never the password: the c-key flash previews copy_text ON SCREEN.
+        -- The explicit Copy Password action copies silently.
+        copy_text = item.name,
         -- Telescope preview pane (lark.nvim v0.14.0). `bw list items` already
         -- carries full bodies, so this is a free plumb. Honors the existing
         -- redact_secrets setting — never leaks passwords/CVV/SSN.
@@ -376,7 +380,9 @@ local function detail_output(item)
     local panel = { item_to_row(item) }
     for _, a in ipairs(build_item_actions(item)) do
         if a.kind == "clipboard" then
-            panel[#panel + 1] = { label = a.label, icon = "📋", actions = { a }, copy_text = a.args[1] }
+            -- No copy_text: it would flash secret values (password, CVV) on
+            -- screen; the row's own action copies with a generic message.
+            panel[#panel + 1] = { label = a.label, icon = "📋", actions = { a } }
         end
     end
     return {

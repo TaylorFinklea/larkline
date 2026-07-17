@@ -137,6 +137,9 @@ impl LuaPlugin {
         // Richer subprocess primitive than lark.exec. Adds:
         //   - opts.stdin: string piped to the subprocess's stdin (used by the
         //     calendar plugin to send JSON requests to larkline-macos-helper)
+        //   - opts.env: table of extra environment variables for the child —
+        //     the secret-safe channel for tokens (argv is visible in `ps`;
+        //     env is not). Used by bitwarden to pass BW_SESSION.
         //   - stderr in the return table (activates the v0.15.0 from_exit
         //     translator across shell plugins when they migrate)
         //   - exit_code (handlers can branch on non-zero without parsing stderr)
@@ -157,6 +160,16 @@ impl LuaPlugin {
                         Some(ref t) => t.get("stdin").ok(),
                         None => None,
                     };
+                    if let Some(ref t) = opts {
+                        if let Ok(env) = t.get::<mlua::Table>("env") {
+                            for pair in env.pairs::<String, String>() {
+                                // Skip malformed entries (non-string key/value)
+                                // rather than failing the whole call.
+                                let Ok((k, v)) = pair else { continue };
+                                command.env(k, v);
+                            }
+                        }
+                    }
                     if stdin_payload.is_some() {
                         command.stdin(std::process::Stdio::piped());
                     }
@@ -860,6 +873,27 @@ lark.register({
         assert_eq!(output.title, "Hello from Lua");
         assert_eq!(output.items.len(), 1);
         assert_eq!(output.items[0].label, "Greeting");
+    }
+
+    #[tokio::test]
+    async fn exec_io_env_option_reaches_the_child() {
+        let plugin = lua_plugin_from_source(
+            "exec-env-test",
+            r#"
+lark.register({
+    on_run = function()
+        local res = lark.exec_io("/bin/sh", { "-c", "printf %s \"$LARK_TEST_ENV\"" },
+            { env = { LARK_TEST_ENV = "from-opts" } })
+        return { title = res.stdout, items = {} }
+    end
+})
+"#,
+        );
+        let output = plugin.execute().await.expect("execution failed");
+        assert_eq!(
+            output.title, "from-opts",
+            "opts.env must be injected into the child environment"
+        );
     }
 
     #[tokio::test]
