@@ -49,12 +49,14 @@ end
 
 -- SHARED: curl_service (canonical copy in helpers.lua)
 local function curl_service(url, token, service, body)
+    -- Token via env, not argv: argv is visible in `ps` and in copy-as-JSON.
+    -- The host injects secrets (HA_TOKEN) into shell-action children; sh
+    -- expands it at run time. url/body ride as positional args ("$1"/"$2").
+    local _ = token
     return {
-        "curl", "-s", "-X", "POST",
-        url .. "/api/services/" .. service,
-        "-H", "Authorization: Bearer " .. token,
-        "-H", "Content-Type: application/json",
-        "-d", body,
+        "sh", "-c",
+        'curl -s -X POST "$1" -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" -d "$2"',
+        "curl", url .. "/api/services/" .. service, body,
     }
 end
 
@@ -153,10 +155,6 @@ lark.register({
                     { label = "Turn Off", kind = "shell",
                       args = curl_service(url, token, "switch/turn_off", body),
                        },
-                    { label = "⭐ Favorite", kind = "shell",
-                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
-                    { label = "🚫 Hide", kind = "shell",
-                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }

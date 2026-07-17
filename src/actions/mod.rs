@@ -92,8 +92,14 @@ fn execute_shell(action: &ItemAction) -> Result<ActionResult> {
         .first()
         .context("Shell action missing command argument")?;
     let args: Vec<String> = action.args.iter().skip(1).cloned().collect();
-    let output = std::process::Command::new(cmd)
-        .args(&args)
+    let mut command = std::process::Command::new(cmd);
+    command.args(&args);
+    // Same secrets-env contract as the TUI's shell dispatch and script
+    // plugins: tokens travel via env, never argv.
+    if let Ok(secrets) = crate::plugin::engine::SECRETS.try_with(Clone::clone) {
+        command.envs(secrets.iter());
+    }
+    let output = command
         .output()
         .with_context(|| format!("running shell command `{cmd}`"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

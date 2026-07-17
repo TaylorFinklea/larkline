@@ -3281,8 +3281,15 @@ impl App {
     fn dispatch_shell_action(&mut self, cmd: String, args: Vec<String>) {
         tracing::info!(command = %cmd, args = ?args, "executing shell action");
         let dispatched_view = self.state.viewing_plugin_index;
+        // Plugin-declared shell actions get the secrets env like script-plugin
+        // executions do — so tokens travel via env, never argv (visible in ps
+        // and copy-as-JSON).
+        let secrets = self.secrets.clone();
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            let result = std::process::Command::new(&cmd).args(&args).output();
+            let result = std::process::Command::new(&cmd)
+                .args(&args)
+                .envs(&secrets)
+                .output();
             self.apply_shell_result(&cmd, dispatched_view, result);
             return;
         };
@@ -3290,7 +3297,10 @@ impl App {
         self.state.status_message = Some((format!("Running {cmd}…"), std::time::Instant::now()));
         let tx = self.bg_tx.clone();
         handle.spawn_blocking(move || {
-            let result = std::process::Command::new(&cmd).args(&args).output();
+            let result = std::process::Command::new(&cmd)
+                .args(&args)
+                .envs(&secrets)
+                .output();
             let _ = tx.blocking_send(BgCommandEvent::ShellDone {
                 command: cmd,
                 dispatched_view,
@@ -4200,6 +4210,31 @@ entry = "run.sh"
             "dispatch must return immediately, not wait for the child \
              (took {:?})",
             started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_actions_receive_the_secrets_env() {
+        let mut secrets = std::collections::HashMap::new();
+        secrets.insert("LARK_TEST_SECRET".to_string(), "sekrit-value".to_string());
+        let mut app = App::new(stub_plugins(), &Config::default(), Vec::new(), secrets);
+
+        app.dispatch_shell_action(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                "printf %s \"$LARK_TEST_SECRET\"".to_string(),
+            ],
+        );
+
+        let event = app.bg_rx.recv().await.expect("completion event");
+        app.handle_bg_command_event(event);
+        let output = app.state.plugin_output.as_ref().expect("output pane");
+        assert_eq!(
+            output.raw_text.as_deref(),
+            Some("sekrit-value"),
+            "shell-action children must see the secrets env (like script plugins) \
+             so plugins can reference tokens without embedding them in argv"
         );
     }
 

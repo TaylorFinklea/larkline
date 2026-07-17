@@ -147,18 +147,12 @@ lark.register({
                         label = "Toggle " .. name,
                         kind = "shell",
                         args = {
-                            "curl", "-s", "-X", "POST",
-                            url .. "/api/services/" .. domain .. "/toggle",
-                            "-H", "Authorization: Bearer " .. token,
-                            "-H", "Content-Type: application/json",
-                            "-d", body,
+                            "sh", "-c",
+                            'curl -s -X POST "$1" -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" -d "$2"',
+                            "curl", url .. "/api/services/" .. domain .. "/toggle", body,
                         },
                         
                     },
-                    { label = "⭐ Favorite", kind = "shell",
-                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "favorite", eid } },
-                    { label = "🚫 Hide", kind = "shell",
-                      args = { "bash", lark.env("HOME") .. "/.config/larkline/plugins/homeassistant/ha-manage.sh", "hide", eid } },
                     { label = "Copy entity ID", kind = "clipboard", args = { eid } },
                 },
             }
