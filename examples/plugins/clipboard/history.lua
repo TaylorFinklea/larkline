@@ -3,6 +3,10 @@
 
 local MAX_ENTRIES = 50
 
+-- The sandboxed VM ships no `os` library — indexing the nil global crashed
+-- every capture. Nil-safe lookup keeps timestamps if the sandbox ever adds it.
+local os_lib = rawget(_G, "os")
+
 lark.register({
     on_run = function()
         -- Read current clipboard.
@@ -31,7 +35,7 @@ lark.register({
             end
             table.insert(history, 1, {
                 value = current,
-                time = os.time and os.time() or 0,
+                time = os_lib and os_lib.time() or 0,
             })
         end
 
