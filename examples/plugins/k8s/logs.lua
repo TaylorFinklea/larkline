@@ -153,7 +153,6 @@ lark.register({
 
             local actions = {
                 { label = "Logs (last 100)", kind = "shell", args = { "kubectl", "logs", "-n", ns, name, "--tail=100" } },
-                { label = "Logs (follow)", kind = "shell", args = { "kubectl", "logs", "-n", ns, name, "-f", "--tail=50" } },
                 { label = "Logs (previous)", kind = "shell", args = { "kubectl", "logs", "-n", ns, name, "--previous", "--tail=100" } },
             }
 

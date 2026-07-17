@@ -246,12 +246,11 @@ lark.register({
             if is_running then
                 -- Logs
                 actions[#actions + 1] = docker_action("Logs (last 100)", { "logs", "--tail", "100", id })
-                actions[#actions + 1] = docker_action("Follow Logs", { "logs", "-f", "--tail", "30", id })
-                -- Exec
-                actions[#actions + 1] = docker_action("Exec: bash", { "exec", "-it", id, "bash" })
-                actions[#actions + 1] = docker_action("Exec: sh", { "exec", "-it", id, "sh" })
+                -- Exec needs a real TTY — copy the command for a terminal.
+                actions[#actions + 1] = { label = "Copy exec command", kind = "clipboard",
+                    args = { "docker exec -it " .. id .. " sh" } }
                 -- Stats
-                actions[#actions + 1] = docker_action("Live Stats", { "stats", id })
+                actions[#actions + 1] = docker_action("Stats (snapshot)", { "stats", "--no-stream", id })
                 -- Top (processes)
                 actions[#actions + 1] = docker_action("Top (processes)", { "top", id })
                 -- Lifecycle

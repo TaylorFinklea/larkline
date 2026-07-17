@@ -188,9 +188,9 @@ lark.register({
                 copy_text = name,
                 actions = {
                     { label = "Logs (last 100)", kind = "shell", args = { "kubectl", "logs", "-n", ns, name, "--tail=100" } },
-                    { label = "Logs (follow)", kind = "shell", args = { "kubectl", "logs", "-n", ns, name, "-f", "--tail=50" } },
                     { label = "Describe", kind = "shell", args = { "kubectl", "describe", "pod", "-n", ns, name } },
-                    { label = "Exec shell", kind = "shell", args = { "kubectl", "exec", "-it", "-n", ns, name, "--", "/bin/sh" } },
+                    { label = "Copy exec command", kind = "clipboard",
+                      args = { "kubectl exec -it -n " .. ns .. " " .. name .. " -- /bin/sh" } },
                     { label = "Delete Pod", kind = "shell", args = { "kubectl", "delete", "pod", "-n", ns, name }, confirm = true },
                     { label = "Copy Name", kind = "clipboard", args = { name } },
                     { label = "Copy Namespace", kind = "clipboard", args = { ns } },

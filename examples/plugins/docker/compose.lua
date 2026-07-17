@@ -233,7 +233,6 @@ lark.register({
 
             if is_running then
                 actions[#actions + 1] = compose_action("Logs (last 100)", use_v2, name, "logs", { "--tail", "100" })
-                actions[#actions + 1] = compose_action("Follow Logs", use_v2, name, "logs", { "-f", "--tail", "30" })
                 actions[#actions + 1] = compose_action("Services (ps)", use_v2, name, "ps")
                 actions[#actions + 1] = compose_action("Stop", use_v2, name, "stop", nil, true)
                 actions[#actions + 1] = compose_action("Restart", use_v2, name, "restart", nil, true)
@@ -241,7 +240,8 @@ lark.register({
                 actions[#actions + 1] = compose_action("Down + Remove Volumes", use_v2, name, "down", { "-v" }, true)
                 actions[#actions + 1] = compose_action("Pull Latest Images", use_v2, name, "pull")
             else
-                actions[#actions + 1] = compose_action("Up (detached)", use_v2, name, "up", { "-d" })
+                -- No Up here: `-p` alone cannot locate the compose file for a
+                -- fully-down project, so it can never succeed.
                 actions[#actions + 1] = compose_action("Pull Latest Images", use_v2, name, "pull")
             end
 
