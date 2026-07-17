@@ -606,12 +606,14 @@ fn render_output_pane(
 
     // Confirmation dialog
     if let Some(ref pending) = state.pending_confirmation {
-        let prompt = format!(
-            " {}\n Run: {} {}\n\n [Y]es  [N]o ",
-            pending.description,
-            pending.command,
-            pending.args.join(" ")
-        );
+        use crate::plugin::traits::ActionKind;
+        // Shell shows the literal command line; other kinds name the kind so
+        // the user knows what a Yes runs.
+        let summary = match pending.action.kind {
+            ActionKind::Shell => pending.action.args.join(" "),
+            ref kind => format!("{kind:?}: {}", pending.action.args.join(" ")),
+        };
+        let prompt = format!(" {}\n Run: {summary}\n\n [Y]es  [N]o ", pending.description);
         let paragraph = Paragraph::new(prompt)
             .block(block)
             .style(Style::default().fg(theme.accent));

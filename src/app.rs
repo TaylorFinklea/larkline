@@ -369,15 +369,15 @@ pub struct PaneState {
     pub is_loading: bool,
 }
 
-/// A shell action awaiting user confirmation before execution.
+/// An action awaiting user confirmation before execution. Every
+/// [`ActionKind`](crate::plugin::traits::ActionKind) honors `confirm: true`
+/// — not just Shell.
 #[derive(Debug, Clone)]
 pub struct PendingConfirmation {
     /// Human-readable description of the action.
     pub description: String,
-    /// Command to run.
-    pub command: String,
-    /// Arguments to pass.
-    pub args: Vec<String>,
+    /// The gated action, run verbatim on confirm.
+    pub action: crate::plugin::traits::ItemAction,
 }
 
 /// Overlay state for the copy-to-clipboard menu.
@@ -2329,7 +2329,7 @@ impl App {
 
             Action::Confirm => {
                 if let Some(pending) = self.state.pending_confirmation.take() {
-                    self.dispatch_shell_action(pending.command, pending.args);
+                    self.run_item_action(&pending.action);
                 }
             }
 
@@ -2806,10 +2806,17 @@ impl App {
                             ("brew", vec!["upgrade".to_string(), "larkline".to_string()])
                         }
                     };
+                    let mut full_args = vec![cmd.to_string()];
+                    full_args.extend(args);
                     self.state.pending_confirmation = Some(PendingConfirmation {
                         description: format!("Upgrade to v{hint}?"),
-                        command: cmd.to_string(),
-                        args,
+                        action: ItemAction {
+                            id: None,
+                            label: format!("Upgrade to v{hint}"),
+                            kind: ActionKind::Shell,
+                            args: full_args,
+                            confirm: true,
+                        },
                     });
                 }
             }
@@ -2846,7 +2853,21 @@ impl App {
         }
     }
 
+    /// Run an item action, honoring `confirm: true` for EVERY kind — a
+    /// destructive Chain/Open/NvimEdit must prompt exactly like Shell.
     fn execute_item_action(&mut self, action: &ItemAction) {
+        if action.confirm {
+            self.state.pending_confirmation = Some(PendingConfirmation {
+                description: action.label.clone(),
+                action: action.clone(),
+            });
+            return;
+        }
+        self.run_item_action(action);
+    }
+
+    /// Execute an action unconditionally (confirmation already cleared).
+    fn run_item_action(&mut self, action: &ItemAction) {
         match action.kind {
             ActionKind::Open => {
                 if let Some(url) = action.args.first() {
@@ -2868,19 +2889,7 @@ impl App {
             ActionKind::Shell => {
                 let cmd = action.args.first().cloned().unwrap_or_default();
                 let args: Vec<String> = action.args.iter().skip(1).cloned().collect();
-                let description = action.label.clone();
-
-                if action.confirm {
-                    // Show Y/N confirmation before running.
-                    self.state.pending_confirmation = Some(PendingConfirmation {
-                        description,
-                        command: cmd,
-                        args,
-                    });
-                } else {
-                    // Execute immediately without confirmation.
-                    self.dispatch_shell_action(cmd, args);
-                }
+                self.dispatch_shell_action(cmd, args);
             }
             ActionKind::Chain => {
                 // Chain: call the plugin's on_action callback.
@@ -4060,6 +4069,54 @@ entry = "run.sh"
         );
     }
 
+    #[tokio::test]
+    async fn chain_action_with_confirm_true_prompts_before_running() {
+        let mut app = App::with_stubs();
+        app.state.viewing_plugin_index = Some(0);
+        let action = crate::plugin::traits::ItemAction {
+            id: None,
+            label: "Dangerous chain".to_string(),
+            kind: crate::plugin::traits::ActionKind::Chain,
+            args: vec!["delete_all".to_string()],
+            confirm: true,
+        };
+
+        app.execute_item_action(&action);
+
+        assert!(
+            app.state.pending_confirmation.is_some(),
+            "confirm:true must prompt for Chain actions, not run silently"
+        );
+        assert!(
+            !app.state.is_loading,
+            "the chain callback must not dispatch before confirmation"
+        );
+
+        // Confirming runs the gated action.
+        app.handle_action(Action::Confirm);
+        assert!(app.state.is_loading, "Confirm must dispatch the action");
+        assert!(app.state.pending_confirmation.is_none());
+    }
+
+    #[test]
+    fn cancel_drops_a_confirm_gated_action() {
+        let mut app = App::with_stubs();
+        app.state.viewing_plugin_index = Some(0);
+        let action = crate::plugin::traits::ItemAction {
+            id: None,
+            label: "Dangerous open".to_string(),
+            kind: crate::plugin::traits::ActionKind::Chain,
+            args: vec!["nuke".to_string()],
+            confirm: true,
+        };
+        app.execute_item_action(&action);
+
+        app.handle_action(Action::Cancel);
+
+        assert!(app.state.pending_confirmation.is_none());
+        assert!(!app.state.is_loading, "cancelled action must not run");
+    }
+
     #[test]
     fn pm_expand_reads_secret_source_from_snapshot_not_keychain() {
         let mut app = App::with_stubs();
@@ -4126,8 +4183,13 @@ entry = "run.sh"
         let mut app = App::with_stubs();
         app.state.pending_confirmation = Some(PendingConfirmation {
             description: "slow child".to_string(),
-            command: "/bin/sleep".to_string(),
-            args: vec!["2".to_string()],
+            action: crate::plugin::traits::ItemAction {
+                id: None,
+                label: "slow child".to_string(),
+                kind: crate::plugin::traits::ActionKind::Shell,
+                args: vec!["/bin/sleep".to_string(), "2".to_string()],
+                confirm: true,
+            },
         });
 
         let started = std::time::Instant::now();

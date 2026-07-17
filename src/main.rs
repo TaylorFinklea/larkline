@@ -249,12 +249,23 @@ async fn handle_action_command(args: &[String]) -> Result<()> {
     let action: plugin::traits::ItemAction = serde_json::from_str(action_json)
         .with_context(|| format!("invalid --action-json: {action_json}"))?;
 
-    // Confirmation gate: a confirm-required shell action without `--confirm`
+    // Confirmation gate: a confirm-required action without `--confirm`
     // surfaces a `needs_confirmation` outcome so the caller (Telescope) can
-    // prompt the user and re-issue the call.
-    if action.confirm && !confirm && action.kind == plugin::traits::ActionKind::Shell {
-        let cmd = action.args.first().cloned().unwrap_or_default();
-        let cmd_args: Vec<String> = action.args.iter().skip(1).cloned().collect();
+    // prompt the user and re-issue the call. EVERY kind honors confirm:true
+    // — a destructive Chain/Open must not run unprompted headlessly.
+    if action.confirm && !confirm {
+        let (cmd, cmd_args) = if action.kind == plugin::traits::ActionKind::Shell {
+            (
+                action.args.first().cloned().unwrap_or_default(),
+                action.args.iter().skip(1).cloned().collect(),
+            )
+        } else {
+            // Non-shell: name the kind; args are informational for the prompt.
+            (
+                format!("{:?}", action.kind).to_lowercase(),
+                action.args.clone(),
+            )
+        };
         let outcome = ActionWireOutcome::NeedsConfirmation {
             command: cmd,
             args: cmd_args,
