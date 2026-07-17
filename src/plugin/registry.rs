@@ -43,6 +43,11 @@ pub enum RegistryError {
     },
 }
 
+/// The host plugin-API version this binary implements. A manifest declaring
+/// `host_api = N` with `N` greater than this is skipped at scan time — the
+/// plugin targets a newer larkline than the one running it.
+pub const HOST_API_VERSION: u32 = 1;
+
 fn default_icon() -> String {
     "◆".to_string()
 }
@@ -112,6 +117,9 @@ struct ManifestPlugin {
     /// plugins it's the default for any command that doesn't set its own.
     /// Drives the agent's dry-run plan preview safety gate.
     destructive: Option<bool>,
+    /// Minimum host plugin-API version this plugin needs (see
+    /// [`HOST_API_VERSION`]). Absent = compatible with any host.
+    host_api: Option<u32>,
 }
 
 /// A single command within a multi-command plugin manifest.
@@ -212,6 +220,20 @@ pub fn parse_manifest(plugin_dir: &Path) -> Result<Vec<DiscoveredPlugin>, Regist
             path: manifest_path.clone(),
             source,
         })?;
+
+    // Compat gate: a plugin targeting a newer host API is skipped, not
+    // loaded against an API it wasn't written for.
+    if let Some(required) = manifest.plugin.host_api {
+        if required > HOST_API_VERSION {
+            tracing::warn!(
+                plugin = %manifest.plugin.name,
+                required_host_api = required,
+                host_api = HOST_API_VERSION,
+                "plugin requires a newer larkline host API; skipping"
+            );
+            return Ok(Vec::new());
+        }
+    }
 
     let p = manifest.plugin;
     let plugin_dir_buf = plugin_dir.to_path_buf();
@@ -401,6 +423,51 @@ pub fn scan(dirs: &[PathBuf]) -> anyhow::Result<Vec<DiscoveredPlugin>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_manifest(header_extra: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("manifest.toml"),
+            format!(
+                r#"
+[plugin]
+name = "Compat Test"
+description = "host api gate"
+version = "0.1.0"
+author = "test"
+icon = "C"
+entry = "run.sh"
+{header_extra}
+"#
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn manifest_requiring_newer_host_api_is_skipped() {
+        let dir = write_manifest("host_api = 999");
+        let plugins = parse_manifest(dir.path()).expect("parse must not error");
+        assert!(
+            plugins.is_empty(),
+            "a plugin requiring a newer host API must be skipped, not loaded"
+        );
+    }
+
+    #[test]
+    fn manifest_with_supported_host_api_parses() {
+        let dir = write_manifest(&format!("host_api = {HOST_API_VERSION}"));
+        let plugins = parse_manifest(dir.path()).expect("parse failed");
+        assert_eq!(plugins.len(), 1);
+    }
+
+    #[test]
+    fn manifest_without_host_api_parses() {
+        let dir = write_manifest("");
+        let plugins = parse_manifest(dir.path()).expect("parse failed");
+        assert_eq!(plugins.len(), 1);
+    }
 
     #[test]
     fn parses_hello_world_manifest() {

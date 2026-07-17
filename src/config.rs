@@ -1272,10 +1272,8 @@ fn plugin_manager_path() -> std::path::PathBuf {
     } else {
         // HOME unset: per-user private temp dir, not world-writable /tmp
         // (mirrors home_dir()'s fallback; avoids symlink/clobber attacks).
-        let home = std::env::var("HOME").map_or_else(
-            |_| std::env::temp_dir(),
-            std::path::PathBuf::from,
-        );
+        let home =
+            std::env::var("HOME").map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
         home.join(".local").join("share").join("larkline")
     };
     base.join("plugin-manager.json")

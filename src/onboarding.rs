@@ -69,7 +69,12 @@ fn pick_provider() -> anyhow::Result<()> {
         } else {
             "no API key (local)"
         };
-        println!("  {}) {} — default model {}, {auth}", i + 1, p.as_str(), p.default_model());
+        println!(
+            "  {}) {} — default model {}, {auth}",
+            i + 1,
+            p.as_str(),
+            p.default_model()
+        );
     }
     let choice = prompt_choice("Provider", PROVIDERS.len(), 1)?;
     let provider = PROVIDERS[choice - 1];

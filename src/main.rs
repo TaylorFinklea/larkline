@@ -1005,6 +1005,89 @@ fn confirm_overwrite(name: &str) -> Result<bool> {
     Ok(input.trim().eq_ignore_ascii_case("y"))
 }
 
+/// Bring the standard-plugin cache to `git_ref` (a release tag), or the
+/// repo's default branch when `None` (`--unpinned`).
+///
+/// Atomic: a fresh clone lands in a temp sibling and swaps into place only
+/// on success, so an offline or failed sync leaves the existing cache — and
+/// every symlinked plugin — intact.
+fn update_plugin_cache(
+    cache: &std::path::Path,
+    repo_url: &str,
+    git_ref: Option<&str>,
+) -> Result<()> {
+    // In-place fast path for an existing healthy clone.
+    if cache.join(".git").exists() && try_update_cache_in_place(cache, git_ref) {
+        return Ok(());
+    }
+
+    // Fresh clone into a temp sibling; the existing cache stays untouched
+    // until the clone has fully succeeded.
+    if let Some(parent) = cache.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let pid = std::process::id();
+    let tmp = cache.with_extension(format!("tmp-{pid}"));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["clone", "--depth", "1", "-q"]);
+    if let Some(r) = git_ref {
+        cmd.args(["--branch", r]);
+    }
+    cmd.arg(repo_url).arg(&tmp);
+    let status = cmd.status()?;
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        match git_ref {
+            Some(r) => anyhow::bail!(
+                "Failed to fetch the plugin library at {r}. If this release has no \
+                 matching tag yet, re-run with --unpinned; otherwise check your network. \
+                 Existing plugins are untouched."
+            ),
+            None => anyhow::bail!("Failed to clone plugin repository (existing plugins untouched)"),
+        }
+    }
+
+    // Swap the fresh clone into place. Symlinked plugins point INTO the
+    // cache path, so the path itself must not change.
+    if cache.exists() {
+        let old = cache.with_extension(format!("old-{pid}"));
+        let _ = std::fs::remove_dir_all(&old);
+        std::fs::rename(cache, &old)?;
+        if let Err(e) = std::fs::rename(&tmp, cache) {
+            // Failed swap: restore the previous cache.
+            let _ = std::fs::rename(&old, cache);
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e.into());
+        }
+        let _ = std::fs::remove_dir_all(&old);
+    } else {
+        std::fs::rename(&tmp, cache)?;
+    }
+    Ok(())
+}
+
+/// Try to bring an existing clone to `git_ref` without touching the
+/// directory structure. Any failure falls back to clone-and-swap.
+fn try_update_cache_in_place(cache: &std::path::Path, git_ref: Option<&str>) -> bool {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(cache)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    match git_ref {
+        Some(r) => {
+            git(&["fetch", "--depth", "1", "-q", "origin", "tag", r]) && git(&["checkout", "-q", r])
+        }
+        None => git(&["pull", "--ff-only", "-q"]),
+    }
+}
+
 /// Handle `lark plugin sync|list|remove` subcommands.
 #[allow(clippy::too_many_lines)]
 fn handle_plugin_command(args: &[String]) -> Result<()> {
@@ -1014,51 +1097,20 @@ fn handle_plugin_command(args: &[String]) -> Result<()> {
     match sub {
         Some("sync") => {
             let force = args.iter().any(|a| a == "--force");
+            let unpinned = args.iter().any(|a| a == "--unpinned");
             let cache = plugin_cache_dir();
             let repo_url = "https://github.com/TaylorFinklea/larkline.git";
 
-            // Clone or update the repo cache.
-            if cache.join(".git").exists() {
-                println!("Updating standard plugin library...");
-                let status = std::process::Command::new("git")
-                    .args(["-C", &cache.to_string_lossy(), "pull", "--ff-only", "-q"])
-                    .status()?;
-                if !status.success() {
-                    // If pull fails, re-clone.
-                    std::fs::remove_dir_all(&cache)?;
-                    let status = std::process::Command::new("git")
-                        .args([
-                            "clone",
-                            "--depth",
-                            "1",
-                            "-q",
-                            repo_url,
-                            &cache.to_string_lossy(),
-                        ])
-                        .status()?;
-                    if !status.success() {
-                        anyhow::bail!("Failed to clone plugin repository");
-                    }
-                }
-            } else {
-                println!("Downloading standard plugin library...");
-                if let Some(parent) = cache.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                let status = std::process::Command::new("git")
-                    .args([
-                        "clone",
-                        "--depth",
-                        "1",
-                        "-q",
-                        repo_url,
-                        &cache.to_string_lossy(),
-                    ])
-                    .status()?;
-                if !status.success() {
-                    anyhow::bail!("Failed to clone plugin repository");
-                }
+            // Pin to the release tag matching this binary so a released
+            // lark never pulls newer (or compromised) plugin code from the
+            // moving default branch — plugins run with the full secret map.
+            let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+            let git_ref = if unpinned { None } else { Some(tag.as_str()) };
+            match git_ref {
+                Some(r) => println!("Syncing standard plugin library at {r}..."),
+                None => println!("Syncing standard plugin library (unpinned branch tip)..."),
             }
+            update_plugin_cache(&cache, repo_url, git_ref)?;
 
             // Symlink each plugin from examples/plugins/ to the user's plugin dir.
             let source_dir = cache.join("examples").join("plugins");
@@ -1444,6 +1496,112 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A local fixture repo with one commit (containing `marker.txt`) tagged
+    /// `v9.9.9`, then a second commit changing the marker on the branch tip.
+    fn fixture_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        let root = tempfile::tempdir().expect("tempdir");
+        let repo = root.path().join("source-repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.email=test@test",
+                    "-c",
+                    "user.name=test",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "tag.gpgsign=false",
+                ])
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("git");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.join("marker.txt"), "tagged").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "tagged release"]);
+        git(&["tag", "v9.9.9"]);
+        std::fs::write(repo.join("marker.txt"), "tip").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "moving tip"]);
+        (root, repo)
+    }
+
+    #[test]
+    fn sync_pinned_checks_out_the_matching_tag_not_the_tip() {
+        let (root, repo) = fixture_repo();
+        let cache = root.path().join("cache");
+
+        update_plugin_cache(&cache, &repo.to_string_lossy(), Some("v9.9.9"))
+            .expect("pinned sync succeeds");
+
+        let marker = std::fs::read_to_string(cache.join("marker.txt")).expect("cache populated");
+        assert_eq!(
+            marker, "tagged",
+            "pinned sync must check out the release tag, not the moving branch tip"
+        );
+    }
+
+    #[test]
+    fn failed_sync_preserves_the_existing_cache() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let cache = root.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("sentinel.txt"), "keep me").unwrap();
+
+        let result = update_plugin_cache(
+            &cache,
+            &root.path().join("no-such-repo").to_string_lossy(),
+            Some("v9.9.9"),
+        );
+
+        assert!(result.is_err(), "sync against a missing repo must fail");
+        assert_eq!(
+            std::fs::read_to_string(cache.join("sentinel.txt"))
+                .as_deref()
+                .ok(),
+            Some("keep me"),
+            "a failed sync must leave the existing cache untouched"
+        );
+    }
+
+    #[test]
+    fn sync_with_missing_tag_fails_and_preserves_cache() {
+        let (root, repo) = fixture_repo();
+        let cache = root.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("sentinel.txt"), "keep me").unwrap();
+
+        let result = update_plugin_cache(&cache, &repo.to_string_lossy(), Some("v0.0.0-missing"));
+
+        assert!(result.is_err(), "a missing release tag must fail the sync");
+        assert_eq!(
+            std::fs::read_to_string(cache.join("sentinel.txt"))
+                .as_deref()
+                .ok(),
+            Some("keep me"),
+            "cache must survive a missing-tag sync"
+        );
+    }
+
+    #[test]
+    fn unpinned_sync_follows_the_branch_tip() {
+        let (root, repo) = fixture_repo();
+        let cache = root.path().join("cache");
+
+        update_plugin_cache(&cache, &repo.to_string_lossy(), None).expect("unpinned sync succeeds");
+
+        let marker = std::fs::read_to_string(cache.join("marker.txt")).expect("cache populated");
+        assert_eq!(marker, "tip");
+    }
 
     #[test]
     fn validate_plugin_name_rejects_traversal_and_absolute() {

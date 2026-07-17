@@ -5,16 +5,16 @@
 ## Plan
 <!-- Pull exactly one item with `bd ready`; phases stay in beads. -->
 - Week 1 + launch-gate async chain COMPLETE (`.9`–`.13`; `.11` registry half → `mkv.35`).
-  `.26` disabled-plugin parity landed (shared `is_command_enabled` predicate; headless
-  surfaces filtered). Remaining P1s via `bd ready`: `.27` plugin sync pinning,
-  `.31` plugin fix-it batch, then `.32` Taylor-gated launch rehearsal (go/no-go).
-- Launch gate remaining: `.12/.13` async dispatch; `.9` execution identity + `.10` cache owner landed.
+  `.26` parity + `.27` pinned atomic sync (`v{version}` tag, `--unpinned` opt-out,
+  `host_api` manifest gate) landed. Remaining P1s via `bd ready`: `.31` plugin
+  fix-it batch, then `.32` Taylor-gated launch rehearsal (go/no-go).
 - `.8` full stable-ID migration deferred to v1.1; not a `.9` dependency.
+- NOTE for release: tag releases `v{version}` — `lark plugin sync` now pins to that tag.
 
 ## Blockers
 - `cargo test`: 2 known `cli_action_test` failures from installed-plugin dependency;
   `mkv.28` owns hermeticity. Lib/bin + other integrations + strict clippy clean.
-- `cargo fmt -- --check`: pre-existing drift in `config.rs` + `onboarding.rs`.
+- `cargo fmt -- --check`: CLEAN repo-wide (drift in config.rs/onboarding.rs formatted away).
 - Taylor-gated provider/Mail/k8s QA → `mkv.32` go/no-go.
 
 ## Open questions
